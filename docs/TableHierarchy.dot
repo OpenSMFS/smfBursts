@@ -1,0 +1,118 @@
+digraph G {
+graph [
+	newrank = true,
+	overlap = true,
+	splines = true,
+]
+node [shape=plaintext]
+
+PhotonData[label=<<TABLE border="1" cellspacing="0">
+<TR><TD align="left" colspan="2">PhotonData</TD></TR>
+<TR><TD></TD><TD>times</TD></TR>
+<TR><TD></TD><TD>dets</TD></TR>
+<TR><TD></TD><TD>nanos</TD></TR>
+  <TR><TD></TD><TD>particles</TD></TR>
+</TABLE>>]
+
+
+Base [label=<<TABLE align="left" cellspacing="0">
+  <TR><TD colspan="8" align="left">BasePhotonTable</TD></TR>
+  <TR><TD></TD><TD>name</TD><TD align="left">keys</TD><TD>offset</TD><TD>atomic</TD><TD>type</TD></TR>
+  <TR><TD></TD><TD align="left">istarttime</TD><TD></TD><TD>0</TD><TD>true</TD><TD>int</TD></TR>
+  <TR><TD></TD><TD align="left">istoptime</TD><TD></TD><TD>0</TD><TD>true</TD><TD>int</TD></TR>
+  <TR><TD></TD><TD align="left">midtime</TD><TD align="left">["start"|"istarttime"],["stop"|"istoptime"]</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+  <TR><TD></TD><TD align="left">ph_mask</TD><TD align="left">PhSel</TD><TD>0</TD><TD>true</TD><TD>array[bool]</TD></TR>
+  <TR><TD></TD><TD align="left">ph_times</TD><TD align="left">PhSel</TD><TD>0</TD><TD>true</TD><TD>array[int64]</TD></TR>
+  <TR><TD></TD><TD align="left">ph_dets</TD><TD align="left">PhSel</TD><TD>0</TD><TD>true</TD><TD>array[uint8]</TD></TR>
+  <TR><TD></TD><TD align="left">ph_nanos</TD><TD align="left">PhSel</TD><TD>0</TD><TD>true</TD><TD>array[uint16]</TD></TR>
+  <TR><TD></TD><TD align="left">ph_particles</TD><TD align="left">PhSel</TD><TD>0</TD><TD>true</TD><TD>array[int8]</TD></TR>
+  <TR><TD></TD><TD align="left">nph</TD><TD align="left">PhSel</TD><TD>0</TD><TD>true</TD><TD>int</TD></TR>
+  <TR><TD></TD><TD align="left">meanT</TD><TD align="left">PhSel</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+  <TR><TD></TD><TD align="left">mTdiff</TD><TD align="left">PhSel, PhSel</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+  <TR><TD></TD><TD align="left">brightness</TD><TD align="left">PhSel</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+  <TR><TD></TD><TD align="left">dur</TD><TD align="left">["start"|"istarttime"],["stop"|"istoptime"]</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+  <TR><TD></TD><TD align="left">dur</TD><TD align="left">["start"|"istarttime"],["stop"|"istoptime"]</TD><TD>-1</TD><TD>FALSE</TD><TD>float</TD></TR>
+  <TR><TD></TD><TD align="left">max_rate</TD><TD align="left">PhSel, int (positive)</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+  <TR><TD></TD><TD align="left">bva</TD><TD align="left">PhSel, PhSel, int (positive)</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+  <TR><TD></TD><TD align="left">nanohist</TD><TD align="left">PhSel</TD><TD>0</TD><TD>true</TD><TD>array[float]</TD></TR>
+  <TR><TD></TD><TD align="left">nanomean</TD><TD align="left">PhSel</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+</TABLE>>]
+  
+Periods [label=<<TABLE border="1" cellspacing="0">
+<TR><TD align="left" colspan="3" port="top">Periods</TD><TD align="left" colspan="3">Parents:[None]</TD><TD port="out"></TD></TR>
+<TR><TD></TD><TD align="left" colspan="2">name</TD><TD align="left">keys</TD><TD>offset</TD><TD>atomic</TD><TD>type</TD></TR>
+<TR><TD></TD><TD align="left" colspan="2">periods</TD><TD></TD><TD>1</TD><TD>true</TD><TD>int</TD></TR>
+<TR><TD colspan="2"></TD><TD>start</TD><TD></TD><TD>0</TD><TD>true</TD><TD>int</TD></TR>
+<TR><TD colspan="2"></TD><TD>stop</TD><TD></TD><TD>0</TD><TD>true</TD><TD>int</TD></TR>
+<TR><TD></TD><TD align="left" colspan="2">istart</TD><TD></TD><TD>0</TD><TD>true</TD><TD>int</TD></TR>
+<TR><TD></TD><TD align="left" colspan="2">istop</TD><TD></TD><TD>0</TD><TD>true</TD><TD>int</TD></TR>
+</TABLE>>]
+
+BG [label=<<TABLE border="1" cellspacing="0">
+<TR><TD colspan="2" align="left" port="top" >BG</TD><TD align="left" port="parents">Parents:</TD><TD align="left" colspan="3" port="base">base:Periods</TD><TD port="out"></TD></TR>
+<TR><TD></TD><TD>name</TD><TD align="left" colspan="2">keys</TD><TD>offset</TD><TD>atomic</TD><TD>type</TD></TR>
+<TR><TD></TD><TD align="left">bg</TD><TD align="left" colspan="2">PhSel</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+<TR><TD></TD><TD align="left">err_KS</TD><TD align="left" colspan="2">PhSel</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+<TR><TD></TD><TD align="left">err_CM</TD><TD align="left" colspan="2">PhSel</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+<TR><TD></TD><TD>rangecounts</TD><TD align="left" colspan="2">[BasePhotonTable], PhSel, ["start"|"istarttime"],["stop"|"istoptime"]</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+</TABLE>>]
+
+Bursts [label=<<TABLE border="1" cellspacing="0">
+<TR><TD align="left" colspan="2" port="top">Bursts</TD><TD align="left" port="parents">Parents:</TD><TD align="left" colspan="2" port="bg">bg:BG</TD><TD port="out"></TD></TR>
+<TR><TD></TD><TD>name</TD><TD align="left">keys</TD><TD>offset</TD><TD>atomic</TD><TD>type</TD></TR>
+<TR><TD align="left"></TD><TD align="left">start</TD><TD></TD><TD>0</TD><TD>true</TD><TD>int</TD></TR>
+<TR><TD align="left"></TD><TD align="left">stop</TD><TD></TD><TD>1</TD><TD>true</TD><TD>int</TD></TR>
+<TR><TD></TD><TD align="left">istart</TD><TD></TD><TD>0</TD><TD>true</TD><TD>int</TD></TR>
+<TR><TD></TD><TD align="left">istop</TD><TD></TD><TD>0</TD><TD>true</TD><TD>int</TD></TR></TABLE>>]
+
+NPH [label=<<TABLE border="1" cellspacing="0">
+<TR><TD colspan="2" rowspan="2" align="left" port="top">NphBg</TD><TD align="left" port="parents" rowspan="2">Parents:</TD><TD align="left" colspan="3" port="base">base:BasePhotonTable</TD><TD rowspan="2" port="out"></TD></TR>
+<TR><TD align="left" colspan="3" port="bg">bg:BG</TD></TR>
+<TR><TD></TD><TD align="left">name</TD><TD align="left" colspan="2">keys</TD><TD>offset</TD><TD>atomic</TD><TD>type</TD></TR>
+<TR><TD></TD><TD align="left">nph_bg</TD><TD align="left" colspan="2">PhSel, ["start"|"istarttime"], ["stop"|"istoptime"]</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+<TR><TD></TD><TD align="left">sbr</TD><TD align="left" colspan="2">PhSel, ["start"|"istarttime"], ["stop"|"istoptime"]</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+<TR><TD></TD><TD align="left">brightness_bg</TD><TD align="left" colspan="2">PhSel, ["start"|"istarttime"], ["stop"|"istoptime"]</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+<TR><TD></TD><TD align="left">ratio_bg</TD><TD align="left" colspan="2">PhSel, PhSel, ["start"|"istarttime"], ["stop"|"istoptime"]</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+</TABLE>>]
+
+Ratios [label=<<TABLE border="1" cellspacing="0">
+<TR><TD colspan="2" align="left" port="top">Ratios</TD><TD align="left">Parents:</TD><TD align="left" colspan="4" port="nph">nph:NphBG</TD></TR>
+<TR><TD></TD><TD colspan="2" align="left">name</TD><TD align="left">keys</TD><TD>offset</TD><TD>atomic</TD><TD>type</TD></TR>
+<TR><TD></TD><TD align="left" colspan="2">nph_c</TD><TD align="left">PhSel, ["start"|"istarttime"], ["stop"|"istoptime"]</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+<TR><TD></TD><TD align="left" colspan="2">brightness_c</TD><TD align="left">PhSel, ["start"|"istarttime"], ["stop"|"istoptime"]</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+<TR><TD></TD><TD align="left" colspan="2">ratio_c</TD><TD align="left">PhSel, PhSel, ["start"|"istarttime"], ["stop"|"istoptime"]</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+<TR><TD colspan="2"></TD><TD align="left">E</TD><TD>["start"|"istarttime"], ["stop"|"istoptime"]</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+<TR><TD colspan="2"></TD><TD align="left">S</TD><TD>["start"|"istarttime"], ["stop"|"istoptime"]</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+<TR><TD></TD><TD align="left" colspan="2">anisotropy_c</TD><TD align="left">PhSel, PhSel, ["start"|"istarttime"], ["stop"|"istoptime"]</TD><TD>0</TD><TD>true</TD><TD>float</TD></TR>
+</TABLE>>]
+
+subgraph cluster_0{
+    label="PhotonDataSet"
+    PhotonData;
+}
+  
+subgraph cluster_1{
+  label="Base Table"
+  Base
+  Periods
+  Bursts
+}
+
+subgraph cluster_2{
+  label="ChildTable"
+  BG
+  NPH
+  Ratios
+}
+
+Base->Periods[arrowhead=none label="contributes columns"];
+Base->Bursts[arrowhead=none label="contributes columns"];
+
+PhotonData -> Periods:top;
+Periods:out -> BG:base [label="defines rows"];
+BG:out->Bursts:bg;
+Bursts:out->NPH:base [label="defines rows"];
+BG:out->NPH:bg;
+NPH:out->Ratios:nph;
+Bursts:out->Ratios [style="dotted" label="defines rows (through NphBG:bg)"];
+}

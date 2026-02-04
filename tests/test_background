@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Oct 27 11:42:57 2025
+
+@author: paul
+"""
+import numpy as np
+
+import fretbursts as frb
+
+import pytest
+
+# TODO: consider putting as fixture of entire test in conf.py
+@pytest.fixture()
+def data()->frb.PhotonData:
+    raw = frb.photonHDF5.load('HP3_TE300_SPC630.hdf5')
+    return frb.photonHDF5.normalize(raw)
+
+global has_periods
+has_periods = False
+
+def test_periods_columns(data):
+    global has_periods
+    prds = frb.Param(frb.Periods, {'period':60.0, 'detdef':data.detdef})
+    assert prds.params['period'] == 60.0
+    has_periods = True
+    # test for proper BasePhotonTable handling
+    start, stop = frb.Column(prds, 'start'), frb.Column(prds, 'stop')
+    assert np.all(data.get_column(start)[1:] == data.get_column(stop[:-1]))
+    istart, istop = frb.Column(prds, 'start'), frb.Column(prds, 'stop')
+    assert np.all(data.get_column(istart) >= data.get_column(start)), "istart before start"
+    assert np.all(data.get_column(istop) <= data.get_column(stop)), 'istop after stop'
+    sep = frb.Column(prds, 'sep', ('istarttime', 'istoptime'))
+    assert data.get_column(sep).size +1 == data.get_column(start)
+    assert np.all(data.get_column(sep) >= 0.0), "negative speartion between periosd"
+    
+
+@pytest.fixture()
+def data_periods(data)->frb.Param:
+    if not has_periods:
+        pytest.skip("Cannot create periods param")
+    return data, frb.Param(frb.Periods, {'period':60.0, 'detdef':data.detdef})
+
+
+def test_bg_columns(data_periods):
+    data, periods = data_periods
+    bg = frb.Param(frb.BG, {'compute_single':True, 'tail_min':300e-6, 'func':frb.bg.exp_mlefit}, {"base":periods})
+    bg00 = frb.Column(bg, 'bg', frb.Ph_sel('0ex0em'))
+    bg01 = frb.Column(bg, 'bg', frb.Ph_sel('0ex1em'))
+    bg0A = frb.Column(bg, 'bg', frb.Ph_sel('0ex'))
+    assert np.allclose(data.get_column(bg00) + data.get_column(bg01), data.get_column(bg0A)), "bg not compute as a sum"
+    # smoke tests for error
+    bg00err_KS = frb.Column(bg, 'err_KS', frb.Ph_sel('0ex0em'))
+    bg00err_CM = frb.Column(bg, 'err_CM', frb.Ph_sel('0ex0em'))
+    data.get_column(bg00err_KS)
+    data.get_column(bg00err_CM)
+    
+def test_make_background(data):
+    """Smoke test for make_backgroun function"""
+    bg = frb.bg.make_bg_param(data, tail_min=1e-5, period=30.0, func=frb.bg.exp_cdffit)
+    assert bg.parents['base'].params['period'] == 30.0
+    assert bg.params['tail_min'] == 1e-5
+    assert bg.params['func'] == frb.bg.exp_cdffit
+    
