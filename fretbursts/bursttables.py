@@ -41,7 +41,8 @@ _alloc_size:int = 512
 def _get_nph_title(col:Column, name:str, include_unit:bool, origin:PhotonData)->str:
     title = _title_sels('_{bg}n', origin, col.keytup[0])[0]
     title = _title_startstop_append(title, col.keytup[1], col.keytup[2])
-    return _title_unit_append(title, 'cnts', include_unit)
+    title = _title_unit_append(title, 'cnts', include_unit)
+    return f'${title}$'
 
 
 def _calc_brightness(table:PhotonTable, base:BasePhotonTable, nph_name:str, phsel:PhSel, starttype:str, stoptype:str)->np.ndarray[np.double]:
@@ -51,7 +52,8 @@ def _calc_brightness(table:PhotonTable, base:BasePhotonTable, nph_name:str, phse
 def _get_brightness_title(col:Column, name:str, include_unit:bool, origin:PhotonData)->str:
     title = _title_sels(name, origin, col.keytup[0])[0]
     title = _title_startstop_append(title, col.keytup[1], col.keytup[2])
-    return _title_unit_append(title, 'cnts s^{-1}', include_unit)
+    title = _title_unit_append(title, 'cnts s^{-1}', include_unit)
+    return f'${title}$'
 
 
 def _iter_ratio(table:PhotonTable, nph_name:str, phsel_num:PhSel, phsel_dem:PhSel, starttype:str, stoptype:str):
@@ -65,7 +67,8 @@ def _calc_ratio(table:PhotonTable, nph_name:str, phsel_num:PhSel, phsel_dem:PhSe
 
 def _get_ratio_title(col:Column, name:str, include_unit:bool, origin:PhotonData)->str:
     title = '%s/%s' %  _title_sels(name, origin, *col.keytup[:2])
-    return _title_startstop_append(title, col.keytup[2], col.keytup[3])
+    title = _title_startstop_append(title, col.keytup[2], col.keytup[3])
+    return f'${title}$'
 
 
 def _iter_anisotropy(table:PhotonTable, nph_name:str, phsel_p:PhSel, phsel_s:PhSel, starttype:str, stoptype:str):
@@ -349,7 +352,7 @@ class NphBG(ChildPhotonTable):
         counts per second in ph_sel, with background rate subtracted
     ratio_bg : (num_ph_sel:Ph_sel, dem_ph_sel:Ph_sel, starttype:str, stoptype:str)
         ratio of num_ph_sel to dem_ph_sel background adjusted counts
-   E_pr : (starttype:str, stoptype:str)
+   E_bg : (starttype:str, stoptype:str)
        Convenience column returns presumed FRET efficiency
        Remaped column of ratio_bg, give ratio of PhSel('0ex1em') to PhSel('0ex')
    S_pr : (starttype:str, stoptype:str)
@@ -382,8 +385,8 @@ class NphBG(ChildPhotonTable):
                   get_func='_get_ratio_bg', iter_func='_iter_ratio_bg',
                   norm_func='_normalizecolumn_ratio_bg', title_func='_get_ratio_bg_title',
                   title_is_tex=True),
-        ColumnDef('E_pr', (TV_str_start, TV_str_stop), 0, remap='_replace_E_pr', norm_func='_normalizecolumn_ES_pr'),
-        ColumnDef('S_pr', (TV_str_start, TV_str_stop), 0, remap='_replace_S_pr', norm_func='_normalizecolumn_ES_pr'),
+        ColumnDef('E_bg', (TV_str_start, TV_str_stop), 0, remap='_replace_E_bg', norm_func='_normalizecolumn_ES_bg'),
+        ColumnDef('S_bg', (TV_str_start, TV_str_stop), 0, remap='_replace_S_bg', norm_func='_normalizecolumn_ES_bg'),
                    )
 
     def __init_columns__(self):
@@ -447,7 +450,8 @@ class NphBG(ChildPhotonTable):
     @classmethod
     def _get_ratio_bg_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
         title = '%s/%s' %  _title_sels('I', origin, *col.keytup[:2])
-        return _title_startstop_append(title, col.keytup[2], col.keytup[3])
+        title = _title_startstop_append(title, col.keytup[2], col.keytup[3])
+        return f'${title}$'
     
     def _iter_anisotropy_bg(self, phsel_p:PhSel, phsel_s:PhSel, starttype:str, stoptype:str)->Iterator[float]:
         yield from _iter_anisotropy(self, 'nph_bg', phsel_p, phsel_s, starttype, stoptype)
@@ -456,15 +460,15 @@ class NphBG(ChildPhotonTable):
         return _calc_anisotropy(self, 'nph_bg', phsel_p, phsel_s, starttype, stoptype)
     
     @classmethod
-    def _replace_E_pr(cls, col:str, keytup:tuple[str,str])->tuple:
-        return 'ratio_bg', (PhSel('0ex1em'), PhSel('0ex'),)+keytup, {'title':'E_{PR}'}
+    def _replace_E_bg(cls, col:str, keytup:tuple[str,str])->tuple:
+        return 'ratio_bg', (PhSel('0ex1em'), PhSel('0ex'),)+keytup, {'title':'E_{app}'}
     
     @classmethod
-    def _replace_S_pr(cls, col:str, keytup:tuple[str,str])->tuple:
-        return 'ratio_bg', (PhSel('0ex'), PhSel('0ex_1ex1em'),)+keytup, {'title':'S_{PR}'}
+    def _replace_S_bg(cls, col:str, keytup:tuple[str,str])->tuple:
+        return 'ratio_bg', (PhSel('0ex'), PhSel('0ex_1ex1em'),)+keytup, {'title':'S_{app}'}
     
     @classmethod
-    def _normalizecolumn_ES_pr(cls, *args:str)->tuple[str, str]:
+    def _normalizecolumn_ES_bg(cls, *args:str)->tuple[str, str]:
         return _normalize_column_startstop(*args)
 
 
@@ -533,8 +537,12 @@ class Ratios(ChildPhotonTable):
     ---------------
     scheme : str
         One of '1ex', 'ALEX', 'PAM'. Default is 'ALEX'
+    alpha : float
+        leakage factor- remaps to lk. Default is 0.0.
     lk : float
         leakage factor. Default is 0.0.
+    delta : float
+        direct excitation factor, remaps to dir_ex. Default is 0.0.
     dir_ex : float
         direct excitation factor. Default is 0.0.
     gamma : float
@@ -588,7 +596,7 @@ class Ratios(ChildPhotonTable):
         ColumnDef('E', (TV_str_start, TV_str_stop), 0, remap='_replace_E', norm_func='_normalizecolumn_ES'),
         ColumnDef('S', (TV_str_start, TV_str_stop), 0, remap='_replace_S', norm_func='_normalizecolumn_ES'),
                    )
-    _fret_factors = ('lk', 'gamma', 'dir_ex', 'beta', 
+    _fret_factors = ('alpha', 'lk', 'gamma', 'delta', 'dir_ex', 'beta', 
                      'scheme', 'npol', 'nsplit', 'matchstreams')
     _alternating_factors = ('dir_ex', 'beta')
     # scheme can be '1ex', 'ALEX', or 'PAM' 
@@ -620,7 +628,8 @@ class Ratios(ChildPhotonTable):
         npol = param.get('npol', 1)
         nsplit = param.get('nsplit', 1)
         corr_mat = np.eye(2 if scheme == '1ex' else 4)
-        lk, dir_ex = param.get('lk', 0.0), param.get('dir_ex', 0.0)
+        lk = param.get('alpha', param.get('lk', 0.0))
+        dir_ex = param.get('delta', ('dir_ex', 0.0))
         gamma, beta = param.get('gamma', 1.0), param.get('beta', 1.0)
         if scheme == 'ALEX':
             corr_mat[0,0] = gamma
@@ -751,7 +760,7 @@ def make_dcbs_burst_search(bg:Param, m:int, F:float, streamA=PhSel('0ex'), strea
 def make_correction_factors(bursts:Param, gamma:float=1.0, beta:float=1.0, 
                             lk:float=0.0, dir_ex:float=0.0)->tuple[Param, Param]:
     nph = Param(NphBG, {'single':True}, {'base':bursts, 'bg':bursts.parents['bg'][0]})
-    ratios = Param(Ratios, {'gamma':gamma, 'beta':beta, 'lk':lk, 'dir_ex':dir_ex}, {'nph':nph})
+    ratios = Param(Ratios, params={'gamma':gamma, 'beta':beta, 'lk':lk, 'dir_ex':dir_ex}, parents={'nph':nph})
     return nph, ratios
     
 

@@ -33,7 +33,7 @@ def citation(bar=True):
 from .datamodel.utils import ImDict, FixedDict, MutDict, tupledict
 from .datamodel.tables import Param, Column, Gate, GateGroup, GG_all, GG_none
 from .datamodel import gates as gates
-from .datamodel.gates import (make_gte_gate, make_lt_gate, make_ellipsoid_gate,
+from .datamodel.gates import (make_geq_gate, make_lt_gate, make_ellipsoid_gate,
                               make_inv_ellipsoid_inclusive_gate)
 from .datamodel.citations import (register_citation, cite, add_citation, get_citations,
     create_citation_group, set_prefered_style, list_citation_groups, list_tags,

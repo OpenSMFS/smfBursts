@@ -341,7 +341,7 @@ class tupledict(tuple):
             elif key in defaults_:
                 cargs.append((key, defaults_[key]))
         if kwargs:
-            raise ValueError("names {kwargs.keys()} not in order")
+            raise ValueError(f"names {list(kwargs.keys())} not in order")
         return cls(*cargs)
 
     def __getitem__(self, k):
@@ -360,15 +360,15 @@ class tupledict(tuple):
             return self.__getitem__(attr)
         except KeyError:
             raise AttributeError(f"{attr} not in tupledict")
-    
+
     def __hash__(self):
         return hash(tuple((k, _tuple_array(v) ) for k, v in self.items()))
-    
+
     def __eq__(self, other):
         if not isinstance(other, tupledict): return False
         if len(other) != len(self): return False
         return all(sk==ok and _eq(sv, ov) for (sk, sv), (ok, ov) in zip(self.items(), other.items()))
-    
+
     def keys(self)->Iterator[str]:
         """
         Iterator over all keys in tupledict, yielded in order
@@ -404,7 +404,7 @@ class tupledict(tuple):
 
         """
         return iter(self)
-    
+
     def get(self, key:str, default:Any=None)->Any:
         """
         Retrieve key from dictionary, if key not present, return default. 
@@ -444,7 +444,7 @@ class tupledict(tuple):
 
         """
         return any(val == v for v in self.values())
-    
+
     def __contains__(self, k):
         if hasattr(k, '__index__'):
             return k < len(self) if k >= 0 else (abs(k) - 1) < len(self)

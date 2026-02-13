@@ -1429,6 +1429,7 @@ class GateDef(_ImData):
             Bit code for overlap
 
         """
+        # TODO: consider influence of Gate offset
         if (gateA.gatedef, gateB.gatedef) in cls._gate_comps:
             code = cls._gate_comps[gateA.gatedef, gateB.gatedef](gateA, gateB)
         elif (gateB.gatedef, gateA.gatedef) in cls._gate_comps:
@@ -1569,18 +1570,19 @@ class Gate(_ImData):
                                   validator=_check_columnsbase, data_proc=_proc_columnsdata),
                               params=TV_tupledict(
                                   data_proc=_make_TV_gateparam, validator=_check_TV_gateparam),
-                              expand=TV_bool)
+                                  expand=TV_bool)
     _required = frozenset({'gate', 'columns', 'params'})
+    _defaults = ImDict({'offset':0})
 
     gatedef: GateDef  # : gate function, should take parameters as keyword arguments,
     columns: tuple[Column]  # : tuple of ColumnABC
     params: tupledict[str, Hashable]  # : parameters defining
-    expand: bool  # : the value for bursts outside of parent_gate for non-atomic gates only
+    expand: bool  # : the value for rows outside of parent_gate for non-atomic gates only
 
     def __post_init__(self):
         if self.atomic:
             if 'expand' in self:
-                raise ValueError("atomic columns do not have attribute expand")
+                raise ValueError("atomic columns do not have attribute 'expand'")
         elif 'expand' not in self:
             super(_ImData, self).__setattr__('expand', False)
         self.gatedef.verify(self.columns, self.params)
@@ -2555,8 +2557,8 @@ class DataSet:
 
             this method return a uint8 so can be used for indexing into truthtable
         """
-        return gate.func(*(self.get_column(col.regate(relative)) for col in gate.columns), 
-                         **gate.params).astype(np.uint8)
+        return gate.func(*(self.get_column(col.regate(relative)) 
+                           for col in gate.columns), **gate.params).astype(np.uint8)
 
     def _get_gate(self, gate:Gate, relative:GateGroup)->np.ndarray[np.uint8]:
         """
@@ -2827,7 +2829,7 @@ class DataSet:
                 f"relative must be GateGroup, 'parent', or 'all', got object of type {type(relative)}")
         out = self._get_gategroup_mask(gategroup, relative)
         return out
-    
+
     def get(self, comp:Union[Param,Column,Gate,GateGroup], gate:Union[str,Gate,GateGroup]=None)->Union["Table",np.ndarray]:
         """
         Retrieve the :class:`Table`,array or mask corresponding to the given
@@ -3949,7 +3951,7 @@ class Table:
     def get_param_parentsdescr(cls, param:Param, indent:int=0)->str:
         out = ''
         for key, value in param.parents.items():
-            out += f'{key}:\n'
+            out += f'\n{key}:\n'
             if not isinstance(value, Param):
                 for i, val in enumerate(value):
                     out += _indent(f'- {cls.get_param_description(val, 2).lstrip()}', 2)

@@ -90,13 +90,13 @@ def _histcol(data:DataS, col:Column, gate:Union[None,GateGroup],
         colarr = colarr[~np.isnan(colarr)]
     hst, bns = np.histogram(colarr, bins=bins, range=minmax)
     if normalize == 'PMF':
-        hst /= np.sum(hst)
+        hst = hst / np.sum(hst)
         olabel = 'PMF'
     elif  normalize == 'max':
-        hst /= np.max(hst)
+        hst = hst / np.max(hst)
         olabel = f'# {col.base_param.tp.row_name} / max' if hasattr(col.base_param.tp, 'row_name') else "cnts / max(cnts)"
     elif normalize == 'PDF':
-        hst /= np.sum(hst)*np.diff(bns)
+        hst = hst / np.sum(hst)*np.diff(bns)
         olabel = 'PDF'
     elif normalize == 'cumulative':
         hst = np.cumsum(hst)
@@ -106,11 +106,11 @@ def _histcol(data:DataS, col:Column, gate:Union[None,GateGroup],
         olabel = 'iCDF'
     elif normalize == 'CDF':
         hst = np.cumsum(hst)
-        hst /= hst[-1]
+        hst = hst / hst[-1]
         olabel = 'CDF'
     elif normalize == 'iCDF':
         hst = np.cumsum(hst[::-1])[::-1]
-        hst /= hst[0]
+        hst = hst / hst[0]
         olabel = 'iCDF'
     elif normalize != 'none':
         raise ValueError("normalize must be None or 'none', 'sum', 'max', or 'PDF'")
@@ -226,6 +226,7 @@ def hist_bar(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
                                        remove_nan, normalize, bins, minmax)
     bar = ax.bar if orientation == 'vertical' else ax.barh
     kwargs['width' if orientation == 'vertical' else 'height'] = np.diff(bns)
+    kwargs['align'] = 'edge'
     if orientation == 'vertical':
         xlabel = cname if xlabel is None else xlabel
         ylabel = olabel if ylabel is None else ylabel
@@ -495,7 +496,8 @@ def hist_kdeoverlay(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=Non
                                 ylabel=ylabel, ylabel_kwargs=ylabel_kwargs, **kwargs)
     kde_bins = np.linspace(b[0], b[-1], kde_bins) if isinstance(kde_bins, Integral) else kde_bins
     kde_kwargs = dict() if kde_kwargs is None else kde_kwargs
-    y = gaussian_kde(data.get_column(col, gate), **kde_kwargs).evaluate(kde_bins)
+    col = data.get_column(col, gate)
+    y = gaussian_kde(col[(~np.isnan(col))&(col>=b[0])&(col<=b[-1])], **kde_kwargs).evaluate(kde_bins)
     kde_args = kde_bins, y*(h*np.diff(b)).sum()
     kde_args = kde_args[::-1] if orientation == 'horizontal' else kde_args
     kdeplot_kwargs = dict() if kdeplot_kwargs is None else kdeplot_kwargs
@@ -1113,7 +1115,7 @@ def gaus_2Dkde_cmap(datax:np.ndarray, datay:np.ndarray, outx:np.ndarray, outy:np
         Minimum KDE value to display, otherwise set to transprent (nan). 
         The default is 1.0.
     thresh_raw : bool, optional
-        If ``True`` thres is evaluated against as raw value of kde.
+        If ``True`` thresh is evaluated against as raw value of kde.
         If ``False`` thresh is defined by as kde divided by number of points 
         (ie if kde / # data poins < thresh, point is not displayed). This makes
         thresh a "fractional" KDE.
@@ -1143,10 +1145,11 @@ def _get_lim(arr):
     return mn-shift, mx+shift
 
 
-def _plot_kde1D(func:Callable, arr, bins:ArrInt=1024, xlim:tuple[float,float]=None, 
+def _plot_kde1D(func:Callable, arr, bins:ArrInt=None, xlim:tuple[float,float]=None, 
                 bw_method:Union[str|Callable[[gaussian_kde],float]]=None, weights=None,
                 rescale_factor:Callable[[np.ndarray],float]=None, edges:bool=False, **kwargs)->Any:
     """Plot 1D KDE using func (should be plot/bar like function)"""
+    bins = 1024 if bins is None else bins
     if isinstance(bins, Integral):
         xmin, xmax = _get_lim(arr) if xlim is None else xlim
         bins = np.linspace(xmin, xmax, bins + 1 if edges else bins)
@@ -1162,7 +1165,7 @@ def _plot_kde1D(func:Callable, arr, bins:ArrInt=1024, xlim:tuple[float,float]=No
 def _plot_kde2D(func:Callable, datax:np.ndarray, datay:np.ndarray, weights:np.ndarray=None,
                 edges:bool=False, sigmax:ArrReal=None, sigmay:ArrReal=None, rho:ArrReal=None,
                 minzero:bool=True, maxone:bool=True, 
-                thresh:float=1.0, thresh_abs:bool=False, bins:tuple[ArrInt,ArrInt]=None,
+                thresh:float=1.0, thresh_raw:bool=False, bins:tuple[ArrInt,ArrInt]=None,
                 xlim:tuple[float,float]=None, ylim:tuple[float,float]=None, **kwargs)->Any:
     """Plot a 2D KDE usuing func, func should be an pcolor like function"""
     binx, biny = (512, 512) if bins is None else bins
@@ -1181,7 +1184,7 @@ def _plot_kde2D(func:Callable, datax:np.ndarray, datay:np.ndarray, weights:np.nd
     kde = gaus_2Dkde_cmap(datax, datay, xl, yl, weights=weights, 
                          sigmax=sigmax, sigmay=sigmay, rho=rho, 
                          minzero=minzero, maxone=maxone, 
-                         thresh=thresh, thresh_abs=thresh_abs)
+                         thresh=thresh, thresh_raw=thresh_raw)
     return func(xg, yg, kde, **kwargs)
 
 
@@ -1201,7 +1204,7 @@ def kdeplot(data:DataS, *args:Column, gate:GateGroup=None, ax:plt.Axes=None,
             sigmax:ArrReal=None, sigmay:ArrReal=None, rho:ArrReal=None,
             minzero:bool=True, maxone:bool=True, bins:tuple[ArrInt,ArrInt]=None,
             xlim:tuple[float,float]=None, ylim:tuple[float,float]=None,
-            thresh:float=1.0, thresh_abs:bool=False, 
+            thresh:float=1.0, thresh_raw:bool=False, 
             xlabel:str=None, xlabel_kwargs:dict=None,
             ylabel:str=None, ylabel_kwargs:dict=None, 
             **kwargs)->tuple[mpl.image.AxesImage, plt.Text, plt.Text]:
@@ -1256,7 +1259,7 @@ def kdeplot(data:DataS, *args:Column, gate:GateGroup=None, ax:plt.Axes=None,
         DESCRIPTION. The default is None.
     thresh : float, optional
         DESCRIPTION. The default is 1.0.
-    thresh_abs : bool, optional
+    thresh_raw : bool, optional
         DESCRIPTION. The default is False.
     xlim : tuple[float,float], optional
         DESCRIPTION. The default is None.
@@ -1300,9 +1303,9 @@ def kdeplot(data:DataS, *args:Column, gate:GateGroup=None, ax:plt.Axes=None,
                           edges=edges, bins=bins, xlim=xlim, **kwargs)
         ylbl =  None if ylabel is False or rescale_factor is not None else ax.set_ylabel("PDF", **ylabel_kwargs)
     else:
-        out = _plot_kde2D(func, *carrs, weights=weights, sigamx=sigmax, sigmay=sigmay,
+        out = _plot_kde2D(func, *carrs, weights=weights, sigmax=sigmax, sigmay=sigmay,
                           rho=rho, minzero=minzero, maxone=maxone, bins=bins,
-                          xlim=xlim, ylim=ylim, thresh=thresh, thresh_abs=thresh_abs, **kwargs)
+                          xlim=xlim, ylim=ylim, thresh=thresh, thresh_raw=thresh_raw, **kwargs)
         ylabel = names[1] if ylabel is None else ylabel
         ylbl = None if ylabel is False else ax.set_ylabel(ylabel, **ylabel_kwargs)
     xlbl = None if xlabel is False else ax.set_xlabel(names[0], **xlabel_kwargs)
@@ -1316,36 +1319,13 @@ def jointplot(data:DataS, colx:Column, coly:Column, gate:GateGroup=None,
               fig:plt.Figure=None, axmat:np.ndarray[plt.Axes]=None,
               include_unit:bool=True, rescale:tuple[Union[int,float],Union[int,float]]=None,
               cxlabel:str=None, cxlabel_kwargs:dict=None, cylabel:str=None, cylabel_kwargs:dict=None,
-              xxlabel:str=False, xxlabel_kwargs:dict=None, xylabel:str=None, xylabel_kwargs:dict=None,
-              yxlabel:str=None, yxlabel_kwargs:dict=None, yylabel:str=False, yylabel_kwargs:dict=None,
-              cfunc=scatter, xfunc=hist, yfunc=hist, 
+              xxlabel:str=None, xxlabel_kwargs:dict=None, xylabel:str=None, xylabel_kwargs:dict=None,
+              yxlabel:str=None, yxlabel_kwargs:dict=None, yylabel:str=None, yylabel_kwargs:dict=None,
+              cfunc:Callable=scatter, hfunc:Callable=hist, xfunc:Callable=None, yfunc:Callable=None, 
               ratio:float=5.0, width_ratio:float=None, height_ratio:float=None,
-              cplot_kwargs:dict=None, xplot_kwargs:dict=None, yplot_kwargs:dict=None,
-              gridspec_kwargs:dict=None, cpos:str='lr'):
-    # process cross-plot kwargs
-    if rescale is None:
-        rescale = (1,1)
-    elif not isinstance(rescale, Sequence):
-        rescale = (rescale, rescale)
-    elif len(rescale) != 2:
-        raise ValueError("rescale for jointplot must be 2 elements")
-    rescalex, rescaley = rescale
-    ckwargs = dict(include_unit=include_unit, rescale=rescale, 
-                   xlabel=cxlabel, ylabel=cylabel, 
-                   xlabel_kwargs=cxlabel_kwargs, ylabel_kwargs=cylabel_kwargs)
-    xkwargs = dict(include_unit=include_unit, rescale=rescalex, 
-                   xlabel=xxlabel, ylabel=xylabel, 
-                   xlabel_kwargs=xxlabel_kwargs, ylabel_kwargs=xylabel_kwargs)
-    ykwargs = dict(include_unit=include_unit, rescale=rescaley, 
-                   xlabel=yxlabel, ylabel=yylabel, 
-                   xlabel_kwargs=yxlabel_kwargs, ylabel_kwargs=yylabel_kwargs)
-    if 'orientation' in signature(xfunc).parameters.keys():
-        xkwargs['orientation'] = 'vertical'
-    if 'orientation' in signature(yfunc).parameters.keys():
-        ykwargs['orientation'] = 'horizontal'
-    ckwargs.update(dict() if cplot_kwargs is None else cplot_kwargs)
-    xkwargs.update(dict() if xplot_kwargs is None else xplot_kwargs)
-    ykwargs.update(dict() if yplot_kwargs is None else yplot_kwargs)
+              cplot_kwargs:dict=None, hplot_kwargs:dict=None, xplot_kwargs:dict=None, yplot_kwargs:dict=None,
+              gridspec_kwargs:dict=None, cpos:str='ll')->tuple[np.ndarray[plt.Axes],tuple[Any,...],tuple[Any,...],tuple[Any,...]]:
+    # make axes layout
     if axmat is None:
         # get figure if None
         fig = plt.gcf() if fig is None else fig
@@ -1354,26 +1334,61 @@ def jointplot(data:DataS, colx:Column, coly:Column, gate:GateGroup=None,
             cposm = _cpos_rgx.match(cpos)
             if cposm is None:
                 raise ValueError("")
-            cpos = (int(cposm.group('y')[0] == 'u'), int(cposm.group('x')[0] == 'l'))
+            cpos = (int(cposm.group('y')[0] == 'l'), int(cposm.group('x')[0] == 'r'))
         elif isinstance(cpos, Integral):
             if cpos not in _cpos_map:
                 raise ValueError(f"invalid cpos code {cpos}, must be in {list(_cpos_map.keys())}")
             cpos = _cpos_map.get(cpos)
         width_ratio = ratio if width_ratio is None else width_ratio
         height_ratio = ratio if height_ratio is None else height_ratio
-        
-        spkwargs = dict(height_ratios=np.array([height_ratio, 1.0] if cpos[0] == 1 else [1.0, height_ratio, ]),
-                        width_ratios=np.array([1.0, width_ratio] if cpos[1] == 1 else [width_ratio, 1.0]))
+        spkwargs = dict(height_ratios=np.array([height_ratio, 1.0])[::1-2*cpos[0]],
+                        width_ratios=np.array([width_ratio, 1.0])[::1-2*cpos[1]])
         spkwargs.update(dict() if gridspec_kwargs is None else gridspec_kwargs)
         gs = mpl.gridspec.GridSpec(2, 2, figure=fig, **spkwargs)
-        axc = fig.add_subplot(gs[1,0])
-        axx = fig.add_subplot(gs[0,0], sharex=axc)
-        axy = fig.add_subplot(gs[1,1], sharey=axc)
+        axc = fig.add_subplot(gs[cpos])
+        axx = fig.add_subplot(gs[1-cpos[0],cpos[1]], sharex=axc)
+        axy = fig.add_subplot(gs[cpos[0], 1-cpos[1]], sharey=axc)
         axmat = np.array([axc, axx, axy])
+        cxlabel = False if cxlabel is None and cpos[0] == 0 else cxlabel
+        cylabel = False if cylabel is None and cpos[1] == 1 else cylabel
+        xxlabel = False if xxlabel is None and cpos[0] == 1 else xxlabel
+        yylabel = False if yylabel is None and cpos[1] == 0 else yylabel
+        axx.yaxis.set_inverted(cpos[0] == 0)
+        axy.xaxis.set_inverted(cpos[1] == 1)
     else:
         axc, axx, axy = axmat
+    # process cross-plot kwargs
+    if rescale is None:
+        rescale = (1,1)
+    elif not isinstance(rescale, Sequence):
+        rescale = (rescale, rescale)
+    elif len(rescale) != 2:
+        raise ValueError("rescale for jointplot must be 2 elements")
+    rescalex, rescaley = rescale
+    xfunc = hfunc if xfunc is None else xfunc
+    yfunc = hfunc if yfunc is None else yfunc
+    ckwargs = dict(include_unit=include_unit, rescale=rescale, 
+                   xlabel = cxlabel, ylabel = cylabel, 
+                   xlabel_kwargs=cxlabel_kwargs, ylabel_kwargs=cylabel_kwargs)
+    xkwargs = dict(include_unit=include_unit, rescale=rescalex, 
+                   xlabel=xxlabel, ylabel=xylabel, 
+                   xlabel_kwargs=xxlabel_kwargs, ylabel_kwargs=xylabel_kwargs)
+    ykwargs = dict(include_unit=include_unit, rescale=rescaley, 
+                   xlabel = yxlabel, ylabel=yylabel, 
+                   xlabel_kwargs=yxlabel_kwargs, ylabel_kwargs=yylabel_kwargs)
+    if 'orientation' in signature(xfunc).parameters.keys():
+        xkwargs['orientation'] = 'vertical'
+    if 'orientation' in signature(yfunc).parameters.keys():
+        ykwargs['orientation'] = 'horizontal'
+    ckwargs.update(dict() if cplot_kwargs is None else cplot_kwargs)
+    xkwargs.update(dict() if hplot_kwargs is None else hplot_kwargs)
+    ykwargs.update(dict() if hplot_kwargs is None else hplot_kwargs)
+    xkwargs.update(dict() if xplot_kwargs is None else xplot_kwargs)
+    ykwargs.update(dict() if yplot_kwargs is None else yplot_kwargs)
     # call plotting functions
     cout = cfunc(data, colx, coly, gate=gate, ax=axc, **ckwargs)
     xout = xfunc(data, colx, gate=gate, ax=axx, **xkwargs)
     yout = yfunc(data, coly, gate=gate, ax=axy, **ykwargs)
+    if cpos[0]:
+        axy
     return axmat, cout, xout, yout

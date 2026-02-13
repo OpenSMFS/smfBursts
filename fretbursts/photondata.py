@@ -1315,7 +1315,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
     def _get_sep_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
         sep = ''
         if 'offset' in col:
-            sep = 'fwd ' if col.offset else 'bwd '
+            sep = r'bwd\:' if col.offset else r'fwd\:'
         sep += 'separation'
         title = cls._title_startstop_append(sep, col.keytup[0], col.keytup[1])
         title =  _title_unit_append(title, 's', include_unit)

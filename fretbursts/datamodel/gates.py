@@ -321,7 +321,7 @@ PERCENTILE_GTE_gate = GateDef(percentile_gte_gate, tupledict(('percentile',float
 PERCENTILE_GT_gate = GateDef(percentile_gt_gate, tupledict(('percentile',float)), atomic=False, normalize=_normalize_percentile)
 
 ###############################################################################
-################### Convenience functions for makeing gates ###################
+################### Convenience functions for making gates  ###################
 ###############################################################################
 def make_gt_gate(column:Column, mn:float, outside_expand:bool=False)->GateGroup:
     """
@@ -352,7 +352,7 @@ def make_gt_gate(column:Column, mn:float, outside_expand:bool=False)->GateGroup:
     return GateGroup(_TT_ft, gate, title=f'{column.name()} > {mn}')
 
     
-def make_gte_gate(column:Column, mn:float, outside_expand:bool=False)->GateGroup:
+def make_geq_gate(column:Column, mn:float, outside_expand:bool=False)->GateGroup:
     """
     
 
@@ -410,7 +410,7 @@ def make_lt_gate(column:Column, mx:float, outside_expand:bool=False)->GateGroup:
     return GateGroup(_TT_tf, gate, title=f'{column.name()} < {mx}')
 
 
-def make_lte_gate(column:Column, mx:float, outside_expand:bool=False)->GateGroup:
+def make_leq_gate(column:Column, mx:float, outside_expand:bool=False)->GateGroup:
     """
     Create a gate for column greater than mx.
 
