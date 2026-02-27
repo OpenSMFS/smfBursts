@@ -31,7 +31,7 @@ def citation(bar=True):
 
 # data model imports
 from .datamodel.utils import ImDict, FixedDict, MutDict, tupledict
-from .datamodel.tables import Param, Column, Gate, GateGroup, GG_all, GG_none
+from .datamodel.tables import Param, Column, Gate, MappedGate, GateGroup, GG_all, GG_none
 from .datamodel import gates as gates
 from .datamodel.gates import (make_geq_gate, make_lt_gate, make_ellipsoid_gate,
                               make_inv_ellipsoid_inclusive_gate)
@@ -46,7 +46,9 @@ from ._citations import fretbursts_citations
 from .photondata import PhotonData, PhotonDataList
 from .background import Periods, BG, make_bg_param
 from . import background as bg
-from .bursttables import Bursts, NphBG, Ratios, make_burst_search, make_dcbs_burst_search, make_correction_factors
+from .bursttables import (
+    Bursts, NphBG, Ratios, make_burst_search, 
+    make_dcbs_burst_search, make_correction_factors)
 from . import ph_sel
 from .ph_sel import PhSel, DetDef
 from .import photonHDF5
@@ -54,7 +56,6 @@ from . import loadraw
 
 if has_matplotlib:
     from . import plot
-    from . import rawplot
 
 
 add_citation('IngargiolaPLOSOne2016', purpose='FRETBursts citation')

@@ -26,9 +26,19 @@ from .datamodel.diskdict import MappedAttrDD, TypedValueDD
 from .photondata import PhSpec, normalize_photon_data, PhotonData, PhotonDataList, TV_pharray_mtch, PhArray
 from .ph_sel import DetDef, PhSel
 
-# TODO rewrite so uses non-TypeValidator (because photon HDF5 does not use title)
-# Do this by overwriting the read and write commands for each part
+
 class PhEventsRawDiskDict(MappedAttrDD, TypedValueDD):
+    """
+    Disk dictionary to represent specifically raw photon arrays of photondata.
+    This is always intended to be an attribute of :class:`PhGroupRaw`, as
+    it does not store any of the settings.
+    
+    There are 4 keys:
+    #. times: photon arrival times
+    #. dets: detector index of each photon
+    #. nanos: photon nanotimes (pulsed data only)
+    #. particles : simulated particle index (simulated data only)
+    """
     _name_map = ImDict({'times':'timestamps', 'dets':'detectors', 
                        'nanos':'nanotimes', 'particles':'particles'})
     _typemap = ImDict(times=TV_pharray_mtch(dtype=np.int64), dets=TV_pharray_mtch(dtype=np.uint8),
@@ -44,12 +54,15 @@ class PhEventsRawDiskDict(MappedAttrDD, TypedValueDD):
     
     @classmethod
     def _valtype(cls, key):
+        """Type of array for key"""
         return cls._typemap[key]
     
     def _read_group(self, group:tb.Group, nodename:str)->Any:
+        """read specific node from gruop"""
         return group[nodename].read()
     
     def _write_group(self, group:tb.Group, nodename:str, value:Any)->tb.Group:
+        """Write specific node to group"""
         group._v_file.create_carray(group, nodename, value)
     
     def __getattr__(self, attr):
@@ -77,6 +90,7 @@ class PhEventsRawDiskDict(MappedAttrDD, TypedValueDD):
 
     @property
     def mut(self)->bool:
+        """If any data was modified after creation"""
         return self._mut
     
     @property
@@ -284,14 +298,17 @@ class PhGroupRaw(_DataLike):
     
     @property
     def mut(self)->bool:
+        """If data or settigns were modified after creation."""
         return any(val.mut for val in self.values())
     
     @property
     def mut_ph(self)->bool:
+        """If specifically photon data were modified after creation"""
         return self.photon_data.mut
     
     @property
     def mut_set(self)->bool:
+        """If specifically settings were modified after creation"""
         return any(val.mut for key, val in self.items() if key != 'photon_data')
 
 
@@ -307,7 +324,8 @@ class SetupSpec(MutDict):
 
 class PhotonHDF5Data(_DataLike):
     """
-    Full representation of photon-HDF5 data.
+    Full representation of photon-HDF5 data. use :meth:`PhotonHDF5Data.load_hdf5`
+    to load from file.
     """
     __slots__ = ('photon_data', 'setup', 'acquisition_duration', 'description',
                  'sample', 'identity', 'provenance', 'filename', 'user',
@@ -355,6 +373,7 @@ class PhotonHDF5Data(_DataLike):
             self.ondisk = self._file is not None and self._file.isopen
             
     def _finalize(self):
+        """Release file from tracking (will close if file is not tracked by other objects)"""
         self._finalizer.finalize_owner(weakref.ref(self))
 
     @classmethod
@@ -456,6 +475,7 @@ class PhotonHDF5Data(_DataLike):
     
     @property
     def file(self)->Union[None,tb.File]:
+        """File where raw photonHDF5 data is stored"""
         return self._file
     
     @file.setter
@@ -549,6 +569,7 @@ class PhotonHDF5Data(_DataLike):
         return nanos
     
     def _save_group_future(self)->_GroupFuture:
+        """Get group future for self- avoids creation if not necessary"""
         file = self._file
         if file is None or not file.isopen:
             return _GroupFuture(None)
@@ -562,7 +583,8 @@ class PhotonHDF5Data(_DataLike):
             return file.root.user.FRETBursts
         return _GroupFuture(create_group, self._finalizer, file=file)
     
-    def _save_photon_group_future(self, i:Union[None,int], groupfuture:_GroupFuture=None)->_GroupFuture:
+    def _save_photon_group_future(self, i:None|int, groupfuture:_GroupFuture=None)->_GroupFuture:
+        """Get/create GroupFuture for specific photon_data group"""
         if i is not None and (not isinstance(i, int) or i < 0):
             raise TypeError("i must be positive in or None")
         if groupfuture is None:
@@ -583,7 +605,28 @@ class PhotonHDF5Data(_DataLike):
             out.update({f'photon_data{i}':v.as_photonHDF5_dict for i, v in enumerate(self.photon_data)})
         return out
     
-    def save_photonHDF5(self, file:Union[str,PathLike,tb.File]=None, close:bool=None, **kwargs)->tb.File:
+    def save_photonHDF5(self, file:str|PathLike|tb.File=None, close:bool=None, **kwargs)->tb.File:
+        """
+        
+
+        Parameters
+        ----------
+        file : str|PathLike|tb.File, optional
+            Path to file, or file into which to save data. The default is None.
+        close : bool, optional
+            Whether to close the created tb.File object at end of function call. 
+            If None, close only if specied as str or PathLike, but if specified
+            as tb.File, do not close.
+            The default is None.
+        **kwargs : Any
+            Additional kwargs passed to phconvert.hdf5.save_photon_hdf5.
+
+        Returns
+        -------
+        out : tb,File
+            File object where data was saved.
+
+        """
         if file is None:
             kwargs['h5_fname'] = '.'.join(file.filename.split('.')[:-1]) + 'hdf5'
         elif isinstance(file, tb.File):
@@ -598,11 +641,6 @@ class PhotonHDF5Data(_DataLike):
         if self.file is None:
             self.file = out
         return out
-
-
-def _save_ph_group_future(groupfuture:_GroupFuture, i:int)->_GroupFuture:
-    groupname = f'photon_data{i}'
-    return groupfuture._create_groupfuture(groupname)
 
 
 def _sort_tcspc_param(i:int, pd:PhGroupRaw, setup:SetupSpec, name:str,
@@ -640,6 +678,7 @@ def _get_tcspc_param(i:int, pd:PhGroupRaw, setup:SetupSpec,
                      em_dets:tuple[np.ndarray[np.uint8]],
                      pol_dets:tuple[np.ndarray[np.uint8]],
                      split_dets:tuple[np.ndarray[np.uint8]])->dict:
+    """Extract or infer all possible TCSPC parameters from PhGroupRaw and additional settings"""
     out = dict(tcspc_unit=_sort_tcspc_param(i, pd, setup, 'tcspc_unit', em_dets, pol_dets, split_dets))
     if 'tcspc_num_bins' in pd.nano_specs or 'tcspc_num_bins' in setup:
         out['tcspc_num_bins'] = _sort_tcspc_param(i, pd, setup, 'tcspc_num_bins', em_dets, pol_dets, split_dets)

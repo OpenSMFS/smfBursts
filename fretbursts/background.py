@@ -12,7 +12,7 @@ computation of background, respectively.
 
 Additional background functions are defined.
 """
-from typing import Union, ClassVar
+from typing import Union, ClassVar, Literal
 from collections.abc import Hashable, Callable, Sequence, Iterator
 import inspect
 import warnings
@@ -27,15 +27,16 @@ from .datamodel.immutabledata import (TypeValidator, TV_float, TV_str, TV_bool,
 from .datamodel.tables import ParamDef, ParentDef, ColumnDef, Param, Column, DataSet, as_paramdict
 from .datamodel.citations import cite
 from .ph_sel import PhSel, DetDef, TV_DetDef
-from .photondata import (BasePhotonTable, ChildPhotonTable, PhotonData, 
-                         _normalize_column_startstop, _title_sels, 
-                         _title_startstop_append, _title_unit_append,
-                         make_base_column_defs)
+from .photondata import (
+    BasePhotonTable, ChildPhotonTable, PhotonData, 
+    _normalize_column_startstop, _title_sels, _title_startstop_append, _title_unit_append, 
+    make_base_column_defs, ColKeyStart, ColKeyStop)
 
 import fretbursts.cfuncs as fbc
 
 
 def _periods_title_func(col:Column, include_unit:bool=False)->str:
+    """Title func for periods column"""
     if 'offset' not in col:
         out = 'periods'
     else:
@@ -53,12 +54,12 @@ class Periods(BasePhotonTable):
     ------
     period : float
         The duration of each period (time range) in seconds.
-    start_at : str
+    start_at : {'time_min', 'zero', 'under', 'over'}
         One of ``'time_min'``, ``'zero'``, ``'under'``, or ``'over'``. Defines when 
         first period starts relative to first photon in data.
         
-        Options::
-            
+        Options:
+                
             - ``'time_min'`` start of first period is first photon in data
             - ``'zero'`` start of first period is time = 0
             - ``'under'`` start of first period is the time that is a integer multiple of 
@@ -69,10 +70,10 @@ class Periods(BasePhotonTable):
         ``start_at`` must be specified with ``stop_at```, and these are exclusive of 
         specifying ``start`` and ``stop``. Default (if ``start`` is not defined)
         is ``'time_min'``
-    stop_at : str
+    stop_at : {'under', 'over'}
         One of ``'under'`` or ``'over'``. Defines stop time of last period.
         
-        Options::
+        Options:
             
             - ``'under'`` last period ends before last time of data
             - ``'over'`` last period ends after last time of data
@@ -96,7 +97,7 @@ class Periods(BasePhotonTable):
     -------
     periods : int, offset = 1, limits of periods
         
-    And all columns in `basephotoncolumns`_ for full list of columns.
+    And all columns in :any:`basephotoncolumns` for full list of columns.
     
     """
     row_name:ClassVar[str] = "Periods"
@@ -171,14 +172,17 @@ class Periods(BasePhotonTable):
     
     @classmethod
     def _replace_column_startstop(cls, col:str, keys)->tuple[str,tuple[Hashable,...],int]:
+        """Remap function for remapped coluns start and stop"""
         return 'periods', keys, 0 if col == 'start' else 1
     
     @classmethod
     def _detdef(cls, param:Param)->DetDef:
+        """Return :class:`DetDef` of Periods :class:`Param`."""
         return param.params['detdef']
     
     @classmethod
     def _get_periods_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """Title func for periods column"""
         if 'offset' not in col:
             out = 'periods'
         else:
@@ -189,6 +193,7 @@ class Periods(BasePhotonTable):
     
     @classmethod
     def _get_periods_index(cls, col:Column, include_unit:bool=False)->str:
+        """Index name func for periods column"""
         return cls._periods_title_func(col, include_unit)
     
 
@@ -257,17 +262,17 @@ def get_ecdf(s:np.ndarray, offset:float=0.5):
 
     Parameters
     ----------
-        s : np.ndarray
-            sample data
-        offset : float, optional 
-            Offset to add to the y values of the CDF, the default is 0.5
+    s : np.ndarray
+        sample data
+    offset : float, optional 
+        Offset to add to the y values of the CDF, the default is 0.5
 
     Returns
     -------
-        x : np.ndarray
-            the x values of the empirical CDF
-        y : np.ndarray
-            the y values of the emperical CDF
+    x : np.ndarray
+        the x values of the empirical CDF
+    y : np.ndarray
+        the y values of the emperical CDF
     """
     return np.sort(s), np.arange(offset, s.size+offset)*1.0/s.size
 
@@ -284,17 +289,18 @@ def exp_mlefit(times:np.ndarray[np.int64], clk_p:float, tail_min:float=500e-6,
 
     Parameters
     ----------
-        times : np.ndarray[np.int64]
-            array of exponetially-distributed samples
-        tail_min : float
-            all samples < `tail_min` are discarded (`tail_min` must be >= 0).
-        offset : float, optional
-            offset for computing the CDF. **Ignored in this function** default is 0.5
-        
-    Returns:
-        Lambda : float
-            photon rate
-        
+    times : np.ndarray[np.int64]
+        array of exponetially-distributed samples
+    tail_min : float
+        all samples < `tail_min` are discarded (`tail_min` must be >= 0).
+    offset : float, optional
+        offset for computing the CDF. **Ignored in this function** default is 0.5
+    
+    Returns
+    -------
+    Lambda : float
+        photon rate
+    
     """
     deltaT = np.diff(times)
     tlmin = int(tail_min/clk_p)
@@ -331,16 +337,17 @@ def exp_cdffit(times:np.ndarray, clk_p:float, tail_min:float=500e-6, offset:floa
 
     Parameters
     ----------
-        times : np.ndarray[np.int64]
-            array of exponetially-distributed samples
-        tail_min : int
-            all samples < `tail_min` are discarded (`tail_min` must be >= 0).
-        offset : float, optional
-            offset for computing the CDF. default is 0.5
+    times : np.ndarray[np.int64]
+        array of exponetially-distributed samples
+    tail_min : int
+        all samples < `tail_min` are discarded (`tail_min` must be >= 0).
+    offset : float, optional
+        offset for computing the CDF. default is 0.5
         
-    Returns:
-        Lambda : float
-            photon rate
+    Returns
+    -------
+    Lambda : float
+        photon rate
         
     """
     tlmin = int(tail_min / clk_p)
@@ -371,31 +378,42 @@ def _make_bg_cdf_paramdefs(params:dict)->tuple[ParamDef,...]:
 register_bg_func(exp_cdffit, _make_bg_cdf_paramdefs)
 
 
-def expon_fit_hist(s, bins, s_min:float=0.0, weights:str='none', offset=0.5):
-    """Fit of an exponential model to the histogram of `s` using least squares.
+def expon_fit_hist(s:np.ndarray[np.int64], bins:float|np.ndarray[np.int64], 
+                   s_min:float=0.0, weights:Literal['none', 'hist_counts','inv_hist_counts']='none', 
+                   offset:float=0.5)->float:
+    """
+    Fit an exponential model to the hisogram of ``s``, using least squares.
 
     Parameters
     ----------
     s : np.ndarray[np.int64]
-        array of exponetially-distributed samples
-    bins : Union[float, np.ndarray[np.int64]]
-        if float is the bin width, otherwise is the
-        array of bin edges (passed to `numpy.histogram`)
-    s_min : float
-        all samples < `s_min` are discarded
-        (`s_min` must be >= 0).
-    weights : str
-        one of::
+        array of exponetially-distributed samples.
+    bins : float|np.ndarray[np.int64]
+        DESCRIPTION.
+    s_min : float, optional
+        DESCRIPTION. The default is 0.0.
+    weights : {'none', 'hist_counts','inv_hist_counts'},  optional
+        One of the following:
+        
             -  ``'none'`` : no weights is applied.
             -  ``'hist_counts'`` each bin has a weight equal to its counts
             -  ``'inv_hist_counts'`` the weight is the inverse of the counts.
-    offset :  float 
-        offset for computing the CDF. See :func:`get_ecdf`.
-    
+            
+        The default is 'none'.
+        
+    offset : Float, optional
+        Offset for computing the CDF. See :func:`get_ecdf`. The default is 0.5.
+
+    Raises
+    ------
+    ValueError
+        Bad option for weights.
+
     Returns
-   --------
-        A 4-tuple of the fitted rate (1/life-time), residuals array,
-        residuals x-axis array, sample size after threshold.
+    -------
+    Lambda : float
+        photon rate.
+
     """
     if s_min > 0: 
         s = s[s >= s_min] - s_min
@@ -409,7 +427,7 @@ def expon_fit_hist(s, bins, s_min:float=0.0, weights:str='none', offset=0.5):
     x = x[y > 0]
     y = y[y > 0]
 
-    if weights == 'none':
+    if weights in ('none', None):
         w = np.ones(y.size)
     elif weights == 'hist_counts':
         w = np.sqrt(y*s.size*(bins[1]-bins[0]))
@@ -430,7 +448,8 @@ def expon_fit_hist(s, bins, s_min:float=0.0, weights:str='none', offset=0.5):
 
 def exp_histfit(times:np.ndarray[np.int64], clk_p:float, tail_min:float=500e-6, binw=50e-6, 
                  weights:str='hist_counts', auto_threshold:bool=False, F_bg:float=2.0):
-    """Compute background rate with WLS histogram fit of waiting-times.
+    """
+    Compute background rate with WLS histogram fit of waiting-times.
 
     Compute the background rate, selecting waiting-times (delays) larger
     than a minimum threshold.
@@ -449,7 +468,7 @@ def exp_histfit(times:np.ndarray[np.int64], clk_p:float, tail_min:float=500e-6, 
     clk_p : float
         clock period for timestamps in `times`
     weights : str
-        one of::
+        one of:
             
             -  ``'none'`` : no weights is applied.
             -  ``'hist_counts'`` each bin has a weight equal to its counts
@@ -536,7 +555,7 @@ def param_to_ParamDef(param:inspect.Parameter)->ParamDef:
     Returns
     -------
     ParamDef
-        Rendered ParamDef.
+        Rendered :class:`ParamDef`.
 
     """
     pdict = dict(name=param.name)
@@ -566,8 +585,8 @@ class BG(ChildPhotonTable):
     ------
     compute_stream : str
         How background for multi-stream ph_sel columns is computed.
-        Must be one of::
-            
+        Must be one of:
+        
             - ``'single'`` compund ph_sel columns always computed as sum of single streams
             - ``'single_all'`` like single, but if ph_sel is *all*, then compute stream separately
             - ``'any'`` all streams computed separately
@@ -581,33 +600,36 @@ class BG(ChildPhotonTable):
     
     Parents
     -------
-    base : Periods
-        The time periods for background calculation.
+        base : Periods
+            The time periods for background calculation.
         
     Columns
     -------
-    bg : float, (ph_sel:Ph_sel, )
-        background rate for (cnts*s\ :sup:`-1`) ``ph_sel``
-    err_KS : float, (ph_sel:Ph_sel, )
-        Kolmogorov-Smirnov error metric, computes the error as the max of 
-        deviation of the empirical CDF from the fitted CDF.
-    err_CM : float, (ph_sel:Ph_sel, )
-        Crames-von Mises error metric. 
-        Computes :math:`\int_{-\infty}^{\infty} \left[] L_{n} - L_{*} \right]^{2}`.
-        Using trapezoid rule for numerical integration.
-    rangecounts : float (param:Param[BasePhotonTable], ph_sel:Ph_sel, starttype:str, stoptype:str)
-        Expected number of photons in ranges from param for stream ph_sel, using
-        duration defined by starttype and stoptype. This is computed as
-        ``origin.get_table(param)['dur', starttype, stoptype]*self.origin(self.param)[ph_sel]``
+        bg : float, (ph_sel:Ph_sel, )
+            background rate for (cnts*s\ :sup:`-1`) ``ph_sel``
+        err_KS : float, (ph_sel:Ph_sel, )
+            Kolmogorov-Smirnov error metric, computes the error as the max of 
+            deviation of the empirical CDF from the fitted CDF.
+        err_CM : float, (ph_sel:Ph_sel, )
+            Crames-von Mises error metric. 
+            Computes :math:`\int_{-\infty}^{\infty} \left[] L_{n} - L_{*} \right]^{2}`.
+            Using trapezoid rule for numerical integration.
+        rangecounts : float (param:Param[BasePhotonTable], ph_sel:Ph_sel, starttype:str, stoptype:str)
+            Expected number of photons in ranges from param for stream ph_sel, using
+            duration defined by starttype and stoptype. This is computed as
+            ``origin.get_table(param)['dur', starttype, stoptype]*self.origin(self.param)[ph_sel]``
     
     """
+    #: :meta private:
     param_defs = (
         ParamDef('compute_stream', TV_str(isin=('single', 'single_all', 'any')), default='single_all'),
         ParamDef('func', TV_PyCode, default=exp_mlefit, append_params=_append_param_bg_func),
                   )
+    #: :meta private:
     parent_defs = (
         ParentDef(name='base', table_type=Periods, is_base=True), 
                    )
+    #: :meta private:
     column_defs = (
         ColumnDef('bg', (PhSel,), 0, 'some',  get_func='_get_bg', dtype=np.float64,
                   title_func='_get_bg_title',
@@ -632,6 +654,7 @@ class BG(ChildPhotonTable):
         return stream_id.size == 1 or cstr == 'any' or (cstr == 'all' and stream_id.size == self.origin.setup.detdef.size)
     
     def _get_tail_min(self, ph_sel:PhSel)->np.ndarray[np.double]:
+        """Getter function for determining tail-min threshold. Only useful when 'auto_threshold' is Ture"""
         if not self.param.params['auto_threshold']:
             return self.param.params['tail_min']
         stream_id = self.origin.setup.detdef.get_stream_ids(ph_sel)
@@ -651,11 +674,16 @@ class BG(ChildPhotonTable):
     
     @classmethod
     def _check_tail_min(cls, param:Param):
+        """
+        Column existence check func for tail_min, 
+        will prevent creating column of BG param that lacks 'auto_threshold' in param.
+        """
         if 'tail_min' not in param.params:
             raise ValueError("tail_min column only specified for bg functions that include tail_min argument")
     
     @cite('IngargiolaPLOSOne2016', purpose='background analysis with FRETBursts')
     def _get_bg(self, ph_sel:PhSel):
+        """Getter function for bg column"""
         ph_sel = ph_sel.render_positive(self.origin.setup.detdef, convert_all=True) # ensures consistent representation in DiskDict
         if ('bg', ph_sel) in self._cache:
             return self._cache['bg', ph_sel]
@@ -669,11 +697,13 @@ class BG(ChildPhotonTable):
     
     @classmethod
     def _get_bg_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """Title getter function for bg column"""
         title = _title_sels('bg', origin, col.keytup[0])[0]
         title = _title_unit_append(title, 'cnts s^{-1}', include_unit)
         return f'${title}$'
     
     def _calc_bg(self, stream_id:np.ndarray[np.uint8])->np.ndarray[np.float64]:
+        """Compute bg column if cannot compute as sum from existing columns"""
         times = self.origin.times
         mask = np.isin(self.origin.dets, stream_id)
         periods = self.parents['base']
@@ -686,6 +716,7 @@ class BG(ChildPhotonTable):
         return out
     
     def _get_err_KS(self, ph_sel):
+        """Getter function for err_KS column (Kolmogrov-Smirnov error)"""
         ph_sel = ph_sel.render_positive(self.origin.detdef, convert_all=True) # ensures consistent representation in DiskDict
         if ('err_KS', ph_sel) in self._cache:
             return self._cache['err_KS', ph_sel]
@@ -699,14 +730,17 @@ class BG(ChildPhotonTable):
     
     @classmethod
     def _err_KS_title(cls, col:Column, include_unit:bool=False, origin:DataSet=None)->str:
+        """Title getter function for err_KS column"""
         title = _title_sels('bg', origin, col.keytup[0])[0]
-        return f'$KS error:\: D({title})$'
+        return fr'$KS error:\: D({title})$'
     
     @classmethod
     def _err_KS_index(cls, col:Column, include_unit:bool=False, origin:DataSet=None)->str:
+        """Index name getter function for err_KS column"""
         return f'KS err BG {str(col.keytup[0])}'
     
     def _calc_err_KS(self, ph_sel:PhSel)->np.ndarray[np.float64]:
+        """Compute err_KS column if cannot compute as sum from existing columns"""
         tail_min = self.param.params['tail_min']/self.origin.clk_p
         offset = self.param.params.get('offset', 0.5)
         out = np.empty(self.size, dtype=np.float64)
@@ -717,14 +751,17 @@ class BG(ChildPhotonTable):
     
     @classmethod
     def _err_CM_title(cls, col:Column, include_unit:bool=False, origin:DataSet=None)->str:
+        """Title getter function for err_CM column"""
         title = _title_sels('bg', origin, col.keytup[0])[0]
-        return f'$CM error:\: T({title})$'
+        return fr'$CM error:\: T({title})$'
     
     @classmethod
     def _err_CM_index(cls, col:Column, include_unit:bool=False, origin:DataSet=None)->str:
+        """Index name getter function for err_CM column"""
         return f'CM err BG {str(col.keytup[0])}'
     
     def _get_err_CM(self, ph_sel):
+        """TGetter function for err_CM column (Cramer von Misses error)"""
         ph_sel = ph_sel.render_positive(self.origin.detdef, convert_all=True) # ensures consistent representation in DiskDict
         if ('err_CM', ph_sel) in self._cache:
             return self._cache['err_CM', ph_sel]
@@ -737,6 +774,7 @@ class BG(ChildPhotonTable):
         return out
     
     def _calc_err_CM(self, ph_sel:PhSel)->np.ndarray[np.float64]:
+        """Compute err_CM column if cannot compute as sum from existing columns"""
         tail_min = int(self.param.params['tail_min']/self.origin.clk_p)
         offset = self.param.params.get('offset', 0.5)
         out = np.empty(self.size, dtype=np.float64)
@@ -748,13 +786,15 @@ class BG(ChildPhotonTable):
     
     @classmethod
     def _normalizecolumn_rangecounts(cls, *args)->tuple[PhSel, str, str]:
+        """Column normalization function for mapped column range-counts"""
         if len(args) < 2:
             raise ValueError("no defaults for destination param or Ph_sel, must specify")
         param, ph_sel, startstoptype = args[0], args[1], args[2:]
         starttype, stoptype = _normalize_column_startstop(*startstoptype)
         return param, ph_sel, starttype, stoptype
             
-    def _iter_rangecounts(self, param:Param, ph_sel:PhSel, starttype:str, stoptype:str)->Iterator[float]:
+    def _iter_rangecounts(self, param:Param, ph_sel:PhSel, starttype:ColKeyStart, stoptype:ColKeyStop)->Iterator[float]:
+        """Iter function for rangecounts mapped column"""
         dest_table = self.origin.get_table(param)
         period_iter =  zip(self.iter_column('bg', ph_sel),
                            self.parents['base'].iter_column('periods',0),
@@ -788,6 +828,7 @@ class BG(ChildPhotonTable):
     
     @classmethod
     def _get_rangecounts_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """Title getter function for rangecounts column"""
         title = _title_sels('_{n}bg', origin, col.keytup[1])[0]
         title = _title_startstop_append(title, col.keytup[2], col.keytup[3])
         title = _title_unit_append(title, 'photons', include_unit)
@@ -796,6 +837,29 @@ class BG(ChildPhotonTable):
 
 def make_bg_param(data:PhotonData, tail_min:float=500e-6, period:float=60.0, 
             func:BGFuncType=exp_mlefit, **kwargs)->Param:
+    """
+    Make a background computation :class:`Param`. (based on :class:`BG`)
+
+    Parameters
+    ----------
+    data : PhotonData
+        DESCRIPTION.
+    tail_min : float, optional
+        Minimum photon separation (in seconds) to consider in bg computation. 
+        The default is 500e-6.
+    period : float, optional
+        Size (in seconds) of 1 backgroun assesment periods. The default is 60.0.
+    func : Callable[[np.ndarray[np.int64],float,...], float], optional
+        Function used to comptute background. The default is exp_mlefit.
+    **kwargs : Hashable
+        Any additional arguments to be passed to func for BG computation.
+
+    Returns
+    -------
+    Param
+        :class:`Param` based on :class:`BG` specifying background computation.
+
+    """
     prd = Param(Periods, {'period':period, 'detdef':data.detdef})
     args = {'func':exp_mlefit, 'tail_min':tail_min}
     args.update(kwargs)
@@ -804,4 +868,27 @@ def make_bg_param(data:PhotonData, tail_min:float=500e-6, period:float=60.0,
 
 def get_bg_table(data:PhotonData, tail_min:float=500e-6, period:float=60.0, 
                  func:BGFuncType=exp_mlefit, **kwargs)->BG:
+    """
+    Get a :class:`BG` table from data.
+
+    Parameters
+    ----------
+    data : PhotonData
+        DESCRIPTION.
+    tail_min : float, optional
+        Minimum photon separation (in seconds) to consider in bg computation. 
+        The default is 500e-6.
+    period : float, optional
+        Size (in seconds) of 1 backgroun assesment periods. The default is 60.0.
+    func : Callable[[np.ndarray[np.int64],float,...], float], optional
+        Function used to comptute background. The default is exp_mlefit.
+    **kwargs : Hashable
+        Any additional arguments to be passed to func for BG computation.
+
+    Returns
+    -------
+    Param
+        :class:`BG` table computing background of data.
+
+    """
     return data.get_table(make_bg_param(data, tail_min, period, func, **kwargs))

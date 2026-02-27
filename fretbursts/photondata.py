@@ -9,7 +9,7 @@ This incldudes the primary class definitions for the handling of
 stream sorted photon data, and the various attributes and tables
 that can be defined thereof.
 """
-from typing import Union, Any, ClassVar
+from typing import Union, Any, ClassVar, Literal
 from collections.abc import Sequence, Iterator, Hashable, Callable
 import weakref
 from numbers import Real
@@ -20,14 +20,18 @@ import hashlib
 import numpy as np
 import tables as tb
 
-from .datamodel.utils import (tupledict, ImDict, arr_slc, union_multi,
-                              enumerate_intersects, get_unit_prefix,
-                              _GroupFuture, weakref_alive_test)
-from .datamodel.immutabledata import _ImData, TV_int, TV_float, TV_ndarray, TV_ImData, TV_str, TypeValidator
-from .ph_sel import DetDef, PhSel, TV_DetDef, ChannelSet, _csall, _phsel_all
+from .datamodel.utils import (
+    tupledict, ImDict, arr_slc, union_multi, enumerate_intersects, get_unit_prefix
+    )
+from .datamodel.immutabledata import (
+    _ImData, TV_int, TV_float, TV_ndarray, TV_ImData, TV_str, TypeValidator
+    )
+from .ph_sel import DetDef, PhSel, TV_DetDef, ChannelSet, _csall, phsel_all
 from .datamodel.diskdict import AttrDD, TypedValueDD, SubDiskDict
-from .datamodel.tables import (TableLike, BaseTable, ChildTable, DataSet, DataSetList, 
-                               Param, Gate, GateGroup, ColumnDef, Column, GroupFuture)
+from .datamodel.tables import (
+    TableLike, BaseTable, ChildTable, DataSet, DataSetList, 
+    Param, ColumnDef, Column, Gate, GateGroup, GroupFuture
+    )
 from .datamodel import cite
 
 import fretbursts.cfuncs as fbc
@@ -75,9 +79,9 @@ class PhSpec(_ImData):
         **alex_type = 'macro' only.** Offset in units of clk_p to be applied to
         timestamps to compute alex period. Alex period computed as
         :math:`(timestamp - alex_offset) \mod alex_period`.
-    alternated : np.ndarray[np.bool_]
+    alternated : np.ndarray[np.bool\_]
         If given laser excitation is cw with alternation.
-    pulsed : np.ndarray[np.bool_]
+    pulsed : np.ndarray[np.bool\_]
         If a given laser excitation is from a pulsed (ps) laser source
     ex_wv : np.ndarray[np.float64]
         wavelength of each excitation laser (in nm).
@@ -186,6 +190,7 @@ class PhSpec(_ImData):
 
 
 def _proc_size(imdata:"PhArray", kwarg_append:dict)->dict:
+    """Pre-process for typevalidator of pharray of PhArray, ensure correct size of arrays"""
     for k in imdata.keys():
         if k == 'setup':
             continue
@@ -201,10 +206,10 @@ class PhArray(AttrDD, TypedValueDD):
     DiskDict of data from single photon counting measurement.
     All keys can be accessed as attrs.
     
-    Arguments
-    ---------
+    Parameters
+    ----------
     setup : Ph_sec
-        PhSpec of settings informing about timestamps/tcspc_unit units, and
+        :class:`PhSpec` of settings informing about timestamps/tcspc_unit units, and
         excitation ranges etc.
     times : np.ndarray[np.int64]
         photon arrival times (macrotimes) of photons
@@ -216,10 +221,15 @@ class PhArray(AttrDD, TypedValueDD):
         **Simulated data only** particle index of photon.
     
     """
+    #: :class:PhSpec` of settings used when acquiring data
     setup: PhSpec
+    #: Array of photon arrival times (macrotime)
     times: np.ndarray[np.int64]
+    #: Array of photon detector indexes (identified according to DetDef in setup)
     dets: np.ndarray[np.uint8]
+    #: Array of photon nanotimes (microtime), pulsed excitation only
     nanos: np.ndarray[np.uint16]
+    #: Array of photon particle indexes, simulated data only
     particles: np.ndarray[np.uint8]
     
     _attrs = frozenset({'setup', 'times', 'dets', 'nanos', 'particles'})
@@ -229,6 +239,7 @@ class PhArray(AttrDD, TypedValueDD):
     
     @classmethod
     def _valtype(cls, key):
+        """Get expected dtype of key"""
         return cls._typemap[key]
     
     def __getattr__(self, attr):
@@ -237,7 +248,7 @@ class PhArray(AttrDD, TypedValueDD):
         return self[attr]
     
     @property
-    def detdef(self):
+    def detdef(self)->DetDef:
         """:class:`fretbursts.ph_sel.DetDef` defining :attr:`PhArray.dets` indexes"""
         return self['setup'].detdef
         
@@ -316,16 +327,17 @@ def _one_none_match(n:int, ids:np.ndarray[np.ndarray[np.uint8]],
 
 
 def _apply_mask(mask:np.ndarray[np.bool_], *args:np.ndarray)->tuple[np.ndarray,...]:
+    """Mask all arrays in args by mask"""
     return tuple(None if arg is None else arg[mask] for arg in args)
 
 
 def normalize_photon_data(setup:PhSpec,
-                          times:Union[np.ndarray[np.int64],tb.Node],
-                          dets:Union[np.ndarray[np.uint8],tb.Node],
-                          nanos:Union[tuple[np.ndarray[np.uint16]],tb.Node,None]=None,
-                          particles:Union[tuple[np.ndarray[np.uint8]],tb.Node,None]=None,
-                          em_dets:tuple[np.ndarray[np.uint8]]=None,
-                          pol_dets:tuple[np.ndarray[np.uint8]]=None,
+                          times:np.ndarray[np.int64]|tb.Node,
+                          dets:np.ndarray[np.uint8]|tb.Node,
+                          nanos:tuple[np.ndarray[np.uint16]]|tb.Node|None=None,
+                          particles:tuple[np.ndarray[np.uint8]]|tb.Node|None=None,
+                          em_dets:tuple[np.ndarray[np.uint8],...]=None,
+                          pol_dets:tuple[np.ndarray[np.uint8],...]=None,
                           split_dets:tuple[np.ndarray[np.uint8]]=None,
                           sort:bool=True, group:GroupFuture=None)->PhArray:
     """
@@ -363,7 +375,7 @@ def normalize_photon_data(setup:PhSpec,
         split index. The default is None.
     sort : bool, optional
         Whether or not to ensure times are monotonic. Should only be set to False
-        if it is already **guaranteed that time is monotonically increasing.
+        if it is already **guaranteed** that time is monotonically increasing.
         The default is True.
 
     Raises
@@ -476,16 +488,47 @@ def in_ph_range(thresh:int, setup:PhSpec, phsel:PhSel)->bool:
     return mn <= thresh and thresh < mx
 
 
-def get_phsel_range_size(setup:PhSpec, phsel:PhSel):
+def get_phsel_range_size(setup:PhSpec, phsel:PhSel)->int:
+    """
+    Get size of excitation window of setup for a given excitation defined by phsel.
+
+    Parameters
+    ----------
+    setup : PhSpec
+        Setup spec of :class:`PhotonData` defining excitation windows.
+    phsel : PhSel
+        Photon selection to interogate.
+
+    Returns
+    -------
+    int
+        Number of TCSPC channels (end - start) in excitation window.
+
+    """
     res = get_phsel_ex_range(setup, phsel)
     return res[1] - res[0]
 
 def _pol_names(angle:float)->str:
+    """
+    Get long name of polarization angle, parallel if 0, perpendicular if 90.0
+    and return number otherwise
+    """
     if angle == 0.0:
         return r'\parallel'
     if angle == 90.0:
         return r'\perp'
     return f'{angle}'
+
+
+class _MutTracked(type):
+    """Metaclass implementing check for a property in class called mut"""
+    def __subclasscheck__(self, subclass):
+        return hasattr(subclass, 'mut') and isinstance(subclass.mut, property)
+
+
+class MutTracked(metaclass=_MutTracked):
+    """"Metaclass- any class that implements a mut property is subclass"""
+    pass
 
 
 class PhotonData(DataSet):
@@ -494,7 +537,7 @@ class PhotonData(DataSet):
     
     Parameters
     ----------
-    data : PhArray
+    pharray : PhArray
         PhArray defining the core data of the object.
     group : None | tb.Group | Callable, optional
         Where to store tables in HDF5 file. Default is None
@@ -509,17 +552,28 @@ class PhotonData(DataSet):
         dictionary of arbitrary additional metadata
     save_memory : bool, optional
         flag for tables to select between memory expensive or memory saving 
-        algorithms.
-    
+        algorithms. The default is False.
+    track : bool, optional
+        Whether to "track" the file, ie close file when all tracking datasets
+        have ceased to exist. The default is True.
+    file : tb.File, optional
+        HDF5 file in which to save data, is inferior to group. The default is None
+    group_no : int | bool, optional
+        If True, then group is created within group with name "photon_data", 
+        if number, then data saved in subgroup with name "photon_data[group_no]"
+        if False, data saved directly in group. The default is 1.
+    ref : PhotonHDF5Data, optional
+        Original data, used to determine if data was modified after loading. 
+        The default is None.
     """
     _group_name = 'photon_data'
     
     # : dictionary of codes for (relatitive GateGroup, Gate) : map
-    _gates: dict[Gate,tuple[GateGroup, np.ndarray[np.bool_]]]
+    _gates: dict[Gate:tuple[GateGroup, np.ndarray[np.bool_]]]
     # : nested dictionary of masks {requested:{relative:mask}} for gategroups
-    _gategroups: dict[GateGroup,dict[GateGroup,np.ndarray[np.bool_]]]
+    _gategroups: dict[GateGroup:dict[GateGroup,np.ndarray[np.bool_]]]
     _group: GroupFuture  # location to store HDF5 data, None otherwise
-    _temp_group: Union[None,tuple[Param,tb.Group]]
+    _temp_group: None|tuple[Param,tb.Group]
     autosave: bool  # : whether to automatically record computed columns in HDF5 file
 
     _pharray: PhArray
@@ -529,15 +583,15 @@ class PhotonData(DataSet):
     _reference: weakref.ReferenceType
     _array_cache: weakref.WeakValueDictionary
 
-    def __init__(self, pharray:Union[None,PhArray]=None, group:GroupFuture=None, autosave:bool=False, 
-                 irf:dict[PhSel,np.ndarray[np.int64]]=None, irf_thresh:dict[PhSel,int]=None, 
+    def __init__(self, pharray:None|PhArray=None, group:GroupFuture=None, autosave:bool=False, 
+                 irf:dict[PhSel:np.ndarray[np.int64]]=None, irf_thresh:dict[PhSel:int]=None, 
                  meta:dict=None, save_memory:bool=False, track:bool=True, file:tb.File=None,
-                 group_no:Union[int,bool]=1, ref:Any=None):
+                 group_no:int|bool=1, ref:MutTracked=None):
         super().__init__(group, autosave, meta, pharray=pharray, irf=irf, irf_thresh=irf_thresh, 
                          save_memory=save_memory, track=track, file=file, group_no=group_no, ref=ref)
 
-    def __init_data__(self, pharray:Union[None,PhArray]=None, 
-                    irf:dict[PhSel,np.ndarray[np.int64]]=None, irf_thresh:dict[PhSel,int]=None,
+    def __init_data__(self, pharray:None|PhArray=None, 
+                    irf:dict[PhSel:np.ndarray[np.int64]]=None, irf_thresh:dict[PhSel:int]=None,
                     save_memory=False, ref:Any=None):
         # intercept creating from group
         if pharray is None:
@@ -574,7 +628,8 @@ class PhotonData(DataSet):
         for ph_sel, thresh in irf_thresh.items():
             self._irf_thresh[ph_sel] = thresh
 
-    def _check_irf(self, phsel, hst:np.ndarray):
+    def _check_irf(self, phsel:PhSel, hst:np.ndarray)->tuple[PhSel,np.ndarray[np.int64]]:
+        """Check irf key value pair- ie phsel in range and hst correct size/type"""
         phsel = phsel.render_positive(self.detdef)
         if self.detdef.get_stream_ids(phsel).size != 1:
             raise ValueError("PhSel must specifiy a single index for the given detdef")
@@ -588,6 +643,7 @@ class PhotonData(DataSet):
         return phsel, hst
 
     def _check_irf_thresh(self, phsel:PhSel, thresh:int)->tuple[PhSel,int]:
+        """Check irf_thresh key value pair- phsel in range and thresh in range"""
         phsel = phsel.render_positive(self.detdef)
         if self.detdef.get_stream_ids(phsel).size != 1:
             raise ValueError("PhSel must specifiy a single index for the given detdef")
@@ -601,6 +657,7 @@ class PhotonData(DataSet):
         return phsel, thresh
 
     def _calc_dataID(self)->bytes:
+        """Compute hash of raw data to get dataID"""
         hs = hashlib.sha256(self.times)
         hs.update(self.dets)
         if 'nanos' in self._pharray:
@@ -610,7 +667,12 @@ class PhotonData(DataSet):
         return hs.digest()
 
     @property
-    def _ref(self):
+    def _ref(self)->MutTracked:
+        """
+        Get ref data used to create PhotonData.
+        Main purpose is to check if it was modified post-creation, and thus
+        modified raw data should be saved.
+        """
         if isinstance(self._reference, weakref.ReferenceType):
             return self._reference()
         return self._reference
@@ -640,6 +702,7 @@ class PhotonData(DataSet):
 
     @property
     def pulsed(self)->bool:
+        """If data is has pulsed excitation"""
         return 'nanos' in self._pharray
 
     @property
@@ -654,6 +717,7 @@ class PhotonData(DataSet):
 
     @property
     def simulated(self)->bool:
+        """If data was produced from simulation"""
         return hasattr(self, '_pharray') and 'particles' in self._pharray
 
     @property
@@ -668,7 +732,7 @@ class PhotonData(DataSet):
 
     @property
     def setup(self)->PhSpec:
-        """Dictionary of all settings of processed photon data"""
+        """:class:`PhSec` dictionary of all settings of processed photon data"""
         return self._pharray['setup']
 
     @property
@@ -677,14 +741,14 @@ class PhotonData(DataSet):
         return self._save_memory
 
     @save_memory.setter
-    def save_memory(self, value):
+    def save_memory(self, value:bool):
         self._save_memory = bool(value)
         for table in self._tables.values():
             if hasattr(table, "_save_memory_switch"):
                 table._save_memory_switch(self._save_memory)
 
     @property
-    def irf(self)->dict[PhSel,np.ndarray[np.int64]]:
+    def irf(self)->dict[PhSel:np.ndarray[np.int64]]:
         """Dictionary of irfs (1 per single stream PhSel)"""
         return self._irf
 
@@ -697,7 +761,7 @@ class PhotonData(DataSet):
             self._irf[k] = v
 
     @property
-    def irf_thresh(self)->dict[PhSel,int]:
+    def irf_thresh(self)->dict[PhSel:int]:
         """Dictionary of each single stream PhSel, of nanotime threshold for computing mean nanotime"""
         return self._irf_thresh
     
@@ -710,7 +774,14 @@ class PhotonData(DataSet):
                 continue
             self._irf_thresh[k] = v
 
-    def get_stream_names(self)->dict[str,dict[int,str]]:
+    def get_stream_names(self)->dict[str:dict[int,str]]:
+        """
+        Get a dictionary providing names for each channel-type and stream.
+        Dictionary is nested, has structure:
+        ``{'ex_wv':{n:name,...}, 'em_wv_centers':{n:name,...}}, 'pol_angle':{n:name,...}``
+        Where n is stream number (int), and name is name of stream (str) specifying
+        wavelength or angle of polarization.
+        """
         out = dict()
         if 'ex_wv' in self.setup:
             out['ex'] = {i:f'{wv*1e9:.0f}'  for i, wv in enumerate(self.setup.ex_wv)}
@@ -721,6 +792,7 @@ class PhotonData(DataSet):
         return out
     
     def _save(self, *args:Param, group:tb.Group=None, save_sorted:bool=None, _strict:bool=True)->tb.Group:
+        """Internal function for saving data, wrapped by :meth:`PhotonData.save`"""
         if save_sorted is None:
             save_sorted = True if self._ref is None else self._ref.mut
         if _strict and (self._ref is None or self._ref.mut) and not save_sorted:
@@ -733,8 +805,8 @@ class PhotonData(DataSet):
     def save(self, *args:Param, group:tb.Group=None, save_sorted:bool=None)->tb.Group:
         return self._save(*args, group=group, save_sorted=save_sorted)
 
-    def save_photonHDF5(self, file:Union[str,PathLike,tb.File], 
-                           save_sorted:bool=False, close:bool=None, **kwargs)->tb.File:
+    def save_photonHDF5(self, file:str|PathLike|tb.File, save_sorted:bool=False, 
+                        close:bool=None, **kwargs)->tb.File:
         """
         Create a photonHDF5 file with all saved analysis in the user/FRETBursts
         group.
@@ -742,17 +814,20 @@ class PhotonData(DataSet):
         Parameters
         ----------
         file : str | os.PathLike | File
-            DESCRIPTION.
+            Path to file or tb.File object.
         close : bool, optional
-            DESCRIPTION. The default is None.
+            Whether to close file after saving. If None, will determine whether
+            to save based on how file inputed and if other objects are tracking
+            it. The default is None.
         save_sorted : bool, optional
-            Whether to also record the sorted photons in user/FRETBursts/photon_data0
-            group. 
+            Whether to also record the sorted photons in 
+            ``user/FRETBursts/photon_data[x]`` group. 
             The default is False
 
         Returns
         -------
-        None.
+        tb.File
+            File where data saved.
 
         """
         if self._ref is None:
@@ -793,41 +868,87 @@ class PhotonDataList(DataSetList):
         
     @property
     def detdef(self)->DetDef:
-        """Detector definition of :class:`PhotonDataSet`, since all must be same,
+        """Detector definition of :class:`PhotonData`, since all must be same,
         can DetDef directly"""
         return self._datas[0].detdef
     
     @property
     def setup(self)->tuple[PhSpec,...]:
-        """Tuple of :class:`PhSpec` objects, 1 for each :class:`PhotonDataSet`"""
+        """Tuple of :class:`PhSpec` objects, 1 for each :class:`PhotonData`"""
         return tuple(d._pharray['setup'] for d in self._datas)
 
     def iter_times(self)->Iterator[np.ndarray[np.int64]]:
-        """Iterate over times in each :class:`PhotonDataSet`"""
+        """Iterate over times in each :class:`PhotonData`"""
         for data in self._datas:
             yield data.times
     
     def iter_dets(self)->Iterator[np.ndarray[np.uint8]]:
-        """Iterate over dets in each :class:`PhotonDataSet`"""
+        """Iterate over dets in each :class:`PhotonData`"""
         for data in self._datas:
             yield data.dets
     
     def iter_nanos(self)->Iterator[np.ndarray[np.uint16]]:
-        """Iterate over nanos in each :class:`PhotonDataSet`"""
+        """Iterate over nanos in each :class:`PhotonData`"""
         for data in self._datas:
             yield data.nanos
     
     def iter_particles(self)->Iterator[np.ndarray[np.uint8]]:
-        """Iterate over particles (simulated data only) in each :class:`PhotonDataSet`"""
+        """Iterate over particles (simulated data only) in each :class:`PhotonData`"""
         for data in self._datas:
             yield data.particles
             
     def save(self, *args:Param, group:tb.Group=None, name:Callable[[int],str]=None, 
              save_sorted:bool=None)->list[tb.Group]:
+        """
+        Save specified tables to HDF5 file.
+
+        Parameters
+        ----------
+        *args : Param
+            Tables to save to file.
+        group : tb.Group, optional
+            Group in which to save, if not specified, use default group. 
+            If no default group is set, will raise an error.
+            The default is None.
+        name : Callable[[int],str], optional
+            Callable that takes int/bool and outputs name for each :class:`PhotonData`
+            in datas. The default is None.
+        save_sorted : bool, optional
+            Whether, for each data set, to save raw photons as well as each table. 
+            The default is None.
+
+        Returns
+        -------
+        list[tb.Group]
+            List of groups (1 per data-set) where data was saved.
+
+        """
         return super().save(*args, group=group, name=name, save_sorted=save_sorted)
     
-    def save_photonHDF5(self, file:Union[str,PathLike,tb.File], 
+    def save_photonHDF5(self, file:str|PathLike|tb.File, 
                                save_sorted:bool=False, close:bool=None)->tb.File:
+        """
+        Save data in PhotonHDF5 format. Computed tables will be saved
+        under ``/user/FRETBursts/photon_data[x]`` groups.
+
+        Parameters
+        ----------
+        file : str|PathLike|tb.File
+            Path to file where data is to be saved.
+        save_sorted : bool, optional
+            Whether to also record the sorted photons in 
+            ``user/FRETBursts/photon_data[x]`` group. 
+            The default is False
+        close : bool, optional
+            Whether to close file after saving. If None, infer from input and if
+            file is being used by othe objects.. The default is None.
+
+        Returns
+        -------
+        file : tb.File
+            File object where data was saved.
+
+        """
         ref = self._datas[0]._ref
         if any(data._ref is None or data._ref != ref for data in self._datas):
             raise ValueError("Inconsistent or deleted raw data, cannot save raw HDF5 data")
@@ -849,7 +970,7 @@ class PhotonDataList(DataSetList):
         return file
                                                         
 
-PhotonDataS = Union[PhotonData, PhotonDataList]
+PhotonDataS = PhotonData|PhotonDataList
 
 
 def _echo_first(*args):
@@ -862,14 +983,14 @@ def _mask_byset(mask:np.ndarray, inset:np.ndarray)->np.ndarray:
     return mask[np.isin(mask, inset)]
 
 
-def _normalize_ph_sel(val:Union[PhSel,Sequence[PhSel]], 
-                      detdef:DetDef, convert_all:bool=False)->Union[PhSel,Sequence[PhSel]]:
+def _normalize_ph_sel(val:PhSel|Sequence[PhSel], 
+                      detdef:DetDef, convert_all:bool=False)->PhSel|Sequence[PhSel]:
     """
     Ensure all ph_sels are rendered positive based on detef.
 
     Parameters
     ----------
-    val : Union[PhSel,Sequence[PhSel]]
+    val : PhSel|Sequence[PhSel]
         ph_sels to convert.
     detdef : DetDef
         DetDef definition.
@@ -878,8 +999,8 @@ def _normalize_ph_sel(val:Union[PhSel,Sequence[PhSel]],
 
     Returns
     -------
-    Union[PhSel,Sequence[PhSel]]
-        DESCRIPTION.
+    PhSel|Sequence[PhSel]
+        Rendered sequence of PhSel.
 
     """
     if isinstance(val, PhSel):
@@ -895,7 +1016,7 @@ def _normalize_ph_sel(val:Union[PhSel,Sequence[PhSel]],
     return val
 
 
-def _normalize_column_startstop(*args):
+def _normalize_column_startstop(*args:Hashable)->tuple[str,str]:
     r"""
     Convenience function for column normalization of columns whose keytup
     ends in `starttime, stoptime`. \*args should be the args after other
@@ -938,6 +1059,7 @@ class PhotonTable:
     """
     @classmethod
     def _validate_param(cls, param:Param)->None:
+        """Validate intercept to ensure all phsel are positive, convert all based on detdef"""
         detdef = cls._detdef(param)
         pdict = tupledict(*((k,_normalize_ph_sel(v, detdef, convert_all=True)) 
                             for k, v in param.params.items()))
@@ -945,12 +1067,20 @@ class PhotonTable:
         cls.validate_param(param)
 
     @classmethod
-    def _normalize_column_kwargs(cls, **kwargs)->dict[str,Any]:
+    def _normalize_column_kwargs(cls, **kwargs)->dict[str:Any]:
+        """
+        Intercept normalize_column_kwargs ensuring all phsel are positive, 
+        convert all based on detdef
+        """
         detdef = cls._detdef(kwargs['source_param'])
         kwargs['keytup'] = _normalize_ph_sel(kwargs['keytup'], detdef, convert_all=True)
         return kwargs
 
     def _get_keys(self, keys:tuple[str,Hashable,...])->tuple[ColumnDef,tuple[Hashable,...],int,Any]:
+        """
+        Intercept keys for accessing columns, ensures all phsel are positive,
+        convert all based on detdef
+        """
         coldef, keys, offset, fill = super()._get_keys(keys)
         keys = tuple(key.render_positive(self._detdef(self.param)) 
                      if isinstance(key, PhSel) else key for key in keys)
@@ -958,14 +1088,24 @@ class PhotonTable:
     
     @property
     def detdef(self)->DetDef:
+        """:class:`DetDef` of origin data"""
         return self.origin.detdef
 
     @classmethod
     def _detdef(self, param:Param)->DetDef:
+        """
+        All final subclasses must implement this. 
+        Returns the :class:`DetDef` of a :class:`Param` based on subclass
+        """
         raise NotImplementedError("Subclasses must implement this method")
 
 
-def _title_startstop_append(name:str, start:str, stop:str)->str:
+ColKeyStart = Literal['istarttime', 'start']
+ColKeyStop = Literal['istoptime', 'stop']
+
+
+def _title_startstop_append(name:str, start:ColKeyStart, stop:ColKeyStop)->str:
+    """Smart appending start/stop to end of column name based on type of start/stop"""
     if start == 'start' and stop == 'stop':
         name += r'\: full'
     elif start != 'istarttime' or stop != 'istoptime':
@@ -973,13 +1113,15 @@ def _title_startstop_append(name:str, start:str, stop:str)->str:
     return name
 
 
-def _title_unit_append(title:str, unit:str, include_unit:Real)->str:
+def _title_unit_append(title:str, unit:str, include_unit:Real|bool)->str:
+    """Apppend unit to title based on unit name and rescale"""
     if include_unit is not False:
         title += rf'\: ({get_unit_prefix(include_unit)}{unit})'
     return title
 
 
 def _title_sels(name:str, origin:PhotonData, *args:PhSel)->str:
+    """Get column names when keys contain phsel based on origin data"""
     kw = {'name':name}
     if origin is not None:
         kw.update(detdef=origin.detdef, stream_names=origin.get_stream_names())
@@ -989,7 +1131,8 @@ def _title_sels(name:str, origin:PhotonData, *args:PhSel)->str:
 _cs01 = ChannelSet(True, {0,1})
 
 
-def _pol_ps(sel:PhSel, detdef:DetDef=None, setup:PhSpec=None):
+def _pol_ps(sel:PhSel, detdef:DetDef=None, setup:PhSpec=None)->bool:
+    """Determine if sel covers all polarization channels- if True, can render as anisotropy"""
     sel = sel if detdef is None else sel.render_positive(detdef, convert_all=True)
     if setup is None and detdef is None:
         return all(s == _csall or s == _cs01 for s in sel.streams)
@@ -1011,6 +1154,12 @@ def _pol_ps(sel:PhSel, detdef:DetDef=None, setup:PhSpec=None):
 
 
 class BasePhotonTableLike(metaclass=TableLike):
+    """
+    Metaclass determining if table can be accessed like a BasePhotonTable-
+    ie if start/stop and similar required columns are implemented.
+    Allows child table to "borrow" from BaseTables, and the still be used
+    as base for other child tables.
+    """
     required_columns = ('start', 'stop', 'istart', 'istop', 'ph_times', 'ph_dets')
 
 
@@ -1036,8 +1185,9 @@ class BasePhotonTable(PhotonTable, BaseTable):
     The :attr:`BasePhotonTable.column_defs` class attribute should be set to a
     tuple of :class:`fretbursts.datamodel.tables.ColumnDef` objects defining
     ``start``, ``stop``, ``istart``, ``istop`` columns concatenated with the
-    convenience tuple :attr:`basetimecoldefs` and any additional user-defined
-    columns.
+    convenience function :func:`make_base_column_defs` to create tuple of column
+    defs, any additional user-defined columns can be added by adding to returned
+    tuple.
     
     BasePhotonTable defines the following columns:
     
@@ -1045,40 +1195,58 @@ class BasePhotonTable(PhotonTable, BaseTable):
     
     Base Photon Columns
     -------------------
-    istarttime : int
-        time of first photon in range
-    istoptime : int
-        time of last photon in range
-    ph_mask : np.ndarray[np.bool_], (ph_sel:PhSel, )
-        mask of photons in ``ph_sel`` vs all photons in range for each range
-    ph_times : np.ndarray[np.int64], (ph_sel:PhSel, )
-        times (macrotimes) of photons in range belonging to ``ph_sel``.
-    ph_nanos : np.ndarray[np.uint16], (ph_sel:PhSel, )
-        nanotimes of photons in range belonging to ``ph_sel``.
-    ph_dets : np.ndarray[np.uint8], (ph_sel:PhSel, )
-        detector indexes (sorted) of photons in range belonging to ``ph_sel``.
-    ph_particles : np.ndarray[np.int64], (ph_sel:PhSel, )
-        particle indexes (simulated data only) of photons in range belonging to ``ph_sel``
-    nph_raw : int, (ph_sel:PhSel, )
-        number of photons in ``ph_sel`` in range. No corrections applied (even background)
-    brightness : float, (ph_sel:PhSel, )
-        photons*s\ :sup:`-1` for stream ``ph_sel`` in range
-    dur : float (starttype:str, stoptype:str)
-        duration (in seconds) of range
-    sep : float, offset=-1, non-atomic, (starttype:str, stoptype:str)
-        suparation (in seconds) between successive ranges
-    max_rate : float, (ph_sel:PhSel, m:int)
-        maximum photon rate for ``ph_sel`` based on sliding window of of size ``m`` in range
-    bva : float, (ph_sel_num:PhSel, ph_sel_dem:PhSel, n:int) 
-        variance of ratio of :math:`N(ph\_sel\_num)/N(ph\_sel\_dem)` of chuncks 
-        of size ``n``.
-    nanohist : np.ndarray[np.int64] (:class:`fretbursts.ph_sel.PhSel`, bool)
-        histogram (1 per range) of nanotimes of photons in range.
-    nanomean : float, (:class:`fretbursts.ph_sel.PhSel`, )
-        mean nanotime (in seconds) of ph_sel of photons in range. All streams in
-        ph_sel should have same irf_thresh in origin data, and be reasonable to
-        be treated collectively (single stream, or at least same excitation and
-        emission).
+    
+        istarttime : int
+            time of first photon in range
+        istoptime : int
+            time of last photon in range
+        ph_mask : np.ndarray[np.bool\_], (ph_sel:PhSel, )
+            mask of photons in ``ph_sel`` vs all photons in range for each range
+        ph_times : np.ndarray[np.int64], (ph_sel:PhSel, )
+            times (macrotimes) of photons in range belonging to ``ph_sel``.
+        ph_nanos : np.ndarray[np.uint16], (ph_sel:PhSel, )
+            nanotimes of photons in range belonging to ``ph_sel``.
+        ph_dets : np.ndarray[np.uint8], (ph_sel:PhSel, )
+            detector indexes (sorted) of photons in range belonging to ``ph_sel``.
+        ph_particles : np.ndarray[np.int64], (ph_sel:PhSel, )
+            particle indexes (simulated data only) of photons in range belonging to ``ph_sel``
+        nph_raw : int, (ph_sel:PhSel, )
+            number of photons in ``ph_sel`` in range. No corrections applied (even background)
+        ratio_raw : float (phsel_num:PhSel, phsel_dem:PhSel)
+            Ratio of ``[nph_raw, phsel_num] / [nph_raw, phsel_dem]``
+        anisotropy_raw: float (phsel_p:PhSel, phsel_s:PhSel)
+            Anisotropy of two channels 
+            (only sensible if phsel_p and phsel_s are parallel/perpendicular compliments of each other).
+            Computes as  ``([nph_raw, phsel_p] - [nph_raw, phsel_p])/([nph_raw, phsel_p] + 2*[nph_raw, phsel_p])``
+        brightness : float, (ph_sel:PhSel, starttype:{'istarttime', 'start'}, stoptype:{'istoptime', 'stop'})
+            photons*s\ :sup:`-1` for stream ``ph_sel`` in range
+        max_rate : float, (ph_sel:PhSel, m:int)
+            maximum photon rate for ``ph_sel`` based on sliding window of of size ``m`` in range
+        dur : float (starttype:{'istarttime', 'start'}, stoptype:{'istoptime', 'stop'})
+            duration (in seconds) of range
+        midtime : (starttype:{'istarttime','start'}, stoptype:{'istoptime', 'stop'})
+            Midpoint time of burst (in s)
+        sep : float, offset=-1, non-atomic, (starttype:{'istarttime', 'start'}, stoptype:{'istoptime', 'stop'})
+            suparation (in seconds) between successive ranges
+        bva : float, (ph_sel_num:PhSel, ph_sel_dem:PhSel, n:int) 
+            variance of ratio of :math:`N(ph\_sel\_num)/N(ph\_sel\_dem)` of chuncks 
+            of size ``n``.
+        nanohist : np.ndarray[np.int64] (phsel:PhSel, full:bool)
+            histogram (1 per range) of nanotimes of photons in range. If full, the
+            return histogram using TCSPC raw bins, if full=False, then trim to excitation range.
+        nanomean : float, (:class:`fretbursts.ph_sel.PhSel`, )
+            mean nanotime (in seconds) of ph_sel of photons in range. All streams in
+            ph_sel should have same irf_thresh in origin data, and be reasonable to
+            be treated collectively (single stream, or at least same excitation and
+            emission).
+        
+    Remapped Columns
+    ----------------
+        E_raw : float ()
+            FRET efficiency, maps to ``ratio_raw, PhSel(0ex1em), PhSel(0ex)``
+        S_raw : float ()
+            Stoichiometry efficiency, maps to ``ratio_raw, PhSel(0ex), PhSel(0ex_1ex1em)``
+    
     """
     _parent_ph_subrange:ClassVar[str] = False
 
@@ -1090,17 +1258,22 @@ class BasePhotonTable(PhotonTable, BaseTable):
         super()._init_new_()
 
     def record_photondata(self)->None:
+        """
+        Save core photon data arrays (array per row).
+        This can speed procesing of data.
+
+        """
         if self._derived:
             return self._base.record_photondata()
         if 'nanos' not in self._cache and self.origin.pulsed:
-            self._cache['nanos'] = self['ph_nanos', _phsel_all]
+            self._cache['nanos'] = self['ph_nanos', phsel_all]
         if 'particles' not in self._cache and self.origin.simulated:
-            self._cache['particles'] = self['ph_particles', _phsel_all]
+            self._cache['particles'] = self['ph_particles', phsel_all]
         if 'dets' not in self._cache:
-            self._cache['dets'] = self['ph_dets', _phsel_all]
+            self._cache['dets'] = self['ph_dets', phsel_all]
         # record times last so that check in _get_parent_ph_subrange returns false for all iterations
         if 'times' not in self._cache:
-            self._cache['times'] = self['ph_times', _phsel_all]
+            self._cache['times'] = self['ph_times', phsel_all]
 
     @classmethod
     # @abstractmethod
@@ -1109,17 +1282,22 @@ class BasePhotonTable(PhotonTable, BaseTable):
         raise NotImplementedError("subclasses of BasePhotonTable must implement detdef method")
 
     def _get_istarttime(self)->np.ndarray[np.int64]:
+        """Getter function, time of first photon in each row, in clk_p units"""
         return self.origin.times[self['istart']]
 
     def _get_istoptime(self)->np.ndarray[np.int64]:
+        """Getter function, time+1 (so can be treated as half-open interval) 
+        of last photon in each row, in clk_p units"""
         return self.origin.times[self['istop']-1]+1
 
-    def _get_midtime(self, starttime:str, stoptime:str)->np.ndarray[np.double]:
+    def _get_midtime(self, starttime:ColKeyStart, stoptime:ColKeyStop)->np.ndarray[np.double]:
+        """Getter function, midpoint time of burst"""
         start, stop = self[stoptime], self[starttime]
         return ((stop - start)/2 + start)*self.origin.clk_p
 
     @classmethod
     def _get_midtime_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """Title function for midtime"""
         if col.keytup[0] == 'istarttime' and col.keytup[1] == 'istoptime':
             out = 'time'
         else:
@@ -1129,6 +1307,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
         return out
 
     def _get_parent_ph_subrange(self)->Union["BasePhotonTable",None]:
+        """Get parent table if it has stored photon arrays"""
         if 'times' in self._bcache:
             return self
         parent_name = self._parent_ph_subrange
@@ -1140,6 +1319,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
         return None
 
     def _iter_ph_array_all(self, key:str)->Iterator[np.ndarray]:
+        """General iterator, if available iterate over stored photon arrays of type key"""
         # iterate from stored photon arrays (not from origin)
         if key in self._bcache:
             yield from self._bcache.iter_key(key)
@@ -1164,6 +1344,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
                     yield pharray[istart:istop]
 
     def _iter_ph_mask(self, phsel:PhSel)->np.ndarray[np.bool_]:
+        """Iterator for mask of phsel of photon arrays"""
         stream_ids = self.origin.detdef.get_stream_ids(phsel)
         if not self.origin.save_memory and hasattr(self.origin, 'dets'):
             mask = self.origin._get_from_cache(BasePhotonTable, tupledict(('phsel',phsel),), 'mask',
@@ -1175,26 +1356,32 @@ class BasePhotonTable(PhotonTable, BaseTable):
                 yield np.isin(dets, stream_ids)
 
     def _iter_ph_array(self, key:str, phsel:PhSel)->np.ndarray:
-        if phsel.render_positive(self.origin.detdef, convert_all=True) == _phsel_all:
+        """Iterator over ph_array key masked by phsel"""
+        if phsel.render_positive(self.origin.detdef, convert_all=True) == phsel_all:
             yield from self._iter_ph_array_all(key)
         else:
             for arr, mask in zip(self._iter_ph_array_all(key), self._iter_ph_mask(phsel)):
                 yield arr[mask]
 
     def _iter_ph_dets(self, phsel:PhSel)->Iterator[np.ndarray[np.uint8]]:
+        """Iterator function, photon detector indices"""
         yield from self._iter_ph_array('dets', phsel)
 
     def _iter_ph_times(self, phsel:PhSel)->Iterator[np.ndarray[np.int64]]:
+        """Iterator function, photon times"""
         yield from self._iter_ph_array('times', phsel)
 
     def _iter_ph_nanos(self, phsel:PhSel)->Iterator[np.ndarray[np.uint16]]:
+        """Iterator function, photon nanotimes"""
         yield from self._iter_ph_array('nanos', phsel)
 
     def _iter_ph_particles(self, phsel:PhSel)->Iterator[np.ndarray[np.uint8]]:
+        """Iterator function, photon detector particles (simulated)"""
         yield from self._iter_ph_array('particles', phsel)
 
     def _iter_nph_raw(self, phsel:PhSel)->Iterator[int]:
-        if phsel == _phsel_all:
+        """Iterator function, for nph_raw column, raw photon counts for phsel"""
+        if phsel == phsel_all:
             yield from (istop-istart for istart, istop 
                         in zip(self.iter_column('istart'), self.iter_column('istop')))
         else:
@@ -1202,19 +1389,23 @@ class BasePhotonTable(PhotonTable, BaseTable):
 
     @classmethod
     def _get_nph_raw_title(cls, col:Column, include_unit:Real=False, origin:PhotonData=None)->str:
+        """Title getter function for nph_raw"""
         title = _title_sels('_{raw}n', origin, col.keytup[0])[0]
         title = _title_unit_append(title, 'cnts', include_unit)
         return f'${title}$'
 
     def _get_ratio_raw(self, phsel_num:PhSel, phsel_dem:PhSel)->np.ndarray[np.float64]:
+        """Getter function for ratio_raw column"""
         return self['nph_raw', phsel_num] / self['nph_raw', phsel_dem]
 
     @classmethod
     def _get_ratio_raw_title(cls, col:Column, include_unit:Real=False, origin:PhotonData=None)->str:
+        """Title getter function for ratio_raw column"""
         return '$%s/%s$' % _title_sels('_{raw}n', origin, *col.keytup[:2])
 
     @classmethod
     def _replace_E_raw(cls, col:str, keytup:tuple)->tuple:
+        """Column map function E_raw->ratio_raw"""
         return 'ratio_raw', (PhSel('0ex1em'), PhSel('0ex'),)+keytup, {'title':'E_{raw}'}
 
     @classmethod
@@ -1222,11 +1413,13 @@ class BasePhotonTable(PhotonTable, BaseTable):
         return 'ratio_raw', (PhSel('0ex'), PhSel('0ex_1ex1em'),)+keytup, {'title':'S_{raw}'}
 
     def _get_anisotropy_raw(self, phsel_p:PhSel, phsel_s:PhSel)->np.ndarray[np.float64]:
+        """Getter function for anisotropy_raw column"""
         p, s = self['nph_raw', phsel_p], self['nph_raw', phsel_s]
         return (p-s)/(p+2*s)
 
     @classmethod
     def _get_anisotropy_raw_title(cls, col:Column, include_unit:Real=False, origin:PhotonData=None)->str:
+        """Title getter function for anisotropy_raw column"""
         kw = {'name':'_{raw}I'}
         par, perp, start, stop = col.keytup
         fuse = par | perp
@@ -1245,61 +1438,74 @@ class BasePhotonTable(PhotonTable, BaseTable):
         return title
 
     def _iter_meanT(self, ph_sel:PhSel)->Iterator[float]:
+        """Iterator function for meanT column, mean time of given photon stream"""
         for time, s in zip(self.iter_column('ph_times', ph_sel), self.iter_column('istart')):
             yield (np.mean(time-s)+s)*self.origin.clk_p
 
     @classmethod
     def _get_meanT_title(cls, col:Column, include_unit:Real=False, origin:PhotonData=None)->str:
+        """Title getter function for meanT columns"""
         title = _title_sels('_{raw}n', origin, *col.keytup)
         title = _title_unit_append(title, 's', include_unit)
         return f'${title}$'
 
     def _iter_mTdiff(self, phsel_a:PhSel, phsel_b:PhSel)->Iterator[float]:
+        """Iterator function for mTdiff, difference in s in mean time between phsel_a and phsel_b"""
         for timea, timeb, s in zip(self.iter_column('ph_times', phsel_a), self.iter_column('ph_times', phsel_b), self.iter_column('istart')):
             yield (np.mean(timea-s) - np.mean(timeb-s))*self.origin.clk_p
 
     @classmethod
     def _get_mTdiff_title(cls, col:Column, include_unit:Real=False, origin:PhotonData=None)->str:
+        """Title getter function for column mTdiff"""
         ta, tb = _title_sels(r'\bar t', origin, *col.keytup[:2])
         title = _title_unit_append(f'{ta}-{tb}', 's', include_unit)
         return f'${title}$'
 
     @classmethod
     def _normalizecolumn_brightness(cls, *args):
+        """Column normalzation function for brightness column"""
         return args[:1] + cls._normalize_column_startstop(*args[1:])
 
-    def _get_brightness(self, phsel:PhSel, starttype:str, stoptype:str)->Iterator[float]:
+    def _get_brightness(self, phsel:PhSel, starttype:ColKeyStart, stoptype:ColKeyStop)->np.ndarray[np.double]:
+        """Getter function for brightness column"""
         return self['nph_raw', phsel] / self['dur', starttype, stoptype]
 
     @classmethod
     def _get_brightness_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """Title getter function for brightness column"""
         title = _title_sels('_{raw}br', origin, col.keytup[0])[0]
         title = _title_unit_append(title, 'cnts s^{-1}', include_unit)
         return f'${title}$'
 
     @classmethod
     def _normalize_column_startstop(cls, *args):
+        """Sub function for normalizing start/stop times of columns using said keys"""
         return _normalize_column_startstop()
 
     @classmethod
     def _normalizecolumn_middur(cls, *args:str)->tuple[str, str]:
+        """Normalization function for midtime and dur columns"""
         return cls._normalize_column_startstop(*args)
 
-    def _get_dur(self, starttype:str, stoptype:str)->np.ndarray[np.float64]:
+    def _get_dur(self, starttype:ColKeyStart, stoptype:ColKeyStop)->np.ndarray[np.float64]:
+        """Getter function for dur column"""
         return self.origin.clk_p*(self[stoptype,]-self[starttype,])
 
     @classmethod
-    def _title_startstop_append(cls, name, start, stop):
+    def _title_startstop_append(cls, name:str, start:ColKeyStart, stop:ColKeyStop)->str:
+        """Sub-function for appending start/stop type to column titles"""
         return _title_startstop_append(name, start, stop)
 
     @classmethod
     def _get_dur_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """Title getter function for column dur"""
         title = cls._title_startstop_append('duration', col.keytup[0], col.keytup[1])
         title = _title_unit_append(title, 's', include_unit)
         return f'${title}$'
 
     @classmethod
     def _normalizecolumn_sep(cls, *args:str)->tuple[str, str]:
+        """Column normalization function for sep column"""
         if len(args) > 1 and not isinstance(args[-2], str):
             args, post = args[:-2], args[-2:]
         elif len(args) > 0 and  not isinstance(args[-1], str):
@@ -1308,11 +1514,13 @@ class BasePhotonTable(PhotonTable, BaseTable):
             post = tuple()
         return cls._normalize_column_startstop(*args) + post
 
-    def _get_sep(self, starttype:str, stoptype:str)->np.ndarray[np.float64]:
+    def _get_sep(self, starttype:ColKeyStart, stoptype:ColKeyStop)->np.ndarray[np.float64]:
+        """Getter function for sep column"""
         return self.origin.clk_p*(self[starttype,][1:]-self[stoptype,][:-1])
 
     @classmethod
     def _get_sep_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """Title getter function for sep column"""
         sep = ''
         if 'offset' in col:
             sep = r'bwd\:' if col.offset else r'fwd\:'
@@ -1323,8 +1531,9 @@ class BasePhotonTable(PhotonTable, BaseTable):
 
     @classmethod
     def _normalizecolumn_max_rate(self, *args)->tuple[PhSel, int]:
+        """Column normalization function for max_rate column"""
         phsel, m = args[0:1], args[1:2]
-        phsel = _phsel_all if not phsel else phsel[0]
+        phsel = phsel_all if not phsel else phsel[0]
         m = 10 if not m else m[0]
         try:
             m = int(m)
@@ -1336,6 +1545,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
 
     @cite('IngargiolaPLOSOne2016')
     def _get_max_rate(self, phsel:PhSel, m:int)->np.ndarray[np.float64]:
+        """Getter function for max_rate column"""
         stream_ids = self.origin.detdef.get_stream_ids(phsel)
         return fbc.maximum_rate(self.origin.times, self.origin.dets, 
                                 self['istart',], self['istop',], 
@@ -1343,12 +1553,14 @@ class BasePhotonTable(PhotonTable, BaseTable):
 
     @classmethod
     def _get_max_rate_title(cls, col:Column, include_unit:bool=True, origin:PhotonData=None)->str:
+        """Title getter function for max_rate column"""
         title = _title_sels(r'peak\: rate _{%d}r' % (col.keytup[1],), origin, col.keytup[0])
         title = _title_unit_append(title, 'cnts s^{-1}', include_unit)
         return f'${title}$'
 
     @classmethod
     def _normalizecolumn_bva(cls, *args)->tuple[PhSel, int]:
+        """Column normalization function for bva column"""
         phsel_num, phsel_dem, n = args[0:1], args[1:2], args[2:3]
         phsel_num = PhSel('0ex0em') if not phsel_num else phsel_num[0]
         phsel_dem = PhSel('0ex') if not phsel_dem else phsel_dem[0]
@@ -1365,6 +1577,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
 
     @cite('TorellaBioPhyJ2011', purpose='Burst Variance Analysis')
     def _get_bva(self, phsel_num:PhSel, phsel_dem:PhSel, n:int)->np.ndarray[np.float64]:
+        """Getter function for bva column"""
         stream_idsSub = self.origin.detdef.get_stream_ids(phsel_num)
         stream_idsAll = self.origin.detdef.get_stream_ids(phsel_dem)
         return fbc.burst_variance_analysis(self.origin.dets, 
@@ -1373,19 +1586,24 @@ class BasePhotonTable(PhotonTable, BaseTable):
 
     @classmethod
     def _get_bva_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """Title getter function for bva column"""
         num, dem = _title_sels('n', origin, *col.keytup[:2])
         return r'$_{%d}\sigma_{%s/%s}$' % (col.keytup[2], num, dem)
 
+    @cite('TorellaBioPhyJ2011', purpose='Burst Variance Analysis')
     def _get_ebva(self, phsel_num:PhSel, phsel_dem:PhSel, n:int)->np.ndarray[np.float64]:
+        """Getter function for ebva column"""
         bva, r = self['bva', phsel_num, phsel_dem, n], self['ratio_raw', phsel_num, phsel_dem]
         return np.sqrt(bva**2 - ((r*1-r)/n))
 
     @classmethod
     def _get_ebva_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """Title getter function for ebva column"""
         num, dem = _title_sels('n', origin, *col.keytup[:2])
         return r'$_{%d,\: excess}\sigma_{%s/%s}$' % (col.keytup[2], num, dem)
 
     def _iter_nanomean(self, phsel:PhSel)->float:
+        """Iter function for nanomean column"""
         phsel = phsel.render_positive(self.origin.detdef, convert_all=True)
         stream_ids = self.origin.detdef.get_stream_ids(phsel)
         if stream_ids.size == 1:
@@ -1406,11 +1624,13 @@ class BasePhotonTable(PhotonTable, BaseTable):
 
     @classmethod
     def _get_nanomean_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """Title getter function for nanomean"""
         title = _title_sels(r'\bar \tau', origin, col.keytup[0])[0]
         title = _title_unit_append(title, 's', include_unit)
         return f'${title}$'
 
     def _iter_nanohist(self, phsel:PhSel, full:bool)->Iterator[np.uint16]:
+        """Iter function for nanohist column"""
         if not phsel.positive:
             phsel = phsel.render_positive(self.origin.detdef, convert_all=False)
         if not full:
@@ -1425,6 +1645,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
 
     @classmethod
     def _noramlizecolumn_nanohist(self, *args)->tuple[PhSel, bool]:
+        """Column normalization function for nanohist column"""
         phsel, fill, err = args[:1], args[1:2], args[2:]
         if err:
             raise TypeError("too many keys for nanohist, maximumn two, PhSel and full, (full optional)")
@@ -1436,64 +1657,6 @@ class BasePhotonTable(PhotonTable, BaseTable):
 TV_str_start = TV_str(isin=('start', 'istarttime'))
 TV_str_stop = TV_str(isin=('stop', 'istoptime'))
 
-basetimecoldefs = (
-    ColumnDef('istarttime', tuple(), 0, 'never', dtype=np.dtype('<i8'), 
-              get_func='_get_istarttime', get_derived=True, unit='(clk_p)'),
-    ColumnDef('istoptime', tuple(), 0, 'never', dtype=np.dtype('<i8'), 
-              get_func='_get_istoptime', get_derived=True, unit='(clk_p)'),
-    ColumnDef('midtime', (TV_str_start, TV_str_stop), 0, 'never', get_func='_get_midtime', 
-              get_derived=True, norm_func='_normalizecolumn_middur', 
-              title_func='_get_midtime_title', unit='(s)'),
-    ColumnDef('ph_mask', (PhSel, ), 0, 'never', iter_func='_iter_ph_mask', 
-              get_derived=True, dtype=np.object_, typedef=np.dtype(np.bool_)),
-    ColumnDef('ph_times', (PhSel, ), 0, 'never', iter_func='_iter_ph_times', 
-              get_derived=True, dtype=np.object_, typedef=np.dtype('<i8')),
-    ColumnDef('ph_nanos', (PhSel, ), 0, 'never', iter_func='_iter_ph_nanos', 
-              get_derived=True, dtype=np.object_, typedef=np.dtype('<u2')),
-    ColumnDef('ph_dets', (PhSel, ), 0, 'never', iter_func='_iter_ph_dets', 
-              get_derived=True, dtype=np.object_, typedef=np.dtype('<u1')), 
-    ColumnDef('ph_particles', (PhSel, ), 0, 'never', iter_func='_iter_ph_particles', 
-              get_derived=True, dtype=np.object_, typedef=np.dtype('<u1')),
-    ColumnDef('nph_raw', (PhSel, ), 0, 'user', dtype=np.dtype('<i8'), iter_func='_iter_nph_raw', 
-              get_derived=True, title_func='_get_nph_raw_title', unit='cnts', 
-              index_unit='cnts'),
-    ColumnDef('ratio_raw', (PhSel, PhSel), 0, 'user', dtype=np.dtype('<f8'), 
-              get_func='_get_ratio_raw', get_derived=True, 
-              title_func='_get_ratio_raw_title'),
-    ColumnDef('anisotropy_raw', (PhSel, PhSel), 0, 'user', dtype=np.dtype('<f8'),
-              get_func='_get_anisotropy_raw', get_derived=True,
-              title_func='_get_anisotropy_raw_title'),
-    ColumnDef('meanT', (PhSel, ), 0, 'user', iter_func='_iter_meanT', get_derived=True,
-              title_func='_get_meanT_title', unit='s'),
-    ColumnDef('mTdiff', (PhSel, PhSel), 0, 'user', iter_func='_iter_mTdiff', get_derived=True,
-              title_func='_get_mTdiff_title', unit='s'),
-    ColumnDef('brightness', (PhSel, str, str), 0, 'user', dtype=np.dtype('<f8'), 
-              get_func='_get_brightness', get_derived=True, 
-              norm_func='_normalizecolumn_brightness', title_func='_get_brightness_title',
-              unit=r'cnts\: s^{-1}', index_unit='cns s-1'),
-    ColumnDef('dur', (TV_str_start, TV_str_stop), 0, 'never', dtype=np.dtype('<f8'), get_func='_get_dur', 
-              get_derived=True, norm_func='_normalizecolumn_middur', 
-              title_func='_get_dur_title', unit='s', index='dur', index_unit='s'),
-    ColumnDef('sep', (TV_str_start, TV_str_stop), -1, 'never', get_func='_get_sep', atomic=False, 
-              dtype=np.dtype('<f8'), norm_func='_normalizecolumn_sep', 
-              title_func='_get_sep_title', unit='s', index='sep', index_unit='s'),
-    ColumnDef('max_rate', (PhSel, int), 0, 'user', get_func='_get_max_rate',
-              dtype=np.dtype('<f8'), get_derived=True, norm_func='_normalizecolumn_max_rate',
-              title_func='_get_max_rate_title', unit=r'cnts\: s^{-1}', index_unit='cnts s-1'),
-    ColumnDef('bva', (PhSel, PhSel, int), 0, 'user', get_func='_get_bva', 
-              dtype=np.dtype('<f8'), get_derived=True, norm_func='_normalizecolumn_bva',
-              title_func='_get_bva_title'),
-    ColumnDef('ebva', (PhSel, PhSel, int), 0, 'user', get_func='_get_ebva', 
-              dtype=np.dtype('<f8'), get_derived=True, norm_func='_normalizecolumn_bva',
-              title_func='_get_ebva_title'),
-    ColumnDef('nanohist', (PhSel, bool), 0, 'never', iter_func='_iter_nanohist',
-              norm_func='_noramlizecolumn_nanohist',
-              get_derived=True, dtype=np.dtype('<i8'), ndim=2),
-    ColumnDef('nanomean', (PhSel, ), 0, 'user', iter_func='_iter_nanomean', get_derived=True,
-              dtype=np.dtype('<f8'), title_func='_get_nanomean_title', unit='s'),
-    ColumnDef('E_raw', tuple(), 0, remap='_replace_E_raw'),
-    ColumnDef('S_raw', tuple(), 0, remap='_replace_S_raw'),
-                  )
 
 _basetimecolumndefs = (
     ColumnDef('start', tuple(), 0, 'all', dtype=np.int64, title='start', unit='clk_p'), 
@@ -1595,10 +1758,25 @@ class ChildPhotonTable(PhotonTable, ChildTable):
         return base.tp._detdef(base)
 
 
-def as_irf(data:PhArray)->dict[PhSel,np.ndarray[np.int64]]:
+def as_irf(data:PhotonData)->dict[PhSel:np.ndarray[np.int64]]:
+    """
+    Convert a :class:`PhotonData` into an IRF dictionar, usable as :attr:`PhotonData.irf`
+    in another :class:`PhotonData` object.
+
+    Parameters
+    ----------
+    data : PhotonData
+        PhotonData to be turned into IRF, should be of scatter or quenched fluorephore.
+
+    Returns
+    -------
+    irf : dict[PhSel:np.ndarray[np.int64]]
+        Dictionary of photon-stream:irf histogram key value pairs.
+
+    """
     irf = dict()
-    for i in range(data.detdef.size):
-        phsel = data.detef.stream_ids_to_PhSel(i)
+    for i in range(data._pharray.detdef.size):
+        phsel = data.detdef.stream_ids_to_PhSel(i)
         mn, mx = get_phsel_ex_range(data.setup, phsel)
         irf[phsel] = np.bincount(data.nanos[data.dets==i]-mn, minlength=mx-mn)
     return irf

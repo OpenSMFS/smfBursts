@@ -23,7 +23,7 @@ the code.
 
 .. note::
     
-    This shoudl be seen as the minimal set of citations, ie citations in this
+    This should be seen as the minimal set of citations, ie citations in this
     list are those that reflect the algorithms/methods used. Authors are still
     responsible for including appropriate citations based on additional factors.
 

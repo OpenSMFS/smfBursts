@@ -10,14 +10,19 @@ Definitions of basic gating definitions and convenience functions.
 
 """
 from typing import Any
+from collections.abc import Callable
 from itertools import product
+from numbers import Real
 
 import numpy as np
 
 from .utils import tupledict
 from .immutabledata import register_PyCode
-from .tables import Column, GateDef, Gate, GateGroup, _TT_ft, _TT_tf
-from .tables import GD_intersect, GD_equal, GD_superset, GD_subset
+from .tables import (
+    Column, GateDefinition, GateDef, MappedGateDef, Gate, MappedGate, GateGroup, 
+    _TT_ft, _TT_tf, TT_subtract,
+    GD_intersect, GD_equal, GD_superset, GD_subset
+                     )
 
 
 def _linear_compute(columns:tuple[np.ndarray[np.floating],...],
@@ -41,7 +46,7 @@ def linear_gt_gate(*columns:np.ndarray[np.floating], vec:np.ndarray[np.double], 
 
     Returns
     -------
-    np.ndarray[np.bool_]
+    np.ndarray[np.bool\_]
         gate mask.
 
     """
@@ -51,7 +56,7 @@ def linear_gt_gate(*columns:np.ndarray[np.floating], vec:np.ndarray[np.double], 
 register_PyCode(linear_gt_gate)
 
 
-def linear_gte_gate(*columns:np.ndarray[np.floating], vec:np.ndarray[np.double], m:float)->np.ndarray[np.bool_]:
+def linear_geq_gate(*columns:np.ndarray[np.floating], vec:np.ndarray[np.double], m:float)->np.ndarray[np.bool_]:
     r"""
     Gate function for :attr:`LIN_GTE_gate`. :math:`V \cdot C >= m`
 
@@ -67,17 +72,17 @@ def linear_gte_gate(*columns:np.ndarray[np.floating], vec:np.ndarray[np.double],
 
     Returns
     -------
-    np.ndarray[np.bool_]
+    np.ndarray[np.bool\_]
         gate mask.
 
     """
     return _linear_compute(columns, vec) >= m
 
 
-register_PyCode(linear_gte_gate)
+register_PyCode(linear_geq_gate)
 
 
-def _normalize_linear_gate(params:dict[str, Any], colorder:tuple[int,...]):
+def _normalize_linear_gate(params:dict[str:Any], colorder:tuple[int,...]):
     """Ensure that columns in correct order, and vec is unit vector"""
     if 'vec' not in params:
         raise ValueError("must specify vec for linear_gate")
@@ -106,7 +111,7 @@ LIN_GT_gate = GateDef(linear_gt_gate, tupledict(('vec', np.ndarray), ('m', float
                    sortcol=True, normalize=_normalize_linear_gate)
 
 
-LIN_GTE_gate = GateDef(linear_gte_gate, tupledict(('vec', np.ndarray), ('m', float)),
+LIN_GEQ_gate = GateDef(linear_geq_gate, tupledict(('vec', np.ndarray), ('m', float)),
                    sortcol=True, normalize=_normalize_linear_gate)
 
 
@@ -120,16 +125,16 @@ def _comp_linear(gateA:Gate, gateB:Gate)->int:
         return GD_superset
     elif gateA.params['m'] > gateB.params['m']:
         return GD_subset
-    if gateA.gatedef == LIN_GT_gate and gateB.gatedef == LIN_GTE_gate:
+    if gateA.gatedef == LIN_GT_gate and gateB.gatedef == LIN_GEQ_gate:
         return GD_subset
-    elif gateA.gatedef == LIN_GTE_gate and gateB.gatedef == LIN_GT_gate:
+    elif gateA.gatedef == LIN_GEQ_gate and gateB.gatedef == LIN_GEQ_gate:
         return GD_superset
     return GD_equal
 
 
-GateDef.set_gate_comparison(LIN_GT_gate, LIN_GT_gate, _comp_linear)
-GateDef.set_gate_comparison(LIN_GTE_gate, LIN_GTE_gate, _comp_linear)
-GateDef.set_gate_comparison(LIN_GT_gate, LIN_GTE_gate, _comp_linear)
+GateDefinition.set_gate_comparison(LIN_GT_gate, LIN_GT_gate, _comp_linear)
+GateDefinition.set_gate_comparison(LIN_GEQ_gate, LIN_GEQ_gate, _comp_linear)
+GateDefinition.set_gate_comparison(LIN_GT_gate, LIN_GEQ_gate, _comp_linear)
 
 
 def _ellipsoid_compute(columns:tuple[np.ndarray[np.floating]], transform:np.ndarray[np.floating],
@@ -140,23 +145,23 @@ def _ellipsoid_compute(columns:tuple[np.ndarray[np.floating]], transform:np.ndar
 
 def ellipsoid_lt_gate(*columns:np.ndarray[np.floating], transform:np.ndarray[np.floating],
                       center:np.ndarray[np.floating])->np.ndarray[np.bool_]:
-    """
+    r"""
     Gate function for :attr:`ELLIPSOID_LTE_gate`
     Creates an n-D ellipsoid with an open (less than) boarder.
 
     Parameters
     ----------
-    *columns : Column
+    \*columns : Column
         arrays of each column of gate, number of columns = n, each element becomes
         index *i* of *C*.
     transform : np.ndarray[np.double]
-        transformation matrix to apply to vector of location in columns.
+        The :math:`\mathbf{T}` in :math:`\left\|{\mathbf{T}\vec{x}-\vec{c}}\right\| \lt 1`.
     center : np.ndarray[np.double]
-        Center vector, ``magnitude(transform@(loc-center)) < 1.0``.
+        The :math:`\vec{c}` in :math:`\left\|{\mathbf{T}\vec{x}-\vec{c}}\right\| \lt 1`.
 
     Returns
     -------
-    np.ndarray[np.bool_]
+    np.ndarray[np.bool\_]
         gate mask.
 
     """
@@ -166,9 +171,9 @@ def ellipsoid_lt_gate(*columns:np.ndarray[np.floating], transform:np.ndarray[np.
 register_PyCode(ellipsoid_lt_gate)
 
                 
-def ellipsoid_lte_gate(*columns:Column, transform:np.ndarray[np.double], center:np.ndarray[np.double])->np.ndarray[np.bool_]:
-    """
-    Gate function for :attr:`ELLIPSOID_LTE_gate`
+def ellipsoid_leq_gate(*columns:Column, transform:np.ndarray[np.double], center:np.ndarray[np.double])->np.ndarray[np.bool_]:
+    r"""
+    Gate function for :attr:`ELLIPSOID_Leq_gate`
     Creates an n-D ellipsoid with a closed (less than or equal to) 
     boarder.
 
@@ -178,20 +183,20 @@ def ellipsoid_lte_gate(*columns:Column, transform:np.ndarray[np.double], center:
         arrays of each column of gate, number of columns = n, each element becomes
         index *i* of *C*.
     transform : np.ndarray[np.double]
-        DESCRIPTION.
+        The :math:`\mathbf{T}` in :math:`\left\|{\mathbf{T}\vec{x}-\vec{c}}\right\| \leq 1`.
     center : np.ndarray[np.double]
-        DESCRIPTION.
+        The :math:`\vec{c}` in :math:`\left\|{\mathbf{T}\vec{x}-\vec{c}}\right\| \leq 1`.
 
     Returns
     -------
-    np.ndarray[np.bool_]
+    np.ndarray[np.bool\_]
         gate mask.
 
     """
     return _ellipsoid_compute(columns, transform, center) <= 1.0
 
 
-register_PyCode(ellipsoid_lte_gate)
+register_PyCode(ellipsoid_leq_gate)
 
 
 def _norm_upper(r:np.ndarray[np.double])->np.ndarray[np.double]:
@@ -204,7 +209,7 @@ def _norm_upper(r:np.ndarray[np.double])->np.ndarray[np.double]:
     return rn
 
 
-def _normalize_ellipsoide_gate(params:dict[str, np.ndarray[np.double]],
+def _normalize_ellipsoide_gate(params:dict[str:np.ndarray[np.double]],
                                colorder:tuple[int,...])->np.ndarray[np.bool_]:
     """
     Enure transform is upper triangular matrix and re-order transform and
@@ -232,37 +237,108 @@ register_PyCode(_normalize_ellipsoide_gate)
 ELLIPSOID_LT_gate = GateDef(ellipsoid_lt_gate, tupledict(('transform', np.ndarray), ('center', np.ndarray)), 
                              sortcol=True, normalize=_normalize_ellipsoide_gate)
 
-ELLIPSOID_LTE_gate = GateDef(ellipsoid_lte_gate, tupledict(('transform', np.ndarray), ('center', np.ndarray)), 
+ELLIPSOID_LEQ_gate = GateDef(ellipsoid_leq_gate, tupledict(('transform', np.ndarray), ('center', np.ndarray)), 
                              sortcol=True, normalize=_normalize_ellipsoide_gate)
 
 
-def isin_gate(column:np.ndarray[np.integer], *, inset:np.ndarray[np.integer])->np.ndarray[np.bool_]:
+def _isin_nan(elements:np.ndarray, test_elements:np.ndarray, **kwargs)->np.ndarray[np.bool_]:
+    """
+    Nan-matching isin function. Wraps np.isin
+
+    Parameters
+    ----------
+    elements : np.ndarray
+        Input array.
+    test_elements : np.ndarray
+        The values against which to test each value of element. 
+    **kwargs : TYPE
+        Passed to np.isin.
+
+    Returns
+    -------
+    np.ndarray[np.bool\_]
+        Boolean mask of whether element in elements is in test_elements.
+
+    """
+    if np.issubdtype(test_elements.dtype, np.floating):
+        isnan = np.isnan(test_elements)
+        if np.all(isnan):
+            return np.isnan(elements)
+        elif np.any(isnan):
+            return np.isnan(elements) | np.isin(elements, test_elements, **kwargs)
+    return np.isin(elements, test_elements, **kwargs)
+
+
+def isin_gate(column:np.ndarray, *, inset:np.ndarray)->np.ndarray[np.bool_]:
     """
     Gate function for :attr:`ISIN_gate`
 
     Parameters
     ----------
-    column : np.ndarray[np.integer]
+    column : np.ndarray
         array mask.
-    inset : np.ndarray[np.integer], optional
+    inset : np.ndarray, optional
         Set of values for which gate evaluates True. The default is frozenset().
 
     Returns
     -------
-    np.ndarray[np.bool_]
+    np.ndarray[np.bool\_]
         gate mask.
 
     """
-    return np.isin(column, inset)
+    return _isin_nan(column, inset)
+
+
+def _normalize_isin(params:dict, cols:tuple[Column])->dict:
+    """Ensure params['isin'] matches type fo col"""
+    inset = params['inset']
+    dtype = cols[0]._get_coldef().dtype
+    params['inset'] = inset.astype(dtype).reshape(-1)
+    return params
+
+
+def _comp_isin_isin(gateA:Gate, gateB:Gate)->int:
+    """Comparison function for comparing two ISIN_gate gates"""
+    if gateA.columns[0] != gateB.columns[0]:
+        return GD_intersect
+    ainb = _isin_nan(gateA.params['inset'], gateB.params['inset'])
+    bina = _isin_nan(gateB.params['inset'], gateA.params['inset'])
+    return np.any(ainb)<<3 | (not np.all(bina))<<2 | (not np.all(ainb))<<1 | 0b0001
+
+
+def _comp_isin_lin(gateIN:Gate, gateLN:Gate, comp:Callable[[np.ndarray, Real],np.ndarray[np.bool_]])->int:
+    """Comparison function for comparing ISIN_gate with LINEAR_XX_gate gates"""
+    if gateIN.columns[0] in gateLN.columns:
+        inset = gateIN.params['inset']
+        if len(gateLN.columns) > 1:
+            if np.all(np.isnan(inset)):
+                return 0b0110
+            return GD_intersect
+        ingate = inset > gateLN.params['m']
+        return np.any(ingate)<<3 | 1<<2 | (not np.all(ingate))<<1 | 1
+    return GD_intersect
+
+
+def _comp_isin_gt(gateIN:Gate, gateGT:Gate)->int:
+    """Comparison function for comparing ISIN_gate with LINEAR_GT_gate gates"""
+    return _comp_isin_lin(gateIN, gateGT, lambda inset, m: inset > m)
+
+
+def _comp_isin_geq(gateIN:Gate, gateGEQ:Gate)->int:
+    """Comparison function for comparing ISIN_gate with LINEAR_GEQ_gate gates"""
+    return _comp_isin_lin(gateIN, gateGEQ, lambda inset, m: inset >= m)
 
 
 register_PyCode(isin_gate)
 
 ISIN_gate = GateDef(isin_gate, tupledict(('inset', np.ndarray)), np.array([1,1]))
+GateDefinition.set_gate_comparison(ISIN_gate, ISIN_gate, _comp_isin_isin)
+GateDefinition.set_gate_comparison(ISIN_gate, LIN_GT_gate, _comp_isin_gt)
+GateDefinition.set_gate_comparison(ISIN_gate, LIN_GEQ_gate, _comp_isin_geq)
 
 
 def percentile_gte_gate(col:np.ndarray[np.number], *, percentile:float):
-    """
+    r"""
     Gate function for :attr:`PERCENTILE_GT_gate`
 
     Parameters
@@ -274,7 +350,7 @@ def percentile_gte_gate(col:np.ndarray[np.number], *, percentile:float):
 
     Returns
     -------
-    np.ndarray[np.bool_]
+    np.ndarray[np.bool\_]
         gate mask.
 
     """
@@ -285,7 +361,7 @@ register_PyCode(percentile_gte_gate)
 
 
 def percentile_gt_gate(col:np.ndarray[np.number], *, percentile:float):
-    """
+    r"""
     Gate function for :attr:`PERCENTILE_GT_gate`
 
     Parameters
@@ -297,7 +373,7 @@ def percentile_gt_gate(col:np.ndarray[np.number], *, percentile:float):
 
     Returns
     -------
-    np.ndarray[np.bool_]
+    np.ndarray[np.bool\_]
         gate mask.
 
     """
@@ -307,7 +383,8 @@ def percentile_gt_gate(col:np.ndarray[np.number], *, percentile:float):
 register_PyCode(percentile_gt_gate)
 
 
-def _normalize_percentile(param:dict[str,float])->dict:
+def _normalize_percentile(param:dict[str:float])->dict:
+    """Normalize function for percentile_XXX_gate GateDefs"""
     if 'percentile' not in param:
         param['percentile'] = 90.0
     if param['percentile'] <= 0.0 or param['percentile'] >= 100.0:
@@ -320,12 +397,91 @@ register_PyCode(_normalize_percentile)
 PERCENTILE_GTE_gate = GateDef(percentile_gte_gate, tupledict(('percentile',float)), atomic=False, normalize=_normalize_percentile)
 PERCENTILE_GT_gate = GateDef(percentile_gt_gate, tupledict(('percentile',float)), atomic=False, normalize=_normalize_percentile)
 
+
+def shift_mask(mask:np.ndarray[np.bool_], offset:int=1, fill:bool=False)->np.ndarray[np.bool_]:
+    r"""
+    Shift the values of a boolean mask by offset.
+
+    Parameters
+    ----------
+    mask : np.ndarray[np.bool\_]
+        boolean mask.
+    offset : int, optional
+        Number of indexes to offset mask. The default is 1.
+    fill : bool, optional
+        Value of mask in first or last offset indexes. The default is False.
+
+    Returns
+    -------
+    np.ndarray[np.bool\_]
+        Shifted mask.
+
+    """
+    out = np.empty(mask.size, dtype=np.bool_)
+    if offset < 0:
+        oslc = slice(None, offset)
+        islc = slice(-offset, None)
+        fslc = slice(offset,None)
+    else:
+        oslc = slice(None, -offset)
+        islc = slice(offset, None)
+        fslc = slice(None,offset)
+    out = np.empty(mask.shape, dtype=np.bool_)
+    out[oslc] = mask[islc]
+    out[fslc] = fill
+    return out
+
+
+def _validate_shift_mask(params):
+    """Check function for shift-type MappedGate"""
+    if params.offset == 0:
+        raise ValueError("shift_mask cannot have offset == 0 (this results in same result as mask_gate)")
+
+
+register_PyCode(shift_mask)
+register_PyCode(_validate_shift_mask)
+
+SHIFT_mapgate = MappedGateDef(shift_mask, tupledict(('offset', int), ('fill', bool)), _validate_shift_mask)
+
+
 ###############################################################################
 ################### Convenience functions for making gates  ###################
 ###############################################################################
-def make_gt_gate(column:Column, mn:float, outside_expand:bool=False)->GateGroup:
+_nan_exclude = np.array([np.nan])
+_nan_exclude.setflags(write=False)
+
+def make_exclude_nan(column:Column)->GateGroup:
     """
-    
+    Create a gate that excludes all rows that have NAN values for a given column.
+
+    Parameters
+    ----------
+    column : Column
+        Column of gate to be created.
+
+    Raises
+    ------
+    TypeError
+        Column cannot have NAN (is not a floating point column).
+
+    Returns
+    -------
+    GateGroup
+        Gate excluding rows with NANs of given column.
+
+    """
+    if not np.issubdtype(column._get_coldef().dtype, np.floating):
+        raise TypeError("Column excluding nan must ")
+    return GateGroup(_TT_tf, Gate(ISIN_gate, (column, ), _nan_exclude))
+
+
+_TT_andnn = np.array([[True, False,],[False,False]])
+_TT_andnn.setflags(write=False)
+
+
+def make_gt_gate(column:Column, mn:float, exclude_nan:bool=True, outside_expand:bool=False)->GateGroup:
+    """
+    Create a gate for all values of column greater than mn.
 
     Parameters
     ----------
@@ -333,6 +489,9 @@ def make_gt_gate(column:Column, mn:float, outside_expand:bool=False)->GateGroup:
         Column on which gate is based.
     mn : float
         minnimum value of gate (exclusive, ie greater than).
+    exclude_nan : bool, optional
+        Whether to exclude NAN values from gate.
+        The default is True
     outside_expand : bool, optional
         Whether gate should incldue rows outsid of parent_gate. 
         **Only for non-atomic columns**, ignored if column is atomic.
@@ -345,16 +504,22 @@ def make_gt_gate(column:Column, mn:float, outside_expand:bool=False)->GateGroup:
 
     """
     if column.atomic:
-        gate = Gate(LIN_GT_gate, column, dict(vec=np.array([1.0]), m=float(mn)))
+        gate = Gate(LIN_GT_gate, (column, ), dict(vec=np.array([1.0]), m=float(mn)))
     else:
-        gate =Gate(LIN_GT_gate, column, dict(vec=np.array([1.0]), m=float(mn)), 
+        gate =Gate(LIN_GT_gate, (column, ), dict(vec=np.array([1.0]), m=float(mn)), 
                    expand=outside_expand)
-    return GateGroup(_TT_ft, gate, title=f'{column.name()} > {mn}')
+    title = fr'{column.name()} \gt {mn}'
+    if np.issubdtype(column._get_coldef().dtype, np.floating) and not exclude_nan:
+        nexcl = Gate(ISIN_gate, (column, ), {'inset':_nan_exclude})
+        out = GateGroup(TT_subtract, gate, nexcl, title=title)
+    else:
+        out = GateGroup(_TT_ft, gate, title=title)
+    return out
 
     
-def make_geq_gate(column:Column, mn:float, outside_expand:bool=False)->GateGroup:
+def make_geq_gate(column:Column, mn:float, exclude_nan:bool=True, outside_expand:bool=False)->GateGroup:
     """
-    
+    Create a gate for all values of column greater than or equal to mn.
 
     Parameters
     ----------
@@ -362,6 +527,9 @@ def make_geq_gate(column:Column, mn:float, outside_expand:bool=False)->GateGroup
         Column on which gate is based.
     mn : float
         minnimum value of gate (inclusive, ie greater than or equal to).
+    exclude_nan : bool, optional
+        Whether to exclude NAN values from gate.
+        The default is True
     outside_expand : bool, optional
         Whether gate should incldue rows outsid of parent_gate. 
         **Only for non-atomic columns**, ignored if column is atomic.
@@ -374,16 +542,22 @@ def make_geq_gate(column:Column, mn:float, outside_expand:bool=False)->GateGroup
 
     """
     if column.atomic:
-        gate = Gate(LIN_GTE_gate, column, dict(vec=np.array([1.0]), m=float(mn)))
+        gate = Gate(LIN_GEQ_gate, (column, ), dict(vec=np.array([1.0]), m=float(mn)))
     else:
-        gate =Gate(LIN_GTE_gate, column, dict(vec=np.array([1.0]), m=float(mn)), 
+        gate =Gate(LIN_GEQ_gate, (column, ), dict(vec=np.array([1.0]), m=float(mn)), 
                    expand=outside_expand)
-    return GateGroup(_TT_ft, gate, title=f'{column.name()} >= {mn}')
+    title = fr'{column.name()} \geq {mn}'
+    if np.issubdtype(column._get_coldef().dtype, np.floating) and not exclude_nan:
+        nexcl = Gate(ISIN_gate, column, {'inset':_nan_exclude})
+        out = GateGroup(TT_subtract, gate, nexcl, title=title)
+    else:
+        out = GateGroup(_TT_ft, gate, title=title)
+    return out
 
 
-def make_lt_gate(column:Column, mx:float, outside_expand:bool=False)->GateGroup:
+def make_lt_gate(column:Column, mx:float, exclude_nan:bool=True, outside_expand:bool=False)->GateGroup:
     """
-    
+    Create a gate for all values of column less than mx.
 
     Parameters
     ----------
@@ -391,6 +565,9 @@ def make_lt_gate(column:Column, mx:float, outside_expand:bool=False)->GateGroup:
         Column on which gate is based.
     mx : float
         maximum value of column (exclusive, ie less than).
+    exclude_nan : bool, optional
+        Whether to exclude NAN values from gate.
+        The default is True
     outside_expand : bool, optional
         Whether gate should incldue rows outsid of parent_gate. 
         **Only for non-atomic columns**, ignored if column is atomic.
@@ -403,16 +580,22 @@ def make_lt_gate(column:Column, mx:float, outside_expand:bool=False)->GateGroup:
 
     """
     if column.atomic:
-        gate = Gate(LIN_GTE_gate, column, dict(vec=np.array([1.0]), m=float(mx)))
+        gate = Gate(LIN_GEQ_gate, column, dict(vec=np.array([1.0]), m=float(mx)))
     else:
-        gate = Gate(LIN_GTE_gate, column, dict(vec=np.array([1.0]), m=float(mx)), 
+        gate = Gate(LIN_GEQ_gate, column, dict(vec=np.array([1.0]), m=float(mx)), 
                     expand= not outside_expand)
-    return GateGroup(_TT_tf, gate, title=f'{column.name()} < {mx}')
+    title = fr'{column.name()} \lt {mx}'
+    if np.issubdtype(column._get_coldef().dtype, np.floating) and exclude_nan:
+        nexcl = Gate(ISIN_gate, (column, ), {'inset':_nan_exclude})
+        out = GateGroup(_TT_andnn, gate, nexcl, title=title)
+    else:
+        out = GateGroup(_TT_tf, gate, title=title)
+    return out
 
 
-def make_leq_gate(column:Column, mx:float, outside_expand:bool=False)->GateGroup:
+def make_leq_gate(column:Column, mx:float, exclude_nan:bool=True, outside_expand:bool=False)->GateGroup:
     """
-    Create a gate for column greater than mx.
+    Create a gate for all values of column less than or equal to mx.
 
     Parameters
     ----------
@@ -420,6 +603,9 @@ def make_leq_gate(column:Column, mx:float, outside_expand:bool=False)->GateGroup
         Column on which gate is based.
     mx : float
         maximum value of column (inclusive, ie less than or equal to).
+    exclude_nan : bool, optional
+        Whether to exclude NAN values from gate.
+        The default is True
     outside_expand : bool, optional
         Whether gate should incldue rows outsid of parent_gate. 
         **Only for non-atomic columns**, ignored if column is atomic.
@@ -436,7 +622,14 @@ def make_leq_gate(column:Column, mx:float, outside_expand:bool=False)->GateGroup
     else:
         gate = Gate(LIN_GT_gate, column, dict(vec=np.array([1.0]), m=float(mx)), 
                     expand= not outside_expand)
-    return GateGroup(_TT_tf, gate, title=f'{column.name()} <= {mx}')
+    title = fr'{column.name()} \leq {mx}'
+
+    if np.issubdtype(column._get_coldef().dtype, np.floating) and exclude_nan:
+        nexcl = Gate(ISIN_gate, (column, ), {'inset':_nan_exclude})
+        out = GateGroup(_TT_andnn, gate, nexcl, title=title)
+    else:
+        out = GateGroup(_TT_tf, gate, title=title)
+    return out
 
 
 def _rotation_matrix(theta:float)->np.ndarray[np.double]:
@@ -546,7 +739,7 @@ def make_ellipsoid_inclusive_gate(colx:Column, coly:Column,
 
     """
     params = _make_ellipsoid_gate(cx, cy, w, h, theta, radians)
-    return GateGroup.as_gategroup(Gate(ELLIPSOID_LTE_gate, (colx, coly), params))
+    return GateGroup.as_gategroup(Gate(ELLIPSOID_LEQ_gate, (colx, coly), params))
 
 
 def make_inv_ellipsoid_gate(colx:Column, coly:Column, cx:float=0, cy:float=0, w:float=1.0, h:float=1.0, rot=0.0, radians:bool=False)->GateGroup:
@@ -589,7 +782,7 @@ def make_inv_ellipsoid_gate(colx:Column, coly:Column, cx:float=0, cy:float=0, w:
 
     """
     params = _make_ellipsoid_gate(cx, cy, w, h, rot, radians)
-    return ~Gate(ELLIPSOID_LTE_gate, (colx, coly), params)
+    return ~Gate(ELLIPSOID_LEQ_gate, (colx, coly), params)
 
 
 def make_inv_ellipsoid_inclusive_gate(colx:Column, coly:Column, cx:float=0, cy:float=0, w:float=1.0, h:float=1.0, rot=0.0, radians:bool=False)->GateGroup:

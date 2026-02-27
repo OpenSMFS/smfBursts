@@ -4,14 +4,13 @@
 # Copyright (C) 2014 Antonino Ingargiola <tritemio@gmail.com>
 #
 """
-Utility functions
+Utility functions.
 """
 import weakref
-from warnings import warn
 from itertools import chain, product
 from collections.abc import Callable, Sequence, Iterator, Iterable, Hashable
 from textwrap import wrap
-from typing import ClassVar, Any, Union
+from typing import ClassVar, Any, Union, Literal
 from numbers import Integral, Number
 import math
 import warnings
@@ -20,7 +19,7 @@ import numpy as np
 import tables as tb
 
 
-IndexType = tuple[Union[int,slice,None],...]
+IndexType = tuple[int|slice|None,...]
 
 _nan = np.nan
 
@@ -103,7 +102,7 @@ def _eq(a, b):
             return all(_eq(aa, bb) for aa, bb in zip(a.ravel(), b.ravel()))
         if np.all(a == b):
             return True
-        return np.all(a == b | (np.isnan(a)&np.isnan(b)))
+        return np.all((a == b) | (np.isnan(a)&np.isnan(b)))
     if isinstance(a, Sequence) and not isinstance(a, str):
         if len(a) != len(b): return False
         return all(_eq(aa, bb) for aa, bb in zip(a, b))
@@ -111,25 +110,12 @@ def _eq(a, b):
 
 
 def _echo(arr:Any)->Any:
-    """
-    Simple function that returns the argument given, for use as dummy function.
-
-    Parameters
-    ----------
-    arr : Any
-        Any object.
-
-    Returns
-    -------
-    Any
-        argument given.
-
-    """
+    """Simple function that returns the argument given, for use as dummy function."""
     return arr
 
 
 def make_objectarray(arrs:np.ndarray)->np.ndarray[np.object_]:
-    """
+    r"""
     Convert any array into 1D object array.
 
     Parameters
@@ -139,7 +125,7 @@ def make_objectarray(arrs:np.ndarray)->np.ndarray[np.object_]:
 
     Returns
     -------
-    np.ndarray[np.object_]
+    np.ndarray[np.object\_]
         1D object type numpy array.
 
     """
@@ -185,22 +171,30 @@ def make_immutable(array:Union[np.ndarray,tuple,list,Hashable], copy:bool=False)
 
 
 def _iter_tbgroup_numeric(group:tb.Group, prefix:str)->Iterable[tb.Node]:
+    """
+    Iterate over groups labeled {prefix}{i} in HDF5 group, 
+    must start at 0, ends iteration at first number not present
+    (ie if number is skipped, iteration will end).
+    """
     i = 0
     while (g:=f'{prefix}{i}') in group:
         yield group[g]
         i += 1
 
+# dictionary of floating point value to prefix of SI prefixes, requires TEX
 _unit_prefixes_tex = {1e-30:'q', 1e-27:'r', 1e-24:'y', 1e-21:'z', 1e-18:'a', 1e-15:'f',
-                  1e-12:'p', 1e-9:'n', 1e-6:'\mu ', 1e-3:'m', 1e-2:'c', 1e-1:'d',
+                  1e-12:'p', 1e-9:'n', 1e-6:r'\mu ', 1e-3:'m', 1e-2:'c', 1e-1:'d',
                   1.0:'', 1e1:'da', 1e2:'h', 1e3:'k', 1e6:'M', 1e9:'G', 1e12:'T',
                   1e15:'P', 1e18:'E', 1e21:'Z', 1e24:'Y', 1e27:'R', 1e30:'Q', 
                   True:'', False:''}
 
+# dictionary of floating point value to prefix of SI prefixes, no r"\" characters
 _unit_prefixes_notex = _unit_prefixes_tex.copy()
 _unit_prefixes_notex[1e-6] = 'u'
 
 
 def get_unit_prefix(factor:float, tex:bool=True)->str:
+    """Get the expected SI unit-prefix based on rescale-factor"""
     if factor is True or factor is False:
         return ''
     factor = 10.0**factor if isinstance(factor, Integral) else factor
@@ -282,6 +276,7 @@ class tupledict(tuple):
     
     @classmethod
     def _verify_input(cls, value):
+        """check each key:value pair, and convert if necessary"""
         if len(value) != 2:
             raise ValueError("must be sequence of pairs of keys and values")
         k, v = value
@@ -299,12 +294,12 @@ class tupledict(tuple):
     
     @classmethod
     def from_order(cls, order:Sequence[str], *args:Any, defaults_:dict[str,Any]=None, **kwargs:Any)->"tupledict":
-        """
+        r"""
         Create a tupledict with keys in the order specified in the first argument.
         Can specify values either as positional arguments, which are assigned keys
         starting from the first key in the first argument. Kwargs can be used to
         specify values of specific keys, allowing out-of-order specification
-        of values. defaults_ kwarg can be used to specify default values of keys
+        of values. defaults\_ kwarg can be used to specify default values of keys
         not specified in either args or kwargs.
 
         Parameters
@@ -462,7 +457,7 @@ class MutDict(dict):
     has not changed since creation, and ``True`` if any operation that changes
     the key-value pairs has been performed.
     """
-    _orig:ImDict()
+    _orig:ImDict() #: Dictionary of original keys, used to compare when values are changed
     
     def __init__(self, *args, **kwargs):
         dict.__init__(self, *args, **kwargs)
@@ -473,17 +468,20 @@ class MutDict(dict):
 
     @property
     def added(self)->bool:
+        """Whether any values have been added to the dictionary after creation"""
         if len(self) > len(self._orig):
             return True
         return any(k not in self._orig for k in self.keys())
 
     @property
     def removed(self)->bool:
+        """Whether any values have been removed from dictionary after creation"""
         if len(self) < len(self._orig):
             return True
         return all(k not in self for k in self._orig.keys())
 
     def _check_mut(self)->bool:
+        """Check for any differences with original dictionary"""
         return any(self[k].mut if isinstance(self[k], MutDict) else not _eq(self[k], v) 
                    for k, v in self._orig.items())
 
@@ -493,7 +491,40 @@ class MutDict(dict):
         return self.added or self.removed or self._check_mut()
 
 
-def iter_funcinput(_slots:tuple[str], _defaults:ImDict[str:Callable], _required:frozenset[str], *args, **kwargs):
+def iter_funcinput(_slots:Sequence[str], _defaults:ImDict[str:Any|Callable[[],Any]], 
+                   _required:frozenset[str], *args, **kwargs)->Iterator[tuple[str,Any]]:
+    r"""
+    Iterator for parseing \*args, \*\*kwargs by the specification in _slots and _defaults.
+    _slots defines sequence of names of arguments, _defaults is dictonary of
+    default values, note that if a value in _defaults is callable, it is assumed
+    to be a "factory" function, ie it will be called with no argumnets, and the
+    return value is the value assigned to that argument.
+    Iterators over arguments, so further processing may take place.
+    
+    Parameters
+    ----------
+    _slots : Sequence[str]
+        Names of each function argument.
+    _defaults : ImDict[str:Any|Callable[[],Any]]
+        Dictionary of default values/factory functions.
+    _required : frozenset[str]
+        Arguments required to be set.
+    *args : Any
+        Args of function being interpreted.
+    **kwargs : Any
+        Kwargs of function being interpreted.
+
+    Raises
+    ------
+    TypeError
+        args/kwargs do not match.
+
+    Yields
+    ------
+    Iterator[tuple[str,Any]]
+        Tuple of (arg_name, arg_value)
+
+    """
     if len(args) > len(_slots):
         raise TypeError(f'too many arguments, maximum of {len(_slots)} allowed, got {len(args)}')
     if any((err:=key) for key in kwargs.keys() if key in _slots[:len(args)]):
@@ -513,6 +544,30 @@ def iter_funcinput(_slots:tuple[str], _defaults:ImDict[str:Callable], _required:
 
 
 def kwarg_like(slots:Sequence[str], seq:Sequence[Any])->dict[str, Any]:
+    """
+    Convert sequence of inputs, unpacking tupledicts, into dictionary, with keys
+    based on slots.
+
+    Parameters
+    ----------
+    slots : Sequence[str]
+        Strings used, and defining order of keys in output.
+    seq : Sequence[Any]
+        Sequence of values, if first is tupledict, unpack.
+
+    Raises
+    ------
+    ValueError
+        Bad input.
+    TypeError
+        Bad input.
+
+    Returns
+    -------
+    dict[str, Any]
+        Dict of seq converted to be as though it were kwargs.
+
+    """
     if isinstance(seq, (dict, tupledict)):
         if any((err:=key) not in slots for key in seq.keys()):
             raise ValueError(f"unrecognized keyword argument {err}")
@@ -595,16 +650,44 @@ class _DataLike:
         Yields
         ------
         Iterator[str]
-            DESCRIPTION.
+            Names of each key.
 
         """
         skip = _tuple_kwarg(skip)
         yield from (key for key in self.__slots__ if hasattr(self, key) if key not in skip)
     
     def values(self, skip:Union[None,str,tuple[str,...]]=None)->Iterator[Any]:
+        """
+        Iterate over values pairs in data.
+
+        Parameters
+        ----------
+        skip : Union[None,str,tuple[str,...]], optional
+            Keys to skip in iteration. The default is None.
+
+        Yields
+        ------
+        Iterator[Any]
+            Values in data.
+
+        """
         yield from (getattr(self, key) for key in self.keys(skip=skip))
     
     def items(self, skip:Union[None,str,tuple[str,...]]=None)->Iterator[tuple[str,Any]]:
+        """
+        Iterate over key:value pairs in data.
+
+        Parameters
+        ----------
+        skip : Union[None,str,tuple[str,...]], optional
+            Keys to skip in iteration. The default is None.
+
+        Yields
+        ------
+        Iterator[tuple[str,Any]]
+            (key value) pairs in data, first.
+
+        """
         yield from ((key, getattr(self, key)) for key in self.keys(skip=skip))
     
     def __repr__(self):
@@ -664,7 +747,8 @@ class HistData:
         return self._pdf
 
 
-def _ndarray_to_str(string:np.ndarray|bytes):
+def _ndarray_to_str(string:np.ndarray|bytes)->str:
+    """Convert byte-like array to string"""
     if isinstance(string, np.ndarray):
         string = np.atleast_1d(string)
         if string.size == 1:
@@ -679,11 +763,13 @@ def _ndarray_to_str(string:np.ndarray|bytes):
 ### Functions for working with nested dictionaries
 ##################################################
 def _nested_in(dct:dict, keys:tuple[Hashable,...])->bool:
+    """Check if keys is in dct, where dct is assumed to be a *nested* dictionary"""
     if keys[0] in dct:
         return True if len(keys) == 1 else _nested_in(dct[keys[0]], keys[1:])
     return False
 
 def _nested_get(dct:dict, keys:tuple, default:Any=None)->Any:
+    """Key keys from nested dictionary dct"""
     for k in keys:
         if k in dct:
             dct = dct[k]
@@ -692,6 +778,7 @@ def _nested_get(dct:dict, keys:tuple, default:Any=None)->Any:
     return dct
 
 def _nested_set(dct:dict, keys:tuple[Hashable,...], val:Any)->Any:
+    """Set keys to val in *nested* dictionary dct- will create super-nested dictionarys"""
     for key in keys[:-1]:
         if key not in dct:
             dct[key] = dict()
@@ -700,6 +787,7 @@ def _nested_set(dct:dict, keys:tuple[Hashable,...], val:Any)->Any:
     return val
 
 def _nested_pop(dct:dict, keys:tuple[Hashable,...], default:Any=None)->Any:
+    """Pop key from nested dictionary dct"""
     final = len(keys) - 1
     for i, k in enumerate(keys):
         if k in dct:
@@ -712,6 +800,7 @@ def _nested_pop(dct:dict, keys:tuple[Hashable,...], default:Any=None)->Any:
     return val
 
 def _inner_nested_items(dct:dict, outer:tuple[Hashable,...])->Iterator[tuple[Hashable,Any], bool, None]:
+    """Iterate over items (key, value pairs) of outer insided nested dictionary"""
     diter = iter(dct.items())
     for key, val in diter:
         if isinstance(val, dict):
@@ -722,8 +811,13 @@ def _inner_nested_items(dct:dict, outer:tuple[Hashable,...])->Iterator[tuple[Has
                 break
 
 def _nested_items(dct:dict)->Iterator[tuple[Hashable,Any], bool, None]:
+    """Iterator over key value pairs in nested dictoinary"""
     yield from _inner_nested_items(dct, tuple())
 
+
+def _indent(val:str, indent:int)->str:
+    """Indent a string"""
+    return ' '*indent+('\n'+' '*indent).join(val.split('\n'))
 
 ########################
 ### Additional functions
@@ -1058,6 +1152,7 @@ def _dim_comp(s:int, d:int|slice)->bool:
 
 
 def _dimscompare(shape:tuple[int], dims:tuple[Union[int,slice]])->bool:
+    """Determine if specification of dims (indexes) compatible with array of shape shape"""
     nellipsis = sum(d is Ellipsis for d in dims)
     if nellipsis > 1:
         raise IndexError("an index can only have a single ellipsis ('...')")
@@ -1081,27 +1176,36 @@ def _dimscompare(shape:tuple[int], dims:tuple[Union[int,slice]])->bool:
 
 
 def _dim_mask_iter(index:np.ndarray[np.bool_], shape:tuple[int])->tuple[int,tuple[int,...],Iterator]:
+    """
+    _dim_iter inner function for when index is boolean mask
+    returns size, shape, [iterator over mask]
+    """
     if index.size!= np.prod(shape):
         raise ValueError("incompatible shape")
     if index.ndim != 1 and index.shape != shape:
         raise ValueError("incompatible shape")
-    index.reshape(shape)
     size = index.sum()
     return size, (size,), (idx for idx in product(*(range(s) for s in shape)) if index[idx])
 
 
 def _n_to_index(n:int, shape:tuple[int,...])->tuple[int,...]:
+    """convert int (1D position in array), to tuple[int,...] index of array with shape shape """
     strides = np.cumprod((shape+(1,))[::-1])[::-1]
     return tuple((n % strides[:-1]) // strides[1:])
 
 
 def _dim_iter_tuple(index:IndexType, shape:tuple[int,...])->tuple[int,tuple[int,...],Iterator]:
+    """_dim_iter for index when index is tuple, returns size, shape, [iterator indexe(s)]"""
     N = np.arange(np.prod(shape)).reshape(shape)
     Ni = N[index]
     return Ni.size, Ni.shape, (_n_to_index(i) for i in Ni.reshape(-1))
 
 
 def _dim_iter(index:IndexType, shape:tuple[int,...])->tuple[int,tuple[int,...],Iterator]:
+    """
+    Create size, shape, [iterator over indexes] 
+    of an index (multiple forms), [shape of array]
+    """
     if isinstance(index,np.ndarray) and index.dtype == np.bool_:
         return _dim_mask_iter(index, shape)
     if not isinstance(index, tuple):
@@ -1110,7 +1214,10 @@ def _dim_iter(index:IndexType, shape:tuple[int,...])->tuple[int,tuple[int,...],I
 
 
 class _FileFinalizer:
-    _files = dict()
+    """
+    Internal class for managing open files. When owner is deleted, will close file.
+    """
+    _files:ClassVar[dict[Hashable:"_FileFinalizer"]] = dict()
     def __new__(cls, file:tb.File, owner:int):
         if not file.isopen:
             return
@@ -1127,9 +1234,22 @@ class _FileFinalizer:
 
     @property
     def file(self)->tb.File:
+        """tb.File being managed"""
         return self._file
 
     def finalize_owner(self, weakref:weakref.ReferenceType=None, strict:bool=False)->None:
+        """
+        Close owner if no other references to owner exist.
+
+        Parameters
+        ----------
+        weakref : weakref.ReferenceType, optional
+            DESCRIPTION. The default is None.
+        strict : bool, optional
+            If True, close file regardless of other open references.
+            The default is False.
+
+        """
         if weakref is not None and weakref() is not None:
             self._finalizers.pop(weakref(), None)
         if not self._finalizers or strict:
@@ -1141,12 +1261,15 @@ class _FileFinalizer:
 
 
 class _GroupFuture:
-    _groupfuture:Union[None,Callable[[],tb.Group],tb.Group]
+    """
+    Internal class for creating a "promise" of a tables tb.Group
+    """
+    _groupfuture:None|Callable[[],tb.Group]|tb.Group
     _parent:weakref.ref
-    _filefuture:Union[None,tb.File]
+    _filefuture:None|tb.File
     _callback:list[Callable[["_GroupFuture"],None]]
 
-    def __init__(self, group:Union[None,Callable[[],tb.Group],tb.Group], 
+    def __init__(self, group:None|Callable[[],tb.Group]|tb.Group, 
                  parent:Any=None, callback:Callable[["_GroupFuture"],None]=None,
                  file:tb.File=None):
         self._parent = None if parent is None else weakref.ref(parent)
@@ -1162,7 +1285,27 @@ class _GroupFuture:
             callback(self, group)
 
     @classmethod
-    def create_dependant(cls, group:Callable, parent:"_GroupFuture", callback=None)->"_GroupFuture":
+    def create_dependant(cls, group:None|Callable[[],tb.Group]|tb.Group, parent:"_GroupFuture", 
+                         callback:None|Callable[["_GroupFuture"],None]=None)->"_GroupFuture":
+        """
+        Create a new _GroupFuture that is a subgroup of parent.
+
+        Parameters
+        ----------
+        group : None|Callable[[],tb.Group]|tb.Group
+            Group or Callable creating group.
+        parent : _GroupFuture
+            GroupFuture on which new future will be dependant.
+        callback : Callable[["_GroupFuture"],None], optional
+            Callback when group is created,, will take parent as only argument 
+            when called. The default is None.
+
+        Returns
+        -------
+        _GroupFuture
+            Newly created GroupFuture, whic.
+
+        """
         obj = object.__new__(cls)
         obj._parent = parent._parent
         obj._filefuture = parent._filefuture
@@ -1177,24 +1320,42 @@ class _GroupFuture:
         return obj
 
     @classmethod
-    def _check_groupfuture(cls, groupfuture:Union[None,Callable[[],tb.Group],tb.Group])->Union[None,Callable[[],tb.Group],tb.Group]:
+    def _check_groupfuture(cls, groupfuture:None|Callable[[],tb.Group]|tb.Group)->None|Callable[[],tb.Group]|tb.Group:
+        """
+        Internal funciton, used to verify input to a create method is a 
+        valid type from which to crate a GroupFuture.
+        """
         if groupfuture is None or callable(groupfuture) or isinstance(groupfuture, tb.Group):
             return groupfuture
         raise TypeError(f"invalid type ({type(groupfuture).__name__} for group future)")
     
     @classmethod
     def _check_filefuture(cls, filefuture:Union[None,tb.File])->Union[None,tb.File]:
+        """Internal function to ensure filefuture argument is valid filefuture"""
         if filefuture is None or isinstance(filefuture, tb.File):
             return filefuture
         raise TypeError("filefuture must be None or table.File")
 
     def _verify_exists(self):
+        """
+        Internal function, checks all necessary compenents exists, 
+        if not, reset _groupfuture attr to None
+        """
         if self._parent is not None and self._parent() is None:
             self._groupfuture = None
         if self._filefuture is not None and not self._filefuture.isopen:
             self._groupfuture = None
         
     def _create(self)->tb.Group:
+        """
+        If hdf5 group has not already been created, create it, the return HDF5 Group.
+
+        Returns
+        -------
+        tb.Group
+            HDF5 group for GroupFuture.
+
+        """
         self._verify_exists()
         if self._groupfuture is None:
             raise AttributeError("no group exists for interaction")
@@ -1215,26 +1376,34 @@ class _GroupFuture:
 
     @property
     def _group(self)->tb.Group:
+        """HDF5 Group, accessing this attribute will create the group if it is not yet created"""
         return self._create()
 
     @property
     def _creatable(self)->bool:
+        """
+        Whether the group has been **or can be** be created- 
+        if not linked to HDF5 file, returns False
+        """
         self._verify_exists()
         return self._groupfuture is not None
 
     @property
     def _created(self)->bool:
+        """Whether the group has already been created"""
         self._verify_exists()
         return isinstance(self._groupfuture, tb.Group)
 
     @property
-    def _groupcurrent(self)->Union[None,tb.Group]:
+    def _groupcurrent(self)->None|tb.Group:
+        """'Current' state of group: None if group is not created, else the group"""
         if self._created:
             return self._groupfuture
         return None
 
     @property
-    def _file(self)->Union[None,tb.File]:
+    def _file(self)->None|tb.File:
+        """tb.File of groupfuture, will create if it does nto already exist"""
         self._create()    
         return self._filefuture
 
@@ -1256,10 +1425,56 @@ class _GroupFuture:
             return self._groupfuture[key]
         raise KeyError(key)
 
-    def _create_group(self, name:str, **kwargs):
+    def _create_group(self, name:str, **kwargs)->tb.Group:
+        """
+        Create a group inside GroupFuture._group with name name. Kwargs passed
+        to tb.File.create_group
+
+        Parameters
+        ----------
+        name : str
+            Name of group to create.
+        **kwargs : Any
+            Kwargs passed to tb.File.create_group.
+
+        Returns
+        -------
+        tb.Group
+            Newly created HDF5 group.
+
+        """
         return self._group._v_file.create_group(self._group, name, **kwargs)
 
-    def _create_array(self, name:str, val:Any, arrtp='a', **kwargs):
+    def _create_array(self, name:str, val:Any, arrtp:Literal['a','c','e']='a', **kwargs)->tb.Array:
+        """
+        Create array within GroupFuture._group with name name and set to val.
+        arrtp sets type of array created, 
+        kwargs passed to relevant create_arrray method
+
+
+        Parameters
+        ----------
+        name : str
+            Name of new HDF5 array.
+        val : Any
+            Array to write to HDF5 file.
+        arrtp : Literal['a','c','e'], optional
+            Type of array created. 
+            
+            - 'a': standard array, '. 
+            - 'c': carray
+            - 'e': earray
+            
+            The default is 'a'.
+        **kwargs : Any
+            kwargs passed to create_[c/e]array.
+
+        Returns
+        -------
+        tb.Array
+            HDF5 array object just created.
+
+        """
         if arrtp == 'a':
             return self._group._v_file.create_array(self._group, name, val, **kwargs)
         if arrtp == 'c':
@@ -1268,6 +1483,25 @@ class _GroupFuture:
             return self._group._v_file.create_earray(self._group, name, obj=val, **kwargs)
     
     def _create_groupfuture(self, name:str, postinit:Callable[[tb.Group],None]=None, **kwargs)->"_GroupFuture":
+        """
+        Create a _GroupFuture under current group.
+
+        Parameters
+        ----------
+        name : str
+            Name of sub-group.
+        postinit : Callable[[tb.Group],None], optional
+            Function called after group creation, takes 1 argument: the HDF5 group. 
+            The default is None.
+        **kwargs : Any
+            Passed to tb.File.create_group upon creation.
+
+        Returns
+        -------
+        _GroupFuture
+            Group future for new group.
+
+        """
         if not self._creatable:
             return type(self).create_dependant(None, self)
         if name in self:
@@ -1286,7 +1520,26 @@ class _GroupFuture:
         self._callback.append(lambda g: out.create() if name in self else None)
         return out
 
-    def _create_arrayfuture(self, name:str, val:Any, **kwargs)->Union[None,tb.Array,Callable[[],tb.Array]]:
+    def _create_arrayfuture(self, name:str, val:Any, **kwargs)->None|tb.Array|Callable[[],tb.Array]:
+        """
+        Create array in _GroupFuture, if group not created, return Callable to create.
+
+        Parameters
+        ----------
+        name : str
+            Name of array to be created.
+        val : Any
+            Array to write to disk, when array is created.
+        **kwargs : Any
+            Kwargs passed to _GroupFuture._create_array.
+
+        Returns
+        -------
+        None|tb.Array|Callable[[],tb.Array]
+            None if not creatable, if created, return HDF5 array, if creatable
+            return Callable that when called creates array and return HDF5 array.
+
+        """
         if not self._creatable:
             return None
         if name in self:
@@ -1296,9 +1549,33 @@ class _GroupFuture:
         return lambda : self._create_array(name, val, **kwargs)
     
     def _assign_parent(self, parent:Any)->None:
+        """
+        Set parent of _GroupFuture.
+
+        Parameters
+        ----------
+        parent : Any
+            Object that when deleted also renders _GroupFuture uncreatedable (parent).
+
+        """
         self._parent = weakref.ref(parent)
     
-    def _add_callback(self, callback:Callable[["_GroupFuture"],tb.Group])->None:
+    def _add_callback(self, callback:Callable[["_GroupFuture"],None])->None:
+        """
+        Add function that is called when group is created. 
+        Used primarily to set finalizer.
+
+        Parameters
+        ----------
+        callback : Callable[["_GroupFuture"],None]
+            Function, called after group is created, takes the GroupFuture as only argument.
+
+        Raises
+        ------
+        TypeError
+            Bad calback.
+
+        """
         self._verify_exists()
         if not callable(callback):
             raise TypeError("callack must be callable")
@@ -1309,7 +1586,21 @@ class _GroupFuture:
 GroupArg = Union[None,tb.Group]        
 GroupFuture = Union[None,Callable[[],tb.Group],tb.Group,_GroupFuture]
 
-def weakref_alive_test(ref:weakref.ReferenceType)->bool:
+def weakref_alive_test(ref:None|weakref.ReferenceType)->bool:
+    """
+    ref must be None or weakreference object, test if reference is alive, None->False
+
+    Parameters
+    ----------
+    ref : None | weakref.ReferenceType
+        Weak-reference to test if allive.
+
+    Returns
+    -------
+    bool
+        Whether references is alive.
+
+    """
     if ref is None:
         return False
     return ref() is not None
@@ -1362,29 +1653,3 @@ class _fnumba:
 
 
 fnumba = _fnumba()
-
-
-######################
-# Deprecated functions
-######################
-def selection_mask(arr, values):
-    """
-    DEPRECATED: replace with numpy isin function
-    Return a boolean mask, True when `arr` is one element of `values`.
-
-    This function generalizes the comparison `arr == values`
-    where `values` can be a scalar or a sequence.
-    If a sequence, the returned mask is True each time `arr` has an element
-    in `values`.
-
-    Arguments:
-        arr (array): input array for which a mask is computed.
-        values (scalar or sequence): one or more values to be selected in
-            `arr`.
-    
-    Returns:
-        Boolean mask same size as `arr`. True where `arr` has an element 
-        in `values`.
-    """
-    warn(DeprecationWarning("use numpy isin instead"))
-    return np.isin(arr, values)

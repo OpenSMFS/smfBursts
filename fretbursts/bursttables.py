@@ -9,11 +9,12 @@ sinlge or multi-channel burst search, and child-tables to compute burst-based
 parameters.
 """
 import os
-from typing import Union, Any, ClassVar
+from typing import Any, ClassVar
 from collections.abc import Iterator, Sequence, Callable
 from functools import partial
 from warnings import warn
 from itertools import chain, repeat, permutations
+from numbers import Real
 
 import numpy as np
 
@@ -24,12 +25,15 @@ from .datamodel.immutabledata import (
                                       )
 from .datamodel.tables import ParamDef, ParentDef, ColumnDef, Param, Column, as_paramdict
 from .datamodel.citations import cite, add_citation
-from .photondata import (PhotonData, PhotonTable, BasePhotonTable, ChildPhotonTable, BasePhotonTableLike,
-                         basetimecoldefs, _normalize_column_startstop, _normalize_ph_sel,
-                         _title_sels, _title_startstop_append, _title_unit_append, _pol_ps,
-                         TV_str_start, TV_str_stop, make_base_column_defs)
+from .photondata import (
+    PhotonData, PhotonTable, BasePhotonTable, ChildPhotonTable, BasePhotonTableLike, 
+    _normalize_column_startstop, _normalize_ph_sel, 
+    _title_sels, _title_startstop_append, _title_unit_append, _pol_ps,
+    TV_str_start, TV_str_stop, make_base_column_defs,
+    ColKeyStart, ColKeyStop
+    )
 from .background import BG
-from .ph_sel import PhSel, DetDef, TV_PhSel, sort_phsels, _phsel_all
+from .ph_sel import PhSel, DetDef, TV_PhSel, sort_phsels, phsel_all
 from .poisson_threshold import find_optimal_T_bga
 
 import fretbursts.cfuncs as fbc
@@ -39,51 +43,67 @@ _alloc_size:int = 512
 
 
 def _get_nph_title(col:Column, name:str, include_unit:bool, origin:PhotonData)->str:
+    """Sub-function to format title of nph-like columns, with "core" name of ``name`` """
     title = _title_sels('_{bg}n', origin, col.keytup[0])[0]
     title = _title_startstop_append(title, col.keytup[1], col.keytup[2])
     title = _title_unit_append(title, 'cnts', include_unit)
     return f'${title}$'
 
 
-def _calc_brightness(table:PhotonTable, base:BasePhotonTable, nph_name:str, phsel:PhSel, starttype:str, stoptype:str)->np.ndarray[np.double]:
+def _calc_brightness(table:PhotonTable, base:BasePhotonTable, nph_name:str, phsel:PhSel, 
+                     starttype:ColKeyStart, stoptype:ColKeyStop)->np.ndarray[np.double]:
+    """
+    Brightness calcualtion function, table and base are Tables for getting approprite column,
+    nph_name is name of nph_column, broadcasts starttype and stoptype so consistent.
+    """
     return table[nph_name, phsel, starttype, stoptype] / base['dur', starttype, stoptype]
 
 
 def _get_brightness_title(col:Column, name:str, include_unit:bool, origin:PhotonData)->str:
+    """Getter function for brightness title"""
     title = _title_sels(name, origin, col.keytup[0])[0]
     title = _title_startstop_append(title, col.keytup[1], col.keytup[2])
     title = _title_unit_append(title, 'cnts s^{-1}', include_unit)
     return f'${title}$'
 
 
-def _iter_ratio(table:PhotonTable, nph_name:str, phsel_num:PhSel, phsel_dem:PhSel, starttype:str, stoptype:str):
+def _iter_ratio(table:PhotonTable, nph_name:str, phsel_num:PhSel, phsel_dem:PhSel, 
+                starttype:ColKeyStart, stoptype:ColKeyStop)->float:
+    """General iterator function for ratio_[]"""
     for n, d in zip(table.iter_column(nph_name, phsel_num, phsel_dem, starttype, stoptype),
                     table.iter_column(nph_name, phsel_num, phsel_dem, starttype, stoptype)):
         yield n / d
 
 def _calc_ratio(table:PhotonTable, nph_name:str, phsel_num:PhSel, phsel_dem:PhSel, starttype:str, stoptype:str):
+    """General getter function for ratio_[]"""
     return table[nph_name, phsel_num, starttype, stoptype] / table[nph_name, phsel_dem, starttype, stoptype]
 
 
 def _get_ratio_title(col:Column, name:str, include_unit:bool, origin:PhotonData)->str:
+    """General title getter function for ratio_[]"""
     title = '%s/%s' %  _title_sels(name, origin, *col.keytup[:2])
     title = _title_startstop_append(title, col.keytup[2], col.keytup[3])
     return f'${title}$'
 
 
-def _iter_anisotropy(table:PhotonTable, nph_name:str, phsel_p:PhSel, phsel_s:PhSel, starttype:str, stoptype:str):
+def _iter_anisotropy(table:PhotonTable, nph_name:str, phsel_p:PhSel, phsel_s:PhSel, 
+                     starttype:ColKeyStart, stoptype:ColKeyStop)->np.ndarray[np.double]:
+    """General iterator function for anisotropy_[]"""
     for p, s in zip(table.iter_column(nph_name, phsel_p, starttype, stoptype),
                     table.iter_column(nph_name, phsel_p, starttype, stoptype)):
         return (p-s)/(p+2*s)
 
 
-def _calc_anisotropy(table:PhotonTable, nph_name:str, phsel_p:PhSel, phsel_s:PhSel, starttype:str, stoptype:str):
+def _calc_anisotropy(table:PhotonTable, nph_name:str, phsel_p:PhSel, phsel_s:PhSel, 
+                     starttype:ColKeyStart, stoptype:ColKeyStop):
+    """General igetter function for anisotropy_[]"""
     p = table[nph_name, phsel_p, starttype, stoptype]
     s = table[nph_name, phsel_s, starttype, stoptype]
     return (p-s)/(p+2*s)
 
 
 def _get_anisotropy_title(col:Column, name:str, include_unit:bool=False, origin:PhotonData=None)->str:
+    """General title getter for anisotropy_[] column"""
     kw = {'name':name}
     par, perp, start, stop = col.keytup
     fuse = par | perp
@@ -103,63 +123,65 @@ def _get_anisotropy_title(col:Column, name:str, include_unit:bool=False, origin:
 
 
 class Bursts(BasePhotonTable):
-    """
+    r"""
     Table of bursts, uses sliding window burst search on arbitrary number of
     streams, and joins based on arbitrary truthatble.
     
     Params
     ------
-    streams : tuple[PhSel,...]
-        tuple of :class:`fretbursts.ph_sel.PhSel` objects, 1 per burst search.
-        Can specify single PhSel and will automatically convert to 1-tuple.
-    m : int | np.ndarray[np.int64]
-        size of sliding window burst search(s). Must match size of streams.
-        If specified as int, will automatically convert to streams size.
-        Default is 10
-    F : float | np.ndarray[np.float64]
-        Threshold for burst-search (F*bg). Like `m`, match size of streams,
-        and autmatically converted to correct size repeating array of value.
-        Default is 6.0.
-    c : float | np.ndarray[np.float64]
-        Correction factor used in the rate vs time-lags relation. Like `m`,
-        must match size of streams, if specified as float, will automatically
-        to correct size repeating array of value. Default is -1.0.
-    truthtable : np.ndarray[np.bool_]
-        `(2,)*len(streams)` shape boolean array specifying under which combinations
-        of in-burst per stream to consider as part of actual burst.
-        Default to 'and-gate' ie only when all streams are in-burst is the system
-        considered in-burst
-    fuse : float
-        If separation between bursts in burst-search-gate is less than `fuse`
-        (in seconds), merge bursts into one. If -1.0 no merge operation is performed,
-        Therefore overlapping bursts are possible, if 0.0 overlapping bursts are
-        merged, but separation between non-overlapping burts can be 0.
-        Default is 0.0
-    asP : np.ndarray[bool_]
-        If ``True`` threshold for burst detection (`F`) expressed as a
-        probability that a detected bursts is not due to a Poisson
-        background. Since background process is usually non-Poissonian, 
-        setting asP to True is discourange. 
-        Like `m`, must be same size as `streams`, and if specified as bool, 
-        will automatically be converted to correct size array of all specified
-        value. Default is False.
+        streams : tuple[PhSel,...]
+            tuple of :class:`fretbursts.ph_sel.PhSel` objects, 1 per burst search.
+            Can specify single PhSel and will automatically convert to 1-tuple.
+        m : int | np.ndarray[np.int64]
+            size of sliding window burst search(s). Must match size of streams.
+            If specified as int, will automatically convert to streams size.
+            Default is 10
+        F : float | np.ndarray[np.float64]
+            Threshold for burst-search (F*bg). Like `m`, match size of streams,
+            and autmatically converted to correct size repeating array of value.
+            Default is 6.0.
+        c : float | np.ndarray[np.float64]
+            Correction factor used in the rate vs time-lags relation. Like `m`,
+            must match size of streams, if specified as float, will automatically
+            to correct size repeating array of value. Default is -1.0.
+        truthtable : np.ndarray[np.bool\_]
+            `(2,)*len(streams)` shape boolean array specifying under which combinations
+            of in-burst per stream to consider as part of actual burst.
+            Default to 'and-gate' ie only when all streams are in-burst is the system
+            considered in-burst
+        fuse : float
+            If separation between bursts in burst-search-gate is less than `fuse`
+            (in seconds), merge bursts into one. If -1.0 no merge operation is performed,
+            Therefore overlapping bursts are possible, if 0.0 overlapping bursts are
+            merged, but separation between non-overlapping burts can be 0.
+            Default is 0.0
+        asP : np.ndarray[np.bool\_]
+            If ``True`` threshold for burst detection (`F`) expressed as a
+            probability that a detected bursts is not due to a Poisson
+            background. Since background process is usually non-Poissonian, 
+            setting asP to True is discourange. 
+            Like `m`, must be same size as `streams`, and if specified as bool, 
+            will automatically be converted to correct size array of all specified
+            value. Default is False.
     
     Parents
     -------
-    bg : tuple[Param[BG],...]
-        Background computation to use, must be same length as `streams`, and like
-        `m` if specified as single, automatically expanded to correct size array
-        of same BG.
+        bg : tuple[Param[BG],...]
+            Background computation to use, must be same length as `streams`, and like
+            `m` if specified as single, automatically expanded to correct size array
+            of same BG.
     
     Columns
     -------
     Uses :class:`fretbursts.photondata.BasePhotonTable` columns.
-    See `basephotoncolumns`_ for full list of columns.
+    See :any:`basephotoncolumns` for full list of columns.
+    
     """
     row_name:ClassVar[str] = "Bursts"
     origin: PhotonData
+    #: :meta private:
     param_defs = (
-        ParamDef('streams', TV_tuple(typedefs=TV_PhSel), default=(_phsel_all,)),
+        ParamDef('streams', TV_tuple(typedefs=TV_PhSel), default=(phsel_all,)),
         ParamDef("m", TV_ndarray(mn=2, dtype=np.dtype('<i8'), dims=arr_slc[:])),
         ParamDef("F", TV_ndarray(mn=0.0, dtype=np.dtype('<f8'), dims=arr_slc[:])),
         ParamDef("c", TV_ndarray(dtype=np.dtype('<f8'), dims=arr_slc[:])),
@@ -169,9 +191,11 @@ class Bursts(BasePhotonTable):
         # -1.0 no fuse in burst search, no fuse afterwards
         # only fuse in bursts search (equivalend to burst fuse 0)
                   )
+    #: :meta private:
     parent_defs = (
         ParentDef('bg', BG, is_base=False, size_func='_param_nstreams'), 
                    )
+    #: :meta private:
     column_defs = make_base_column_defs()
     # column_defs = (
     #     ColumnDef('start', tuple(), 0, 'all', dtype=np.int64, title='start', unit='clk_p'), 
@@ -226,6 +250,7 @@ class Bursts(BasePhotonTable):
 
     @classmethod
     def _cast_param_array(cls, params:dict, nchan:int, name:str, default:Any, dtype:np.dtype)->np.ndarray:
+        """Caster function to coercy array in param to correct dtype and shape"""
         arr = np.atleast_1d(params.get(name, default)).astype(dtype)
         if arr.size == 1:
             return np.repeat(arr, nchan)
@@ -234,10 +259,11 @@ class Bursts(BasePhotonTable):
         raise ValueError(f"{name} has {arr.size} elements, but {nchan} streams specified")
 
     @classmethod
-    def param_preprocess(cls, params:Union[Sequence[tuple[str,Any]],tupledict], parents:dict[str,Param])->tuple[dict, dict]:
+    def param_preprocess(cls, params:Sequence[tuple[str,Any]]|tupledict, parents:dict[str:Param])->tuple[dict, dict]:
+        """Normalize params, relicating arrays, filling defaults etc for burst search"""
         params = as_paramdict(params, tuple(pdef.name for pdef in cls.param_defs))
         # Step 1 of processing burst param: determine and sort number of streams
-        streams = params.get('streams', _phsel_all)
+        streams = params.get('streams', phsel_all)
         streams = (streams, ) if isinstance(streams, PhSel) else streams
         if 'bg' not in parents:
             raise ValueError("must specify bg in parents")
@@ -290,6 +316,7 @@ class Bursts(BasePhotonTable):
         nchan = m.size
         streams, order = sort_phsels(detdef, streams, return_index=True) # ensure canonical order
         truthtable = np.moveaxis(truthtable, order, np.arange(nchan))
+        # Final filling of params keys
         params['streams'] = streams
         params['m'] = m[order]
         params['F'] = F[order]
@@ -301,6 +328,10 @@ class Bursts(BasePhotonTable):
 
     @classmethod
     def validate_param(cls, param:Param)->None:
+        """
+        Check param is valid Bursts Param, used almost exclusively internally.
+        User will rarely use this method :meta private:
+        """
         nchan = len(param.params['streams'])
         if nchan != param.params['m'].size:
             raise ValueError(f"size of m must be {nchan}")
@@ -317,66 +348,76 @@ class Bursts(BasePhotonTable):
 
     @classmethod
     def _param_nstreams(cls, params:tupledict)->int:
+        """Size func to set numbr of BG parents"""
         return len(params['streams'])
 
     @classmethod
     def _detdef(cls, param:Param)->DetDef:
+        """Determine :class:`DetDef` of :class:`Param` based on Bursts"""
         return param.parents['bg'][0].tp._detdef(param.parents['bg'][0])
 
 
 class NphBG(ChildPhotonTable):
-    """
-    Table for background corrected photon counts **WITHOUT correction factors.**
+    r"""
+    Table for background corrected photon counts.
+    No corrections for cross-talk and/or detection efficiencies.
     
     Params
     ------
-    single : bool
-        If true, compute only single streams, colums of compund PhSel computed
-        as sum of streams.
+        single : bool
+            If true, compute only single streams, colums of compund PhSel computed
+            as sum of streams.
     
     Parents
-    base : BasePhotonTable
-        Usually a :class:`Burst`, the time ranges over which rows are computed
-    bg : BG
-        The background counts to use.
-    
+    -------
+        base : Param[BasePhotonTable]
+            Usually a :class:`Burst`, the time ranges over which rows are computed
+        bg : Param[BG]
+            The background counts to use.
+     
     Columns
     -------
-    nph_bg : (ph_sel:Ph_sel, starttype:str, stoptype:str)
-        Background adjusted photon counts in ph_sel, starttype and stoptype
-        define what start/stop values to use for computing burst duration and
-        therefore background photon counts
-    sbr : (ph_sel:PhSel, starttype:str, stoptype:str)
-        signal to background ratio, nph_raw / bg counts
-    brightness_bg : (ph_sel:PhSel, starttype:str, stoptype:str)
-        counts per second in ph_sel, with background rate subtracted
-    ratio_bg : (num_ph_sel:Ph_sel, dem_ph_sel:Ph_sel, starttype:str, stoptype:str)
-        ratio of num_ph_sel to dem_ph_sel background adjusted counts
-   E_bg : (starttype:str, stoptype:str)
-       Convenience column returns presumed FRET efficiency
-       Remaped column of ratio_bg, give ratio of PhSel('0ex1em') to PhSel('0ex')
-   S_pr : (starttype:str, stoptype:str)
-       Convenience column return presumed Stoichiometry
-       Remaped column of ratio_bg, give ratio of PhSel('1ex1em') to 
-       PhSel('0ex_1ex1em')     
+        nph_bg : (ph_sel:Ph_sel, starttype:str, stoptype:str)
+            Background adjusted photon counts in ph_sel, starttype and stoptype
+            define what start/stop values to use for computing burst duration and
+            therefore background photon counts
+        sbr : (ph_sel:PhSel, starttype:{'istarttime', 'start'}, stoptype:{'istoptime', 'stop'})
+            signal to background ratio, nph_raw / bg counts
+        brightness_bg : (ph_sel:PhSel, starttype:{'istarttime', 'start'}, stoptype:{'istoptime', 'stop'})
+            counts per second in ph_sel, with background rate subtracted
+        ratio_bg : (num_ph_sel:Ph_sel, dem_ph_sel:Ph_sel, starttype:{'istarttime', 'start'}, stoptype:{'istoptime', 'stop'})
+            ratio of num_ph_sel to dem_ph_sel background adjusted counts.
+    
+    Remapped Columns
+    ----------------
+        E_bg : (starttype:{'istarttime', 'start'}, stoptype:{'istoptime', 'stop'})
+            Convenience column returns presumed FRET efficiency
+            Remaped column of ratio_bg, give ratio of PhSel('0ex1em') to PhSel('0ex')
+        S_bg : (starttype:{'istarttime', 'start'}, stoptype:{'istoptime', 'stop'})
+            Convenience column return presumed Stoichiometry
+            Remaped column of ratio_bg, give ratio of PhSel('1ex1em') to 
+            PhSel('0ex_1ex1em')     
     
     """
+    #: :meta private:
     param_defs = (
         ParamDef('single', TV_bool, default=True),
                   )
+    #: :meta private:
     parent_defs = (
         ParentDef('base', BasePhotonTableLike, is_base=True),
         ParentDef('bg', BG, is_base=False),
                    )
+    #: :meta private:
     column_defs = (
         ColumnDef('nph_bg', (PhSel,TV_str_start, TV_str_stop), 0, 'some', 
                   get_func='_get_nph_bg', iter_func='_iter_nph_bg',
-                  norm_func='_normalizecolumn_nph_bg', title_func='_get_nph_bg_title',
+                  norm_func='_normalizecolumn_nph_bg_sbr', title_func='_get_nph_bg_title',
                   unit='cnts s^{-1}', index_unit='cnts s-1', title_is_tex=True),
-        # TODO: write title function for sbr
-        ColumnDef('sbr', (PhSel, TV_str_start, TV_str_stop), 0, 'never', 
+        ColumnDef('sbr', (PhSel, TV_str_start, TV_str_stop), 0, 'user', 
                   get_func='_get_sbr', iter_func='_iter_sbr', 
-                  norm_func='_normalizecolumn_sbr'),
+                  norm_func='_normalizecolumn_nph_bg_sbr',
+                  title_func='_get_sbr_title', title_is_tex=True),
         ColumnDef('brightness_bg', (PhSel, TV_str_start, TV_str_stop), 0, 'never', 
                   get_func='_get_brightness_bg', norm_func='_normalizecolumn_brightness_bg',
                   title_func='_get_brightness_bg_title', unit='cnts s^{-1}',
@@ -384,6 +425,10 @@ class NphBG(ChildPhotonTable):
         ColumnDef('ratio_bg', (PhSel, PhSel, TV_str_start, TV_str_stop), 0, 'never', 
                   get_func='_get_ratio_bg', iter_func='_iter_ratio_bg',
                   norm_func='_normalizecolumn_ratio_bg', title_func='_get_ratio_bg_title',
+                  title_is_tex=True),
+        ColumnDef('anisotropy_bg', (PhSel, PhSel, TV_str_start, TV_str_stop), 0, 'never', 
+                  get_func='_get_anisotropy_bg', iter_func='_iter_anisotropy_bg',
+                  norm_func='_normalizecolumn_ratio_bg', title_func='_get_anisotropy_bg_title',
                   title_is_tex=True),
         ColumnDef('E_bg', (TV_str_start, TV_str_stop), 0, remap='_replace_E_bg', norm_func='_normalizecolumn_ES_bg'),
         ColumnDef('S_bg', (TV_str_start, TV_str_stop), 0, remap='_replace_S_bg', norm_func='_normalizecolumn_ES_bg'),
@@ -393,10 +438,12 @@ class NphBG(ChildPhotonTable):
         pass
 
     @classmethod
-    def _normalizecolumn_nph_bg(cls, *args):
+    def _normalizecolumn_nph_bg_sbr(cls, *args):
+        """Column normalization for nph_bg and sbr columns"""
         return args[0:1] +  _normalize_column_startstop(*args[1:])
 
     def _iter_nph_bg(self, phsel:PhSel, starttype:str, stoptype:str)->Iterator[float]:
+        """Iter function for nph_bg column"""
         nph_iter = (nph - bg for nph, bg in zip(self.parents['base'].iter_column('nph_raw', phsel),
                                                         self.parents['bg'].iter_column('rangecounts', 
                                                                                        self.parents['base'].param, 
@@ -412,6 +459,7 @@ class NphBG(ChildPhotonTable):
             yield from nph_iter
 
     def _get_nph_bg(self, phsel:PhSel, starttype:str, stoptype:str)->np.ndarray[np.float64]:
+        """Getter function for nph_bg"""
         nph = self.parents['base']['nph_raw', phsel]
         bg = self.parents['bg']['rangecounts', self.param.parents['base'], phsel, starttype, stoptype]
         out = nph - bg
@@ -422,57 +470,112 @@ class NphBG(ChildPhotonTable):
 
     @classmethod
     def _get_nph_bg_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
-        return _get_nph_title(col, 'I', include_unit, origin)
-    
+        """Title getter function for nph_bg"""
+        return _get_nph_title(col, '^{ii}I', include_unit, origin)
+
     @classmethod
     def _normalizecolumn_brightness_bg(cls, *args):
+        """Column normalization function for brightness_bg function"""
         return args[0:1] +  _normalize_column_startstop(*args[1:])
 
-    def _calc_brightness_bg(self, phsel:PhSel, starttype:str, stoptype:str)->np.ndarray[np.double]:
+    def _get_brightness_bg(self, phsel:PhSel, starttype:str, stoptype:str)->np.ndarray[np.double]:
+        """Getter function for brightness_bg column"""
         return _calc_brightness(self, self.parents['base'], 'nph_bg', phsel, starttype, stoptype)
 
     @classmethod
     def _get_brightness_bg_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """Title getter function for brightness_bg column"""
         return _get_brightness_title(col, '_{bg}br', include_unit, origin)
 
     @classmethod
     def _normalizecolumn_ratio_bg(cls, *args):
+        """Column normalization function for ratio_bg column"""
         return args[0:2] +  _normalize_column_startstop(*args[2:])
 
     def _iter_ratio_bg(self, num_phsel:PhSel, dem_phsel:PhSel, 
-                         starttype:str, stoptype:str)->Iterator[float]:
+                         starttype:ColKeyStart, stoptype:ColKeyStop)->Iterator[float]:
+        """Iter function for ratio_bg column"""
         yield from _iter_ratio(self, 'nph_bg', num_phsel, dem_phsel, starttype, stoptype)
 
     def _get_ratio_bg(self, num_phsel:PhSel, dem_phsel:PhSel, 
-                         starttype:str, stoptype:str)->Sequence[float]:
+                         starttype:ColKeyStart, stoptype:ColKeyStop)->Sequence[float]:
+        """Getter function for ratio_bg column"""
         return _calc_ratio(self, 'nph_bg', num_phsel, dem_phsel, starttype, stoptype)
-    
+
     @classmethod
     def _get_ratio_bg_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
-        title = '%s/%s' %  _title_sels('I', origin, *col.keytup[:2])
+        """Title getter function for ratio_bg column"""
+        title = '%s/%s' %  _title_sels('^{ii}I', origin, *col.keytup[:2])
         title = _title_startstop_append(title, col.keytup[2], col.keytup[3])
         return f'${title}$'
-    
+
     def _iter_anisotropy_bg(self, phsel_p:PhSel, phsel_s:PhSel, starttype:str, stoptype:str)->Iterator[float]:
+        """Iter function for anisotropy_bg column"""
         yield from _iter_anisotropy(self, 'nph_bg', phsel_p, phsel_s, starttype, stoptype)
-    
+
     def _get_anisotropy_bg(self, phsel_p:PhSel, phsel_s:PhSel, starttype:str, stoptype:str)->np.ndarray[np.float64]:
+        """Getter function for anisotropy_bg column"""
         return _calc_anisotropy(self, 'nph_bg', phsel_p, phsel_s, starttype, stoptype)
-    
+
+    @classmethod
+    def _get_anisotropy_bg_title(cls, col:Column, include_unit:Real=False, origin:PhotonData=None)->str:
+        """Title getter function for anisotropy_raw column"""
+        kw = {'name':'^{ii}I'}
+        par, perp, start, stop = col.keytup
+        fuse = par | perp
+        overlap = par | perp
+        detdef = None
+        if origin is not None:
+            kw.update(detdef=origin.detdef, stream_names=origin.get_stream_names())
+            fuse = fuse.render_positive(origin.detdef, convert_all=True)
+            overlap = overlap.render_positive(origin.detdef, convert_all=True)
+            detdef = origin.detdef
+        if not overlap and _pol_ps(fuse, detdef, None if origin is None else origin.setup):
+            kw['name'] = 'r'
+            title = fuse.tex_str(kw)
+        else:
+            title = rf'anis({par.tex_str(**kw)},\: {perp.tex_str(**kw)})'
+        return title
+
     @classmethod
     def _replace_E_bg(cls, col:str, keytup:tuple[str,str])->tuple:
-        return 'ratio_bg', (PhSel('0ex1em'), PhSel('0ex'),)+keytup, {'title':'E_{app}'}
-    
+        """Column re-mapping function for E_bg"""
+        return 'ratio_bg', (PhSel('0ex1em'), PhSel('0ex'),)+keytup, {'title':'^{ii}E_{app}'}
+
     @classmethod
     def _replace_S_bg(cls, col:str, keytup:tuple[str,str])->tuple:
-        return 'ratio_bg', (PhSel('0ex'), PhSel('0ex_1ex1em'),)+keytup, {'title':'S_{app}'}
-    
+        """Column re-mapping function for S_bg"""
+        return 'ratio_bg', (PhSel('0ex'), PhSel('0ex_1ex1em'),)+keytup, {'title':'^{ii}S_{app}'}
+
     @classmethod
     def _normalizecolumn_ES_bg(cls, *args:str)->tuple[str, str]:
+        """Mapped Column normalization function fro E/S_bg"""
         return _normalize_column_startstop(*args)
+    
+    def _iter_sbr(self, phsel:PhSel, starttype:ColKeyStart, stoptype:ColKeyStop)->float:
+        """Iter function for sbr column"""
+        for nph, bg in zip(self.parents['base'].iter_column('nph_raw', phsel),
+                           self.parents['bg'].iter_column('rangecounts', 
+                                                          self.parents['base'].param, 
+                                                          phsel, starttype, stoptype)):
+            yield nph / bg
+    
+    def _get_sbr(self, phsel:PhSel, starttype:ColKeyStart, stoptype:ColKeyStop)->float:
+        """Getter function for sbr column"""
+        nph = self.parents['base']['nph_raw', phsel]
+        bg = self.parents['bg']['rangecounts', self.param.parents['base'], phsel, starttype, stoptype]
+        return nph / bg
+    
+    @classmethod
+    def _get_sbr_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """Title getter for sbr column"""
+        title = _title_sels('sbr', origin, col.keytup[0])[0]
+        title = _title_startstop_append(title, col.keytup[1], col.keytup[2])
+        return f'${title}$'
+        
 
 
-def _index_broadcast_2dto2d(ndim:int, nmat:int, i:int)->tuple[Union[slice,np.newaxis],...]:
+def _index_broadcast_2dto2d(ndim:int, nmat:int, i:int)->tuple[slice|np.newaxis,...]:
     """
     Create slice/newaxis tuple to broadcast a the i-th ndim array of nmat
     into a ndim*nmat dimensional array.
@@ -525,14 +628,16 @@ def _broadcast_2dto2d(*args:np.ndarray)->np.ndarray:
 
 
 class Ratios(ChildPhotonTable):
-    """
+    r"""
     Table for fully correct ratios between different photon streams.
     
     Params
     ------
     corr_mat : np.ndarray[np.double]
-    
-    
+        correction matrix used to compute corrected streams
+        :math:`\mathbf{M}\vec{^{bg}n}` where :math:`\vec{^{bg}n}` is the
+        background correcte intensity of each stream.
+
     Remapped Params
     ---------------
     scheme : str
@@ -546,7 +651,7 @@ class Ratios(ChildPhotonTable):
     dir_ex : float
         direct excitation factor. Default is 0.0.
     gamma : float
-        gamma correction factor for donor/acceptor emmission sensitivity. 
+        gamma correction factor for donor/acceptor emmission sensitivity.
         Default is 1.0.
     beta : float
         beta correction factor for donor/acceptor excitation sensitivity.
@@ -554,33 +659,39 @@ class Ratios(ChildPhotonTable):
     
     Parents
     -------
-    nph : Nph_bg
-        Defines the base of the Ratios table, and background corrected values
+        nph : Nph_bg
+            Defines the base of the Ratios table, and background corrected values
     
     Columns
     -------
-    nph_c : (ph_sel:PhSel, starttype:str, stoptype:str)
-        Corrected (according to correction factors and background) number of photons
-        in ph_sel.
-    brightness_c : (ph_sel:PhSel, starttype:str, stoptype:str)
-        counts per second in given stream, with all correction factors applied
-    ratio_c : (num_ph_sel:PhSel, dem_ph_sel:PhSel, starttype:str, stoptype:str)
-        ratio of num_ph_sel to dem_ph_sel, with all correction factors applied
-    E : (starttype:str, stoptype:str)
-        Convenience column returns presumed FRET efficiency
-        Remaped column of ratio_c, give ratio of PhSel('0ex1em') to PhSel('0ex')
-    S : (starttype:str, stoptype:str)
-        Convenience column return presumed Stoichiometry
-        Remaped column of ratio_c, give ratio of PhSel('1ex1em') to 
-        PhSel('0ex_1ex1em')
-        
+        nph_c : (ph_sel:PhSel, starttype:str, stoptype:str)
+            Corrected (according to correction factors and background) number of photons
+            in ph_sel.
+        brightness_c : (ph_sel:PhSel, starttype:str, stoptype:str)
+            counts per second in given stream, with all correction factors applied
+        ratio_c : (num_ph_sel:PhSel, dem_ph_sel:PhSel, starttype:str, stoptype:str)
+            ratio of num_ph_sel to dem_ph_sel, with all correction factors applied
+    
+    Re-mapped Columns
+    -----------------
+        E : (starttype:str, stoptype:str)
+            Convenience column returns presumed FRET efficiency
+            Remaped column of ratio_c, give ratio of PhSel('0ex1em') to PhSel('0ex')
+        S : (starttype:str, stoptype:str)
+            Convenience column return presumed Stoichiometry
+            Remaped column of ratio_c, give ratio of PhSel('1ex1em') to 
+            PhSel('0ex_1ex1em')
+
     """
+    #: :meta private:
     param_defs = (
         ParamDef('corr_mat', TV_ndarray(square=True, dims=arr_slc[:,:])),
                   )
+    #: :meta private:
     parent_defs = (
         ParentDef('nph', NphBG, is_base=True),
                    )
+    #: :meta private:
     column_defs = (
         ColumnDef('nph_c', (PhSel, TV_str_start, TV_str_stop), 0, 'never', get_func='_get_nph_c', 
                   norm_func='_normalizecolumn_nph_c', title_func='_get_nph_c_title',
@@ -613,7 +724,12 @@ class Ratios(ChildPhotonTable):
         pass
     
     @classmethod
-    def param_preprocess(cls, param:Union[Sequence[tuple[str,Any]],tupledict], parents:dict[str,Param])->tuple[dict,dict]:
+    def param_preprocess(cls, param:Sequence[tuple[str,Any]]|tupledict, parents:dict[str:Param])->tuple[dict,dict]:
+        """
+        Preprocess, not called by user. Sorts inputs using different formats
+        and converts into consistent corr_mat approach for correction factors
+        :meta private:
+        """
         param = as_paramdict(param, tuple(pdef.name for pdef in cls.param_defs)+cls._fret_factors)
         if isinstance(parents, Param):
             parents = {'nph':parents}
@@ -664,12 +780,14 @@ class Ratios(ChildPhotonTable):
         
     @classmethod
     def validate_param(cls, param:Param):
+        """Not usually called by user- validate a Ratios :class:`Param` :meta private:"""
         detdef = cls._detdef(param)
         if detdef.size != param.params['corr_mat'].shape[0]:
             raise ValueError("corr_mat must have both dimensions of size equal to the number of streams in detdef")
     
     @classmethod
     def _normalizecolumn_nph_c(cls, *args):
+        """Column normalization function for nph_c column"""
         return args[0:1] +  _normalize_column_startstop(*args[1:])
 
     def _get_nph_c(self, phsel:PhSel, starttype:str, stoptype:str)->Iterator[float]:
@@ -690,77 +808,219 @@ class Ratios(ChildPhotonTable):
 
     @classmethod
     def _get_nph_c_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """Title getter function for nph_c column"""
         return _get_nph_title(col, 'F', include_unit, origin)
 
     @classmethod
     def _normalizecolumn_brightness_c(cls, *args):
+        """Column normalization function for brightness_c column"""
         return args[0:1] + _normalize_column_startstop(*args[1:])
 
     def _get_brightness_c(self, phsel:PhSel, starttype:str, stoptype:str)->np.ndarray[np.double]:
+        """Getter function for brightness_c column"""
         return _calc_brightness(self, self.parents['nph'].parents['base'], 'nph_c', phsel, starttype, stoptype)
 
     @classmethod
     def _get_brightness_c_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """Title getter function for brightness_c column"""
         return _get_brightness_title(col, '_{c}br', include_unit, origin)
 
     @classmethod
     def _normalizecolumn_ratio_c(cls, *args):
+        """Column normalization function for ratio_c column"""
         return args[0:2] +  _normalize_column_startstop(*args[2:])
 
     def _get_ratio_c(self, num_phsel:PhSel, dem_phsel:PhSel, starttype:str, stoptype:str)->np.ndarray[np.float64]:
+        """Getter function for ratio_c column"""
         return _calc_ratio(self, 'nph_c', num_phsel, dem_phsel, starttype, stoptype)
 
     @classmethod
     def _get_ratio_c_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """Title getter function for ratio_c"""
         return _get_ratio_title(col, 'F', include_unit, origin)
 
     @classmethod
     def _normalizecolumn_anisotropy_c(cls, *args):
+        """Column normalization function for anisotropy_c column"""
         return args[0:2] +  _normalize_column_startstop(*args[2:])
 
     def _get_anisotropy_c(self, phsel_p:PhSel, phsel_s:PhSel, starttype:str, stoptype:str)->np.ndarray[np.float64]:
+        """Getter function for anisotropy_c column"""
         return _calc_anisotropy(self, 'nph_c', phsel_p, phsel_s, starttype, stoptype)
 
     @classmethod
     def _get_anisotropy_c_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """Title getter function for anisotropy_c column"""
         return _get_anisotropy_title(col, 'F', include_unit, origin)
 
     @classmethod
     def _normalizecolumn_ES(cls, *args:str)->tuple[str, str]:
+        """Column normalization function for re-mapped columns E/S"""
         return _normalize_column_startstop(*args)
 
     @classmethod
     def _replace_E(cls, col:str, keytup:tuple[str,str])->tuple:
+        """Column re-mapping function for E column, maps to ratio_c"""
         return 'ratio_c', (PhSel('0ex1em'), PhSel('0ex'),)+keytup, {'title':'E'}
 
     @classmethod
     def _replace_S(cls, col:str, keytup:tuple[str,str])->tuple:
+        """Column re-mapping function for S column, maps to ratio_c"""
         return 'ratio_c', (PhSel('0ex'), PhSel('0ex_1ex1em'),)+keytup, {'title':'S'}
 
-    def dither(self, phsel:PhSel, lsb=2.0, generator=None)->np.ndarray[np.double]:
+    def dither(self, phsel:PhSel, lsb:float=2.0, generator:np.random.Generator=None)->np.ndarray[np.double]:
+        """
+        Dither number of photons in phsel. Returns dithered array
+
+        Parameters
+        ----------
+        phsel : PhSel
+            photon stream to dither.
+        lsb : float, optional
+            Magnitued of dithering. Evaluated as follows:
+            :math:`0.5 rnd n` where :math:`rnd` is random number in inteval ``[-1,1]``
+            and :math:`n` is number of photons in stream.
+            The default is 2.0.
+        generator : np.random.Generator, optional
+            Random number generator to use. The default is None.
+
+        Returns
+        -------
+        np.ndarray[np.double]
+            Version of nph_c dithered with lsb.
+
+        """
         if not isinstance(generator, np.random.Generator):
             generator = np.random.default_rng(generator)
         return self['nph_c', phsel] + lsb*(generator.random(self.size) - 0.5)
 
-    def dither_ratio(self, phsel_num:PhSel, phsel_dem:PhSel, lsb_num=2.0, lsb_dem=2.0,
-                     generator=None):
+    def dither_ratio(self, phsel_num:PhSel, phsel_dem:PhSel, 
+                     lsb_num:float=2.0, lsb_dem:float=2.0,
+                     generator:np.random.Generator=None)->np.ndarray[np.double]:
+        """
+        Dithered ratio of photons in phsel_num to phsel_dem
+
+
+        Parameters
+        ----------
+        phsel_num : PhSel
+            photon stream of numerator of ratio.
+        phsel_dem : PhSel
+            photon stream of denomenator of ratio.
+        lsb_num : float, optional
+            Magnitued of dithering in numerator stream. Evaluated as follows:
+            :math:`0.5 rnd n` where :math:`rnd` is random number in inteval ``[-1,1]``
+            and :math:`n` is number of photons in stream.The default is 2.0.
+        lsb_dem : float, optional
+            Magnitude of dithering in denominator stream, same convention as lsb_num. 
+            The default is 2.0.
+        generator : np.random.Generator, optional
+            Random number generator to use. The default is None.
+
+        Returns
+        -------
+        np.ndarray[np.double]
+            Dithered ratio array.
+
+        """
         if not isinstance(generator, np.random.Generator):
             generator = np.random.default_rng(generator)
         return self.dither(phsel_num, lsb_num, generator) / self.dither(phsel_num, lsb_num, generator)
 
 
+###############################################################################
+######################## Conveniece creation functions ########################
+###############################################################################
 def make_burst_search(bg:Param, m:int, F:float, stream:tuple[PhSel]=PhSel('0ex_1ex1em'))->Param:
+    """
+    Make a standard burst search :class:`Param`, makes ACBS burst search.
+
+    Parameters
+    ----------
+    bg : Param
+        Background :class:`Param` to use to set burst SNR thresholds.
+    m : int
+        Size of sliding window.
+    F : float
+        Minimum SNR to be considered in a burst.
+    stream : tuple[PhSel], optional
+        Photon stream on which to perform burst search. The default is PhSel('0ex_1ex1em').
+
+    Returns
+    -------
+    Param
+        ACBS burst search :class:`Param`. (Based on :class:`Bursts`)
+
+    """
     return Param(Bursts, {'streams':(stream, ), 'm':m, 'F':F}, {'bg':bg})
     
 
-def make_dcbs_burst_search(bg:Param, m:int, F:float, streamA=PhSel('0ex'), streamB:PhSel=PhSel('1ex1em'))->Param:
+def make_dcbs_burst_search(bg:Param, m:int, F:float, 
+                           streamA:PhSel=PhSel('0ex'), streamB:PhSel=PhSel('1ex1em'))->Param:
+    """
+    Make Dual-Channel-Burst-Search :class:`Param`.
+
+    Parameters
+    ----------
+    bg : Param
+        Background :class:`Param` to use to set burst SNR thresholds.
+    m : int
+        Size of sliding window.
+    F : float
+        Minimum SNR to be considered in a burst.
+    streamA : PhSel, optional
+        First photon stream on which to perform burst search. The default is PhSel('0ex').
+    streamB : PhSel, optional
+        Second photon stream on which to perform burst search. The default is PhSel('1ex1em').
+
+    Returns
+    -------
+    Param
+        DCBS :class:`Param`. (Based on :class:`Bursts`)
+
+    """
     return Param(Bursts, {'streams':(streamA, streamB), 'm':m, 'F':F}, {'bg':bg})
     
 
-def make_correction_factors(bursts:Param, gamma:float=1.0, beta:float=1.0, 
+def make_correction_factors(bursts:Param, alpha:float=None, sigma:float=None,
+                            gamma:float=1.0, beta:float=1.0, 
                             lk:float=0.0, dir_ex:float=0.0)->tuple[Param, Param]:
+    """
+    Make backgrouch corrected and cross-talk corrected :class:`Param` from burst
+    search and information on correction factors.
+
+    Parameters
+    ----------
+    bursts : Param
+        Burst :class:`Param` to which to apply correction factors.
+    alpha : float, optional
+        Leakage factor, takes precedence over equivalent lk kwarg. 
+        The default is None.
+    sigma : float, optional
+        Direct excitation factor, takes precedence over equivalent dir_ex kwarg. 
+        The default is None.
+    gamma : float, optional
+        Correction coefficient for Donor Donor emission. The default is 1.0.
+    beta : float, optional
+        Correction coefficent for Acceptor Acceptor emission. The default is 1.0.
+    lk : float, optional
+        Leakage factor, overwritten by alpha. The default is 0.0.
+    dir_ex : float, optional
+        Direct excitation factor, overwritten by sigma. The default is 0.0.
+
+    Returns
+    -------
+    nph : Param
+        Background corrected :class:`Param` (based on :class:`NphBG`).
+    ratio : Param
+        Fully corrected stream intensity/ratio :class:`Param` 
+        (based on :class:`Ratos`)
+
+    """
     nph = Param(NphBG, {'single':True}, {'base':bursts, 'bg':bursts.parents['bg'][0]})
-    ratios = Param(Ratios, params={'gamma':gamma, 'beta':beta, 'lk':lk, 'dir_ex':dir_ex}, parents={'nph':nph})
+    alpha = lk if alpha is None else alpha
+    sigma = dir_ex if sigma is None else sigma
+    ratios = Param(Ratios, params={'gamma':gamma, 'beta':beta, 'alpha':alpha, 'sigma':sigma}, parents={'nph':nph})
     return nph, ratios
     
 
@@ -771,7 +1031,7 @@ def register_2cde_func(func:Callable[[int,int,float],float], shortcut:Callable=N
     Parameters
     ----------
     func : Callable[[int,int,float],float]
-        function of signature ``func(tloc:ing, tphoton:int, tau:float)->float`
+        function of signature ``func(tloc:ing, tphoton:int, tau:float)->float``
         Where tloc is time where KDE is evaluated, tphoton is time of a photon,
         and tau is a floating point constant, must return float.
     shortcut : Callable, optional
@@ -835,6 +1095,8 @@ register_2cde_func(gaussian_kde_2cde, shortcut=partial(fbc.kde_photons, func=1))
 
 class KDE(ChildPhotonTable):
     """
+    
+    This is still untested
     .. note::
         
         The original paper contains some ambiguities, and supplementary original

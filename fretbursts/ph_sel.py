@@ -48,14 +48,6 @@ The synax is `[streamcode1]typecode1[streamcode2]typecode2...` ::
     
     phDA = PhSel('DexAem')
 
-.. note::
-    
-    The above is the new form of specifying ::
-        
-        PhSel(Dex='Aem')
-    
-    from version 0.7
-
 
 Selections are defined by strings, and if you want the union of several selections
 you can specify multiple sub-streams by separating them with a single underscore::
@@ -85,8 +77,8 @@ import re
 import numpy as np
 import tables as tb
 
-from .utils.misc import ImDict, union_multi, _tuple_array
-from .datamodel.immutabledata import _ImData, TypeValidator, init_write_group, register_type, register_byteslike
+from .datamodel.utils import ImDict, union_multi, _tuple_array
+from .datamodel.immutabledata import _ImData, TypeValidator, init_write_group, register_byteslike
 
 class ChannelSet:
     """
@@ -208,7 +200,7 @@ class ChannelSet:
     def render_positive(self, n_streams:int, convert_all:bool=False)->"ChannelSet":
         """
         Convert to positive definition of Channel set, based on number of channels
-        (``n_streams`).
+        (``n_streams``).
 
         Parameters
         ----------
@@ -247,7 +239,24 @@ class ChannelSet:
         """If defined positibely or empty negative (all)"""
         return self.kind if self.elements else not self.kind
     
-    def tex_str(self, stream_names:dict[Union[int,frozenset[int]],str]=None)->str:
+    def tex_str(self, stream_names:dict[str:dict[int|frozenset[int]:str]]=None)->str:
+        """
+        Convert to math-tex formated string
+
+        Parameters
+        ----------
+        stream_names : dict[str:dict[int|frozenset[int]:str]], optional
+            Names for each channel, given as nested dict, outer dicts have 
+            keys of channel name, inner keys are int, specifing index, values
+            are stream names. The default is None.
+
+        Returns
+        -------
+        str
+            math-tex formated string, assumed to be part of larger string so not
+            wrapped with $$.
+
+        """
         stream_names = dict() if stream_names is None else stream_names
         if not self:
             return stream_names.get((True, frozenset()), '')
@@ -329,18 +338,18 @@ def write_channelset(group:tb.Group, name:str, val:ChannelSet)->tb.Group:
 
 
 def read_channelset(group:tb.Group, dct:dict)->ChannelSet:
-    """
+    r"""
     Read function for use with 
-    :class:`~fretbursts.datamodel.immutabledata.TypeValidator` to write 
+    :class:`fretbursts.datamodel.immutabledata.TypeValidator` to write 
     :class:`ChannelSet` to 
 
     Parameters
     ----------
     group : tb.Group
-        DESCRIPTION.
+        Group to read as channel set.
     dct : dict
-        Unused, necessary to be compatible with :class:`TypeValidator, dictionary
-        of _grouptypes.
+        Unused, necessary to be compatible with :class:`TypeValidator`, dictionary
+        of \_grouptypes.
 
     Returns
     -------
@@ -535,7 +544,8 @@ class PhStream(_ImData):
         detdef : DetDef
             :class:`DetDef` defining number of channels in each stream.
         convert_all : bool, optional
-            DESCRIPTION. The default is False.
+            If :code:`True`, remove stream definition for streams that span detdef. 
+            The default is False.
 
         Returns
         -------
@@ -557,7 +567,29 @@ class PhStream(_ImData):
         return all(s.positive_all for s in self._all_values())
     
     def tex_str(self, detdef:"DetDef"=None, name:str='f', 
-                stream_names:dict[str,dict[Union[int,frozenset[int]],str]]=None)->str:
+                stream_names:dict[str:dict[int|frozenset[int]:str]]=None)->str:
+        """
+        Generate tex string representing PhSel using information provided.
+
+        Parameters
+        ----------
+        detdef : DetDef, optional
+            DetDef of originating setup. The default is None.
+        name : str, optional
+            Name given to sort of parameter being extracted (ie n, f, I etc). 
+            The default is 'f'.
+        stream_names : dict[str:dict[int|frozenset[int]:str]], optional
+            Names for each channel, given as nested dict, outer dicts have 
+            keys of channel name, inner keys are int, specifing index, values
+            are stream names. The default is None.
+        
+        Returns
+        -------
+        str
+            Math tex formated expression for string 
+            (assumed to be portion of larger string, so not wrapped in $).
+
+        """
         stream_names = dict() if stream_names is None else stream_names
         st = self if detdef is None else self.render_positive(detdef, convert_all=True)
         sup, sub = '', ''
@@ -597,7 +629,8 @@ def _stream_join(stream0:PhStream, stream1:PhStream)->PhStream:
     return PhStream(**{cat:(det0 | det1) for cat, det0, det1 in _stream_zip(stream0, stream1)})
 
 
-def _stream_num_diff_cat(stream0:PhStream, stream1:PhStream)->PhStream:
+def _stream_num_diff_cat(stream0:PhStream, stream1:PhStream)->int:
+    """Number of channels different between stream0 and stream1"""
     return sum(not det for det in _field_comp(stream0, stream1).values())
 
 
@@ -828,7 +861,7 @@ class PhSel:
     def __str__(self):
         if not self.streams:
             return 'none'
-        elif self == _phsel_all:
+        elif self == phsel_all:
             return 'all'
         return '_'.join(str(stream) for stream in self.streams)
         
@@ -972,7 +1005,31 @@ class PhSel:
         return self._get_union_set('split')
     
     def tex_str(self, detdef:"DetDef"=None, name:str='f', 
-                stream_names:dict[str,dict[int,str]]=None, reduce:bool=True)->str:
+                stream_names:dict[str:dict[int|frozenset[int]:str]]=None, reduce:bool=True)->str:
+        """
+        Generate tex string representing PhSel using information provided.
+
+        Parameters
+        ----------
+        detdef : DetDef, optional
+            DetDef of originating setup. The default is None.
+        name : str, optional
+            Name given to sort of parameter being extracted (ie n, f, I etc). 
+            The default is 'f'.
+        stream_names : dict[str:dict[int|frozenset[int]:str]], optional
+            Names for each channel, given as nested dict, outer dicts have 
+            keys of channel name, inner keys are int, specifing index, values
+            are stream names. The default is None.
+        reduce : bool, optional
+            Whether to remove channels that cover all space in detdef. The default is True.
+
+        Returns
+        -------
+        str
+            Math tex formated expression for string 
+            (assumed to be portion of larger string, so not wrapped in $).
+
+        """
         streams = list(self.streams)
         if reduce:
             cur = PhSel('none')
@@ -1026,6 +1083,7 @@ sep = re.compile(r'^((\s*[,;]?\s*)|_|())$')
 
 
 def _stream_iter(streams:str, id_rgx:str, cat_rgx:str)->re.Match:
+    """Iterate over stream definition, 1 channel at a time, returns regex of stream match"""
     stream_frag_regex = re.compile(fr'((\~|\!|\^)?(({id_rgx})|(\d+)|(\[([^\[\]]+)\]))({cat_rgx}))+')
     pos = 0 # where in the stream the last match came from
     for mtch in stream_frag_regex.finditer(streams):
@@ -1038,14 +1096,16 @@ def _stream_iter(streams:str, id_rgx:str, cat_rgx:str)->re.Match:
         raise ValueError(f"Invalid stream separator: '{streams[pos:]}'")
 
 
-def check_keys(part_map):
+def check_keys(part_map:dict[str:set[np.uint8]])->list[str]:
+    """Check part_map of phsel is valid and retunr list of keys"""
     stream_str = list(part_map.keys())
     if any(not isinstance(strm, str) for strm in stream_str):
         raise KeyError("part_map keys must be strings")
     return stream_str
 
 
-def gen_re_fs(cat_strs):
+def gen_re_fs(cat_strs:Sequence[str])->str:
+    """Generate string for regex of possible stream types"""
     cat_strs = list(set(cat_strs))
     cat_strs.sort(key=functools.cmp_to_key(str_long_less))
     return'|'.join(cat_strs)    
@@ -1054,16 +1114,18 @@ def gen_re_fs(cat_strs):
 _asep = re.compile(r'^,?\s*$')
 is_asep = lambda s: bool(_asep.match(s))
 
-_phsel_all = PhSel(_psall)
-_phsel_none = PhSel()
+#: Photon selection representing all possible streams
+phsel_all = PhSel(_psall)
+#: Photon selection representing no streams (useful for testing when logical operation returns none)
+phsel_none = PhSel() 
 
 
-def _parse_streams(streams:str, part_map:dict[str,set[np.dtype]])->PhSel:
+def _parse_streams(streams:str, part_map:dict[str:set[np.uint8]])->PhSel:
     """Parse str as a stream input"""
     if streams.lower() == 'all':
-        return _phsel_all
+        return phsel_all
     if streams.lower() in ('empty', 'none'):
-        return _phsel_none
+        return phsel_none
     cat_rgx = gen_re_fs(check_keys(part_map))
     if any(c not in PhStream.__slots__ for c in cat_rgx.split('|')):
         raise ValueError("part_map incorrect")
@@ -1284,6 +1346,7 @@ class DetDef:
         return np.prod(self.shape)
     
     def _get_stream_id(self, phstream:PhStream)->np.ndarray[np.uint8]:
+        """Get stream_ids (indices in dets array) from phstream"""
         stream = phstream.render_positive(self)
         pstream = product(*(tuple((name, i) for i in ids) for name, ids in stream._all_items()))
         idxs = [sum(self[f'{p}_stride']*i for p, i in ds) for ds in pstream]
@@ -1310,6 +1373,7 @@ class DetDef:
         return union_multi(*(self._get_stream_id(phs) for phs in phsel))
     
     def _stream_id_to_PhStream(self, stream_id:int)->PhStream:
+        """Convert single stream_id (must be int) to :class:`PhStream`"""
         kwargs = dict()
         if stream_id >= np.prod(self.shape):
             raise ValueError("stream_id {stream_id} out of detdef range ({np.cumprod(self.shape)})")
@@ -1350,6 +1414,30 @@ class DetDef:
 
 
 def check_PhSel(val:PhSel, render_positive:bool=False, detdef:DetDef=None)->PhSel:
+    """
+    Check val (a :class:`PhSel`) is valid for saving to HDF5 file.
+    Used in TypeValidator for PhSel
+
+    Parameters
+    ----------
+    val : PhSel
+        Value to check.
+    render_positive : bool, optional
+        If :code:`True` will automatically render_positive val. The default is False.
+    detdef : DetDef, optional
+        :class:`DetDef` defining maximum valid index in each channel. The default is None.
+
+    Raises
+    ------
+    TypeError
+        val is not a :class:`PhSel`.
+
+    Returns
+    -------
+    PhSel
+        Verified :class:`PhSel`.
+
+    """
     if isinstance(val, PhStream):
         val = PhSel(val)
     if not isinstance(val, PhSel):
@@ -1360,29 +1448,70 @@ def check_PhSel(val:PhSel, render_positive:bool=False, detdef:DetDef=None)->PhSe
 
 
 def dread_PhSel(arr:bytes, dct:dict)->PhSel:
+    """
+    Direct read function for reading :class:`PhSel` from file, 
+    takes bytes array stored in HDF5 array, and converts to :class:`PhSel`
+    """
     return PhSel(arr.decode())
 
 
 def dwrite_PhSel(val:PhSel)->bytes:
+    """
+    Direct write function for :class:`PhSel`. 
+    Outputs bytes-representation of :class:`PhSel` to be written to HDF5 file.
+    For use in TypeValidator object
+    """
     return str(val).encode()
 
 
 def node_repr_PhSel(val:PhSel)->str:
+    """Generate node-string of PhSel, for use in TypeValidator object"""
     return val.attr_str
 
 
 def node_read_PhSel(val:str)->PhSel:
+    """Read node-string of PhSel, for use in TypeValidator object"""
     return PhSel.from_attr_str(val)
 
 TV_PhSel = register_byteslike(PhSel, check_PhSel, dread_PhSel, dwrite_PhSel, 'phsel', node_repr_PhSel, node_read_PhSel)
 
 
 def _none_or_equal(detdef:DetDef, val:int, spec:str)->None:
+    """Verify that val of type spec in valid for a detdef, raises error if problem, otherwise return nothing"""
     if val is not None and getattr(detdef, spec) != val:
         raise ValueError(f"DetDef has {getattr(detdef, spec)}, but expected {val} for {spec}")
 
 
 def check_DetDef(val:DetDef, ex=None, em=None, pol=None, split=None, **kwargs)->DetDef:
+    """
+    Check function for :class:`DetDef` to be used in TypeValidator.
+
+    Parameters
+    ----------
+    val : DetDef
+        :class:`DetDef` to convert/verify.
+    ex : int|None, optional
+        Number of expected ex channels. The default is None.
+    em : TYPE, optional
+        Number of expected em channels. The default is None.
+    pol : TYPE, optional
+        Number of expected pol channels. The default is None.
+    split : TYPE, optional
+        Number of expected split channels. The default is None.
+    **kwargs : TYPE
+        Ignored, necessary for use in TypeValidator.
+
+    Raises
+    ------
+    TypeError
+        Not DetDef or bad specification of one or more channels based on restrictions.
+
+    Returns
+    -------
+    DetDef
+        Verified :class:`DetDef` object.
+
+    """
     if val is None:
         val = DetDef(ex=1 if ex is None else ex, em=1 if em is None else em,
                      pol=1 if pol is None else pol, split=1 if split is None else split)
@@ -1396,10 +1525,20 @@ def check_DetDef(val:DetDef, ex=None, em=None, pol=None, split=None, **kwargs)->
 
 
 def dread_DetDef(arr:np.ndarray[np.uint8], dct:dict)->DetDef:
+    """
+    Direct read function for reading :class:`DetDef` from HDF5 file.
+    Takes bytes array and return :class:`DetDef`.
+    For use in TypeValidator object
+    """
     return DetDef(*arr)
 
 
 def dwrite_DetDef(val:DetDef)->np.ndarray[np.uint8]:
+    """
+    Direct write function for :class:`DetDef`.
+    Returns array to be written to HDF5 file
+    For use in TypeValidator object.
+    """
     return val.shape
 
 
@@ -1408,7 +1547,7 @@ TV_DetDef = register_byteslike(DetDef, check_DetDef, dread_DetDef, dwrite_DetDef
 
 def sort_phsels(detdef:DetDef, phsels:Sequence[PhSel], return_index:bool=False)->tuple[PhSel,...]:
     """
-    
+    Sorting function for ordering sequence of :class:`PhSel` objects.
 
     Parameters
     ----------
@@ -1443,7 +1582,7 @@ def sort_phsels(detdef:DetDef, phsels:Sequence[PhSel], return_index:bool=False)-
 
 
 def mask_detarray(detdef:DetDef, phsel:PhSel, dets:np.ndarray[np.uint8])->np.ndarray[np.bool_]:
-    """
+    r"""
     Generage a mask of dets for all photons in phsel
 
     Parameters
@@ -1457,7 +1596,7 @@ def mask_detarray(detdef:DetDef, phsel:PhSel, dets:np.ndarray[np.uint8])->np.nda
 
     Returns
     -------
-    np.ndarray[np.bool_]
+    np.ndarray[np.bool\_]
         mask of all photons in phsel based on dets.
 
     """
