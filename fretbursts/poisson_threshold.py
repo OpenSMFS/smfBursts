@@ -62,27 +62,27 @@ def prob_noise_above_th(rate, T, m):
     return poisson(rate*T).sf(m-1)
 _p = prob_noise_above_th
 
-def prob_noise_above_th_test_version(rate, T, m):
-    """Returns the probability that noise is above the burst search threshold.
+# def prob_noise_above_th_test_version(rate, T, m):
+#     """Returns the probability that noise is above the burst search threshold.
 
-    Same as prob_noise_above_th() but compute ARITHMETICALLY the probability
-    adding up the PDF from m to a very high integer (mean + 9std_dev).
+#     Same as prob_noise_above_th() but compute ARITHMETICALLY the probability
+#     adding up the PDF from m to a very high integer (mean + 9std_dev).
 
-    WARNING: Test version, significantly slower!!
-    """
-    rate = float(rate)
-    T = float(T)
-    n_poiss = rate*T
-    if m < (n_poiss) - 9*np.sqrt(n_poiss): return 1. #
+#     WARNING: Test version, significantly slower!!
+#     """
+#     rate = float(rate)
+#     T = float(T)
+#     n_poiss = rate*T
+#     if m < (n_poiss) - 9*np.sqrt(n_poiss): return 1. #
 
-    s = 0.
-    for i in np.arange(m,int(rate*T + 9*np.sqrt(rate*T))+1):
-        s += reduce(lambda x,y: x*y, [(n_poiss/j) for j in range(1, i+1)])
-        assert np.isfinite(s)
-    p = np.exp(-(rate*T)) * s
-    assert np.isfinite(p)
-    return p
-_p2 = prob_noise_above_th_test_version
+#     s = 0.
+#     for i in np.arange(m,int(rate*T + 9*np.sqrt(rate*T))+1):
+#         s += np.reduce(lambda x,y: x*y, [(n_poiss/j) for j in range(1, i+1)])
+#         assert np.isfinite(s)
+#     p = np.exp(-(rate*T)) * s
+#     assert np.isfinite(p)
+#     return p
+# _p2 = prob_noise_above_th_test_version
 
 def find_optimal_T_iter(bg_rate, m, P_user, max_iter=int(1e6), debug=False):
     """Returns the T (sec.) that assure prob. P_user or less to have noise.

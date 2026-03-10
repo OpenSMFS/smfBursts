@@ -53,48 +53,11 @@ from . import ph_sel
 from .ph_sel import PhSel, DetDef
 from .import photonHDF5
 from . import loadraw
+from . import fretfactory
 
 if has_matplotlib:
     from . import plot
 
 
 add_citation('IngargiolaPLOSOne2016', purpose='FRETBursts citation')
-# import of legacy functions
-# from .legacy_burstlib import Data
-# from . import legacy_background as bg
-# from . import legacy_select_bursts as select_bursts
-
-# try:
-#     import matplotlib
-#     has_matplotlib = True
-# except:
-#     has_matplotlib = False
-
-# try:
-#     import PyQt5
-#     has_pyqt = True
-# except:
-#     has_pyqt = False
-
-# if has_matplotlib and has_pyqt:
-#     from .legacy_burst_plot import (
-#         # Standalone plots as a function of ch
-#             mch_plot_bg, plot_alternation_hist, alex_jointplot,
-
-#             # Single-ch plots used in multi-ch plots through `dplot`
-#             timetrace, timetrace_single, ratetrace, ratetrace_single,
-#             timetrace_fret, timetrace_bg,
-#             hist_width, hist_size, hist_size_all, hist_brightness,
-#             hist_fret, hist_burst_data,
-#             hist2d_alex, hist_S, hist_sbr, hist_asymmetry,
-#             hist_interphoton_single, hist_interphoton,
-#             hist_bg_single, hist_bg, hist_ph_delays, hist_mdelays,
-#             hist_mrates, hist_burst_phrate, hist_burst_delays,
-#             scatter_width_size, scatter_rate_da, scatter_fret_size,
-#             scatter_fret_nd_na, scatter_fret_width, scatter_da,
-#             scatter_naa_nt, scatter_alex, hexbin_alex,
-
-#             # Wrapper functions that create a plot for each channel
-#             dplot, dplot_48ch, dplot_8ch, dplot_1ch,)
-
 citation()

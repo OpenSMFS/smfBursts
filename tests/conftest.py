@@ -3,12 +3,20 @@
 # author: paul
 # Coppied from https://docs.pytest.org/en/latest/example/simple.html#incremental-testing-test-steps
 
-from typing import Dict, Tuple
 
 import pytest
 
 # store history of failures per test class name and per index in parametrize (if parametrize used)
-_test_failed_incremental: Dict[str, Dict[Tuple[int, ...], str]] = {}
+_test_failed_incremental: dict[str: dict[tuple[int, ...]: str]] = dict()
+_test_dependency_result: dict[str: bool] = dict()
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "incremental: mark test to run only on named environment"
+    )
+    config.addinivalue_line(
+        "markers", "dependency: mark test to run only if depends passed"
+    )
 
 
 def pytest_runtest_makereport(item, call):
@@ -30,6 +38,13 @@ def pytest_runtest_makereport(item, call):
             _test_failed_incremental.setdefault(cls_name, {}).setdefault(
                 parametrize_index, test_name
             )
+    if call.when == 'call':
+        if "dependency" in item.keywords:
+            # dependency marker is used
+            name = item.get_closest_marker('dependency').kwargs.get('name', None)
+            if name is not None:
+                if _test_dependency_result.get(name, None) is None:
+                    _test_dependency_result[name] =  call.excinfo
 
 
 def pytest_runtest_setup(item):
@@ -48,4 +63,30 @@ def pytest_runtest_setup(item):
             test_name = _test_failed_incremental[cls_name].get(parametrize_index, None)
             # if name found, test has failed for the combination of class name & test name
             if test_name is not None:
-                pytest.xfail(f"previous test failed ({test_name})")
+                pytest.skip(f"previous test failed ({test_name})")
+    if 'dependency' in item.keywords:
+        depends = item.get_closest_marker('dependency').kwargs.get('depends', None)
+        if depends is not None:
+            depends = (depends, ) if isinstance(depends, str) else depends
+            # raise Exception(f"{depends}")
+            if any(_test_dependency_result.get(dep, True) is not None for dep in depends):
+                pytest.skip(f"previous test failed (one of {depends})")
+
+
+import fretbursts as frb
+
+
+@pytest.fixture(params=['start', 'istarttime'])
+def colstart(request):
+    return request.param
+
+
+@pytest.fixture(params=['stop', 'istoptime'])
+def colstop(request):
+    return request.param
+
+@pytest.fixture
+def data()->frb.PhotonData:
+    raw = frb.photonHDF5.load('HP3_TE300_SPC630.hdf5')
+    data = frb.photonHDF5.regularize_dets(raw)
+    return data

@@ -30,6 +30,7 @@ def _linear_compute(columns:tuple[np.ndarray[np.floating],...],
     """Compute value of dotproduct of columns and vec"""
     return np.sum(np.array(columns).T*vec, axis=1)
 
+
 def linear_gt_gate(*columns:np.ndarray[np.floating], vec:np.ndarray[np.double], m:float)->np.ndarray[np.bool_]:
     r"""
     Gate function for :attr:`LIN_GT_gate`. :math:`V \cdot C > m`
@@ -82,7 +83,7 @@ def linear_geq_gate(*columns:np.ndarray[np.floating], vec:np.ndarray[np.double],
 register_PyCode(linear_geq_gate)
 
 
-def _normalize_linear_gate(params:dict[str:Any], colorder:tuple[int,...]):
+def _regularize_linear_gate(params:dict[str:Any], colorder:tuple[int,...])->dict[str:Any]:
     """Ensure that columns in correct order, and vec is unit vector"""
     if 'vec' not in params:
         raise ValueError("must specify vec for linear_gate")
@@ -104,32 +105,32 @@ def _normalize_linear_gate(params:dict[str:Any], colorder:tuple[int,...]):
     return dict(vec=vec, m=m)
 
 
-register_PyCode(_normalize_linear_gate)
+register_PyCode(_regularize_linear_gate)
 
-
+#: GateDef for :func:`linear_gt_gate` discouraged from use, use :attr:`LIN_GEQ_gate` instead.
 LIN_GT_gate = GateDef(linear_gt_gate, tupledict(('vec', np.ndarray), ('m', float)),
-                   sortcol=True, normalize=_normalize_linear_gate)
+                   sortcol=True, regularize=_regularize_linear_gate)
 
-
+#: GateDef for :func:`linear_geq_gate`
 LIN_GEQ_gate = GateDef(linear_geq_gate, tupledict(('vec', np.ndarray), ('m', float)),
-                   sortcol=True, normalize=_normalize_linear_gate)
+                   sortcol=True, regularize=_regularize_linear_gate)
 
 
 def _comp_linear(gateA:Gate, gateB:Gate)->int:
     """Comparison function for 2 linear type gates"""
     if gateA.columns != gateB.columns:
-        return GD_intersect
+        return 0b1111
     if np.any(gateA.params['vec'] != gateB.params['vec']):
-        return GD_intersect
+        return 0b1111
     if gateA.params['m'] < gateB.params['m']:
-        return GD_superset
+        return 0b1011
     elif gateA.params['m'] > gateB.params['m']:
-        return GD_subset
+        return 0b1101
     if gateA.gatedef == LIN_GT_gate and gateB.gatedef == LIN_GEQ_gate:
-        return GD_subset
+        return 0b1101
     elif gateA.gatedef == LIN_GEQ_gate and gateB.gatedef == LIN_GEQ_gate:
-        return GD_superset
-    return GD_equal
+        return 0b1011
+    return 0b1001
 
 
 GateDefinition.set_gate_comparison(LIN_GT_gate, LIN_GT_gate, _comp_linear)
@@ -173,7 +174,7 @@ register_PyCode(ellipsoid_lt_gate)
                 
 def ellipsoid_leq_gate(*columns:Column, transform:np.ndarray[np.double], center:np.ndarray[np.double])->np.ndarray[np.bool_]:
     r"""
-    Gate function for :attr:`ELLIPSOID_Leq_gate`
+    Gate function for :attr:`ELLIPSOID_LEQ_gate`
     Creates an n-D ellipsoid with a closed (less than or equal to) 
     boarder.
 
@@ -199,7 +200,7 @@ def ellipsoid_leq_gate(*columns:Column, transform:np.ndarray[np.double], center:
 register_PyCode(ellipsoid_leq_gate)
 
 
-def _norm_upper(r:np.ndarray[np.double])->np.ndarray[np.double]:
+def _reg_upper(r:np.ndarray[np.double])->np.ndarray[np.double]:
     """For ellipse rotation matrix, generate upper triangular matrix of r"""
     rn = np.zeros(r.shape)
     for i in range(r.shape[0]):
@@ -209,7 +210,7 @@ def _norm_upper(r:np.ndarray[np.double])->np.ndarray[np.double]:
     return rn
 
 
-def _normalize_ellipsoide_gate(params:dict[str:np.ndarray[np.double]],
+def _regularize_ellipsoide_gate(params:dict[str:np.ndarray[np.double]],
                                colorder:tuple[int,...])->np.ndarray[np.bool_]:
     """
     Enure transform is upper triangular matrix and re-order transform and
@@ -227,18 +228,20 @@ def _normalize_ellipsoide_gate(params:dict[str:np.ndarray[np.double]],
         raise ValueError(f"unrecognized param(s) for elipsoid_gate: {tuple(params.keys())}")
     center = center[colorder]
     if any(transform[i,j] != 0.0 for i, j in product(range(s), range(s)) if j > i):
-        transform = _norm_upper(transform)
+        transform = _reg_upper(transform)
     return dict(transform=transform, center=center)
 
 
-register_PyCode(_normalize_ellipsoide_gate)
+register_PyCode(_regularize_ellipsoide_gate)
 
 
+#: GateDef for :func:`ellipspoid_lt_gate`
 ELLIPSOID_LT_gate = GateDef(ellipsoid_lt_gate, tupledict(('transform', np.ndarray), ('center', np.ndarray)), 
-                             sortcol=True, normalize=_normalize_ellipsoide_gate)
+                             sortcol=True, regularize=_regularize_ellipsoide_gate)
 
+#: GateDef for :func:`ellipspoid_leq_gate, discouraged from use`
 ELLIPSOID_LEQ_gate = GateDef(ellipsoid_leq_gate, tupledict(('transform', np.ndarray), ('center', np.ndarray)), 
-                             sortcol=True, normalize=_normalize_ellipsoide_gate)
+                             sortcol=True, regularize=_regularize_ellipsoide_gate)
 
 
 def _isin_nan(elements:np.ndarray, test_elements:np.ndarray, **kwargs)->np.ndarray[np.bool_]:
@@ -289,7 +292,7 @@ def isin_gate(column:np.ndarray, *, inset:np.ndarray)->np.ndarray[np.bool_]:
     return _isin_nan(column, inset)
 
 
-def _normalize_isin(params:dict, cols:tuple[Column])->dict:
+def _regularize_isin(params:dict, cols:tuple[Column])->dict:
     """Ensure params['isin'] matches type fo col"""
     inset = params['inset']
     dtype = cols[0]._get_coldef().dtype
@@ -331,14 +334,17 @@ def _comp_isin_geq(gateIN:Gate, gateGEQ:Gate)->int:
 
 register_PyCode(isin_gate)
 
+#: GateDef for :func:`isin_gate` function
 ISIN_gate = GateDef(isin_gate, tupledict(('inset', np.ndarray)), np.array([1,1]))
 GateDefinition.set_gate_comparison(ISIN_gate, ISIN_gate, _comp_isin_isin)
 GateDefinition.set_gate_comparison(ISIN_gate, LIN_GT_gate, _comp_isin_gt)
 GateDefinition.set_gate_comparison(ISIN_gate, LIN_GEQ_gate, _comp_isin_geq)
 
 
-def percentile_gte_gate(col:np.ndarray[np.number], *, percentile:float):
+def percentile_geq_gate(col:np.ndarray[np.number], *, percentile:float):
     r"""
+    Gate function that takes all rows in with values greater than or equal to
+    the `percentile` percentile.
     Gate function for :attr:`PERCENTILE_GT_gate`
 
     Parameters
@@ -357,11 +363,15 @@ def percentile_gte_gate(col:np.ndarray[np.number], *, percentile:float):
     return col >= np.percentile(col, percentile)
 
 
-register_PyCode(percentile_gte_gate)
+register_PyCode(percentile_geq_gate)
 
 
 def percentile_gt_gate(col:np.ndarray[np.number], *, percentile:float):
     r"""
+    **Discouraged from use** use :func:`percentile_geq_gate` instead.
+    
+    Gate function that takes all rows in with values greater than to
+    the `percentile` percentile.
     Gate function for :attr:`PERCENTILE_GT_gate`
 
     Parameters
@@ -383,8 +393,8 @@ def percentile_gt_gate(col:np.ndarray[np.number], *, percentile:float):
 register_PyCode(percentile_gt_gate)
 
 
-def _normalize_percentile(param:dict[str:float])->dict:
-    """Normalize function for percentile_XXX_gate GateDefs"""
+def _regularize_percentile(param:dict[str:float])->dict:
+    """regularize function for percentile_XXX_gate GateDefs"""
     if 'percentile' not in param:
         param['percentile'] = 90.0
     if param['percentile'] <= 0.0 or param['percentile'] >= 100.0:
@@ -392,10 +402,13 @@ def _normalize_percentile(param:dict[str:float])->dict:
     return param
 
 
-register_PyCode(_normalize_percentile)
+register_PyCode(_regularize_percentile)
 
-PERCENTILE_GTE_gate = GateDef(percentile_gte_gate, tupledict(('percentile',float)), atomic=False, normalize=_normalize_percentile)
-PERCENTILE_GT_gate = GateDef(percentile_gt_gate, tupledict(('percentile',float)), atomic=False, normalize=_normalize_percentile)
+#: GateDef for :func:`percentile_geq_gate`
+PERCENTILE_GEQ_gate = GateDef(percentile_geq_gate, tupledict(('percentile',float)), atomic=False, regularize=_regularize_percentile)
+
+#: GateDef for :func:`percentile_gt_gate`, discouraged from use
+PERCENTILE_GT_gate = GateDef(percentile_gt_gate, tupledict(('percentile',float)), atomic=False, regularize=_regularize_percentile)
 
 
 def shift_mask(mask:np.ndarray[np.bool_], offset:int=1, fill:bool=False)->np.ndarray[np.bool_]:
@@ -441,6 +454,7 @@ def _validate_shift_mask(params):
 register_PyCode(shift_mask)
 register_PyCode(_validate_shift_mask)
 
+#: MappedGateDef for :func:`shift_mask` shifts gate by offset
 SHIFT_mapgate = MappedGateDef(shift_mask, tupledict(('offset', int), ('fill', bool)), _validate_shift_mask)
 
 
@@ -482,6 +496,7 @@ _TT_andnn.setflags(write=False)
 def make_gt_gate(column:Column, mn:float, exclude_nan:bool=True, outside_expand:bool=False)->GateGroup:
     """
     Create a gate for all values of column greater than mn.
+    This gate is discourage from use, use :func:`make_geq_gate` instead.
 
     Parameters
     ----------
@@ -596,6 +611,7 @@ def make_lt_gate(column:Column, mx:float, exclude_nan:bool=True, outside_expand:
 def make_leq_gate(column:Column, mx:float, exclude_nan:bool=True, outside_expand:bool=False)->GateGroup:
     """
     Create a gate for all values of column less than or equal to mx.
+    This gate is discrouraged from use, use :func:`make_lt_gate` instead.
 
     Parameters
     ----------
@@ -848,7 +864,7 @@ def make_upper_inclusive_percentile_gate(column:Column, up:float)->GateGroup:
         percentile or greater.
 
     """
-    return GateGroup.as_gategroup(Gate(PERCENTILE_GTE_gate, column, dict(percentile=up)))
+    return GateGroup.as_gategroup(Gate(PERCENTILE_GEQ_gate, column, dict(percentile=up)))
 
 
 def make_upper_exclusive_percentile_gate(column:Column, up:float)->GateGroup:
@@ -915,4 +931,4 @@ def make_lower_exclusive_percentile_gate(column:Column, low:float)->GateGroup:
         `up`\ :sup:`th` percentile.
 
     """
-    return ~Gate(PERCENTILE_GTE_gate, (column, ), dict(percentile=low))
+    return ~Gate(PERCENTILE_GEQ_gate, (column, ), dict(percentile=low))

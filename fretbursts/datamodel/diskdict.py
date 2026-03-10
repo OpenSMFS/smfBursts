@@ -264,11 +264,11 @@ class DiskDict:
         table Group in which all values of DiskDict are saved, None if no group
         is set
         """
-        return self._group
+        return self._group._group
 
     @group.setter
     def group(self, group:tb.Group):
-        if self._group.created:
+        if self._group._created:
             raise TypeError("group already set")
         self._group = group if isinstance(group, _GroupFuture) else _GroupFuture(group, self)
 
@@ -282,7 +282,7 @@ class DiskDict:
         group : tb.Group
             Group from which to load saved data.
         autosave : bool, optional
-            DESCRIPTION. The default is False.
+            Whether to automatically save values to disk. The default is False.
         load_all : bool, optional
             Whether to load all values into memory and detach from current HDF5 file.
             The default is False.
@@ -294,7 +294,10 @@ class DiskDict:
 
         """
         ocls = TypeValidator._grouptypes['DiskDict'][group.dictdef_.read().decode()]
-        return ocls(group=group)
+        out = ocls(group=group, autosave=autosave)
+        if load_all:
+            out.load_to_memory()
+        return out
 
     def save(self, group:GroupArg=None)->tb.Group:
         """

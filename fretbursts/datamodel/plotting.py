@@ -814,7 +814,9 @@ def hexbin(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Axe
     (cx, cy), (nx, ny) = _get_column_arrays(data, colx, coly, gate=gate, 
                                             include_unit=include_unit, rescale=rescale)
     xlabel = nx if xlabel is None else xlabel
+    xlabel_kwargs = dict() if xlabel_kwargs is None else xlabel_kwargs
     ylabel = ny if ylabel is None else ylabel
+    ylabel_kwargs = dict() if ylabel_kwargs is None else ylabel_kwargs
     pc = ax.hexbin(cx, cy, **kwargs)
     xttl = None if xlabel is False else ax.set_xlabel(xlabel, **xlabel_kwargs)
     yttl = None if ylabel is False else ax.set_ylabel(ylabel, **ylabel_kwargs)

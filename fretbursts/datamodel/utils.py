@@ -11,7 +11,7 @@ from itertools import chain, product
 from collections.abc import Callable, Sequence, Iterator, Iterable, Hashable
 from textwrap import wrap
 from typing import ClassVar, Any, Union, Literal
-from numbers import Integral, Number
+from numbers import Integral, Number, Real
 import math
 import warnings
 
@@ -63,7 +63,7 @@ def _as_sortable(val:Union[np.ndarray,Hashable])->Hashable:
     if np.issubdtype(type(val), np.number) or isinstance(val, str):
         return val
     if isinstance(val, np.ndarray):
-        return tuple(_as_sortable(v) for v in val)
+        return _tuple_array(val)
     return hash(val)
 
 
@@ -73,8 +73,18 @@ def _make_sortable(val:Union[np.ndarray,Hashable])->Union[tuple[Hashable,...],in
         val = tuple(val)
     if isinstance(val, tuple):
         val = tuple(_make_sortable(v) if isinstance(v, tuple) else _as_sortable(v) for v in val)
-    return val
+    if isinstance(val, (Real, str, bytes)):
+        return val
+    if hasattr(val, '_sort_tuple'):
+        tp = type(val)
+        return (f'{tp.__module__}.{tp.__name__}', val._sort_tuple)
+    return _const_hash(val)
 
+
+class _Sortable:
+    __slots__ = ('key', )
+    def __init__(self, key):
+        self.key = key
 
 def hash_array(array:np.ndarray)->int:
     """Hash a numpy array"""

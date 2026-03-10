@@ -85,7 +85,7 @@ def load_ptu(file:Union[str,Path],
     """
     Load .ptu (picoquant) file into a :class:PhotonHDF5Data` object.
     Note that excitation and emission windows will need to be completed to
-    allow for normalization.
+    allow for regularization.
 
     Parameters
     ----------
@@ -162,7 +162,7 @@ def load_spc(file:Union[str,Path], setfilename:Union[str,Path]=None, spc_model:s
     """
     Load .spc (Becker & Hickl) file into a :class:PhotonHDF5Data` object.
     Note that excitation and emission windows will need to be completed to
-    allow for normalization.
+    allow for regularization.
 
 
     Parameters
@@ -244,7 +244,7 @@ def load_sm(file:Union[str,Path],
     """
     Load .sm file into a :class:PhotonHDF5Data` object.
     Note that excitation and emission windows will need to be completed to
-    allow for normalization.
+    allow for regularization.
 
 
     Parameters

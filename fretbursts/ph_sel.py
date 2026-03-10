@@ -80,6 +80,7 @@ import tables as tb
 from .datamodel.utils import ImDict, union_multi, _tuple_array
 from .datamodel.immutabledata import _ImData, TypeValidator, init_write_group, register_byteslike
 
+
 class ChannelSet:
     """
     Logical representation of set of integers (uses uint8).
@@ -99,16 +100,16 @@ class ChannelSet:
     def __init__(self, kind:bool, elements:frozenset[np.uint8]):
         super().__setattr__('kind', bool(kind))
         super().__setattr__('elements', frozenset(elements))
-        
+    
     def __setattr__(self, name, value):
         raise AttributeError("ChannelSet does not support assignment")
-    
+
     def __bool__(self)->bool:
         return False if self.kind is True and len(self.elements) == 0 else True    
-        
+    
     def __invert__(self)->"ChannelSet":
         return type(self)(not self.kind, self.elements)
-    
+
     def __and__(self, other:"ChannelSet")->"ChannelSet":
         """Equivalent to intersect"""
         if self.kind:
@@ -121,7 +122,7 @@ class ChannelSet:
                 return type(self)(True, other.elements - self.elements)
             else:
                 return type(self)(False, self.elements | other.elements)
-    
+
     def __or__(self, other:"ChannelSet")->"ChannelSet":
         """Equivalent to union"""
         if self.kind:
@@ -134,26 +135,26 @@ class ChannelSet:
                 return type(self)(False, self.elements - other.elements)
             else:
                 return type(self)(False, self.elements & other.elements)
-            
+
     def __matmul__(self, other):
         return type(self)(self.kind != other.kind, self.elements ^ other.elements)
-    
+
     def __xor__(self, other:"ChannelSet")->"ChannelSet":
         """Elements in one and only one of the two sets"""
         return ~self.__matmul__(other)
-    
+
     def __sub__(self, other:"ChannelSet")->"ChannelSet":
         return (self^other) & self
-    
+
     def __iter__(self)->Iterable[np.uint8]:
         yield from (i for i in self.elements)
-    
+
     def __hash__(self)->int:
         return hash((self.kind, self.elements))
-    
+
     def __eq__(self, other)->bool:
         return self.kind == other.kind and self.elements == other.elements
-    
+
     def __contains__(self, other:"ChannelSet")->bool:
         if isinstance(other, ChannelSet):
             return self & other == other
@@ -162,7 +163,7 @@ class ChannelSet:
                 return other in self.elements
             else:
                 return other not in self.elements
-    
+
     def __le__(self, other:"ChannelSet")->bool:
         return self in other
     
@@ -174,7 +175,7 @@ class ChannelSet:
     
     def __gt__(self, other:"ChannelSet")->bool:
         return other in self and self not in other
-    
+
     @property
     def _sel_repr(self)->str:
         """repr of selection for use with :class:`PhStream`"""
@@ -186,17 +187,17 @@ class ChannelSet:
         else:
             text += '[' + ','.join(str(s) for s in self.elements) + ']'
         return text
-                
+            
     def __str__(self)->str:
         if not self:
             return "emtpy"
         elif not self.kind and len(self.elements) == 0:
             return "all"
         return f'({self.kind}):(' +  ', '.join(str(s) for s in self.elements) + ')'
-    
+
     def __repr__(self)->str:
         return "Channel set: " + str(self)
-    
+
     def render_positive(self, n_streams:int, convert_all:bool=False)->"ChannelSet":
         """
         Convert to positive definition of Channel set, based on number of channels
@@ -233,12 +234,12 @@ class ChannelSet:
             if convert_all and len(ret) == n_streams:
                 return type(self)(False, {})
             return type(self)(True, ret)
-    
+
     @property
     def positive_all(self)->bool:
         """If defined positibely or empty negative (all)"""
         return self.kind if self.elements else not self.kind
-    
+
     def tex_str(self, stream_names:dict[str:dict[int|frozenset[int]:str]]=None)->str:
         """
         Convert to math-tex formated string
@@ -268,6 +269,11 @@ class ChannelSet:
         if len(self.elements) > 1:
             ret = f'[{ret}]'
         return ret if self.kind else rf'\neg {ret}'
+    
+    @property
+    def _sort_tuple(self)->tuple[bool, int,...]:
+        return tuple([self.kind]+sorted(self.elements))
+
 
 
 _csall = ChannelSet(False, frozenset())
@@ -389,45 +395,45 @@ class PhStream(_ImData):
     __slots__ = _StreamTypes
     _typeconversions = ImDict({key:TV_channelset for key in _StreamTypes})
     _defaults = ImDict({key:ChannelSet(False, frozenset()) for key in _StreamTypes})
-    
+
     # catch case of single empty stream, convert to all empty
     def __post_init__(self):
         if not self:
             for attr in self._all_keys():
                 super(_ImData, self).__setattr__(attr, _csempty)
-    
+
     def __eq__(self, other):
         if isinstance(other, PhStream):
             return super().__eq__(other)
         if isinstance(other, PhSel):
             return other.__eq__(self)
         return False
-    
+
     __hash__ = _ImData.__hash__ # python automatically resets hash if a new eq method is defined
-    
+
     def __bool__(self):
         return all(bool(det) for det in self._all_values())
-    
+
     def _all_keys(self):
         """keys() like iterator, ensures all channel categories included"""
         yield from (cat for cat in self.__slots__)
-    
+
     def _all_values(self)->Iterator[ChannelSet]:
         """values() like iterator, ensures all channel sets included"""
         yield from (self[cat] for cat in self.__slots__)
-    
+
     def _all_items(self)->Iterator[tuple[str, ChannelSet]]:
         """items() like iterator, enuring iteration over all channel categories"""
         yield from ((cat, self[cat]) for cat in self.__slots__)
-    
-    def keys(self, skip:Union[Sequence[Hashable],set[Hashable],frozenset[Hashable]]=None)->Iterator[str]:
+
+    def keys(self, skip:Sequence[Hashable]|set[Hashable]|frozenset[Hashable]=None)->Iterator[str]:
         """
         Iterator over each channel category name.
 
         Parameters
         ----------
-        skip : Union[Sequence[Hashable],set[Hashable],frozenset[Hashable]], optional
-            DESCRIPTION. The default is None.
+        skip : Sequence[Hashable]|set[Hashable]|frozenset[Hashable], optional
+            channel categories to skip. The default is None.
 
         Yields
         ------
@@ -437,8 +443,7 @@ class PhStream(_ImData):
         """
         skip = skip if skip is not None else tuple()
         yield from (cat for cat in self.__slots__ if self[cat] != ChannelSet(False, frozenset()) and cat not in skip)
-    
-    
+
     def __contains__(self, other):
         if isinstance(other, PhSel):
             return other in PhSel(self)
@@ -446,7 +451,7 @@ class PhStream(_ImData):
             intersect = _stream_intersect(self, other)
             return intersect == other
         raise TypeError(f"cannot assess {type(other)} contained in PhSel object")
-    
+
     def __invert__(self):
         if not self:
             return type(self)()
@@ -459,26 +464,26 @@ class PhStream(_ImData):
         for inv in inverted[1:]:
             out |= inv
         return out
-    
+
     def __le__(self, other):
         return self in other
-    
+
     def __ge__(self, other):
         return other in self
-    
+
     def __lt__(self, other):
         return self in other and other not in self
-    
+
     def __gt__(self, other):
         return other in self and self not in other
-    
+
     def __and__(self, other):
         if isinstance(other, PhStream):
             return _stream_intersect(self, other)
         elif isinstance(other, PhSel):
             return other & self
         raise TypeError(f"unsupported operand types for &: PhStream and {other.__name__}")
-    
+
     def __or__(self, other):
         if isinstance(other, PhSel):
             return other | self
@@ -489,7 +494,7 @@ class PhStream(_ImData):
         # eliminate repeat streams
         comb = tuple(_stream_combine(*streams))
         return comb[0] if len(comb) == 1 else PhSel(*comb)
-    
+
     def __xor__(self, other):
         if isinstance(other, PhSel):
             return other ^ self
@@ -502,17 +507,17 @@ class PhStream(_ImData):
         streams = _stream_combine(*streams)
         comb = _stream_combine(*streamS)
         return comb[0] if len(comb) == 1 else PhSel(*comb)
-    
+
     def __matmul__(self, other):
         if not isinstance(other, (PhStream, PhSel)):
             raise TypeError(f"unsupported operand types for @: PhStream and {other.__name__}")
         return ~(self ^ other)
-    
+
     def __add__(self, other):
         if not isinstance(other, (PhStream, PhSel)):
             raise TypeError(f"unsupported operand types for +: PhStream and {other.__name__}")
         return self | other
-        
+
     def __sub__(self, other):
         if isinstance(other, PhSel):
             out = PhSel(self) - other
@@ -525,15 +530,15 @@ class PhStream(_ImData):
             comb = _stream_combine(*streamS)
             return comb[0] if len(comb) == 1 else PhSel(*comb)
         raise TypeError(f"unsupported operand types for -: PhStream and {other.__name__}")
-    
+
     def __str__(self):
         return ''.join(cset._sel_repr + name for name, cset in self._all_items() if ~cset)
-    
+
     def __repr__(self):
         text = str(self.__class__) + '\n'
         text += '\n'.join(f'{name} = {str(cset)}' for name, cset in self._all_items())
         return text
-    
+
     def render_positive(self, detdef:"DetDef", convert_all:bool=False)->"PhStream":
         """
         Positive representation of self based on :class:`DetDef` definition of
@@ -555,17 +560,17 @@ class PhStream(_ImData):
         """
         return type(self)(**{cat:self[cat].render_positive(n, convert_all=convert_all) 
                              for cat, n in detdef.items()})
-    
+
     @property
     def positive(self)->bool:
         """If all streams defined in a positive manner"""
         return all(s.kind for s in self._all_values())
-    
+
     @property
     def positive_all(self)->bool:
         """All streams defined as all or in possitive manner"""
         return all(s.positive_all for s in self._all_values())
-    
+
     def tex_str(self, detdef:"DetDef"=None, name:str='f', 
                 stream_names:dict[str:dict[int|frozenset[int]:str]]=None)->str:
         """
@@ -603,6 +608,11 @@ class PhStream(_ImData):
         out += '_{%s}'%sub if sub else ''
         out += '^{%s}'%sup if sup else ''
         return out
+    
+    @property
+    def _sort_tuple(self)->tuple[tuple[bool,int,...],...]:
+        return tuple(s._sort_tuple for s in self._all_values())
+
 
 
 _psall = PhStream()
@@ -737,9 +747,9 @@ class PhSel:
                         'split':None})
     # map for recording phsel string as node-name
     _attr_repl_dict = ImDict({'[':'b', ']':'B', '~':'n', ',':'c'})
-    
+    #: all compoenent streams of PhSel, streams may overlap, if a stream is in one compenent, is in PhSel
     streams: frozenset[PhStream]
-    
+
     def __init__(self, *args, **kwargs):
         if args and kwargs:
             raise ValueError("Cannot mix args and kwargs in creating new PhSel object")
@@ -764,13 +774,13 @@ class PhSel:
                 pargs += [PhStream(**kwargs), ]
         sub_streams = _stream_shadows(*pargs) if pargs else frozenset()
         super().__setattr__('streams', _stream_combine(*chain(*sub_streams)))
-        
+
     def __setattr__(self, attr):
         raise AttributeError("PhSel does not suport assignment")
-    
+
     def __hash__(self)->int:
         return hash(self.streams)
-    
+
     def __contains__(self, other)->bool:
         if isinstance(other, PhSel):
             return all(stream in self for stream in other.streams)
@@ -779,39 +789,39 @@ class PhSel:
         else:
             raise TypeError("Can only asses PhSel and PhStream can be contained by PhSel,"
                             " got type {type(other)}")
-    
+
     def __iter__(self)->PhStream:
         for stream in self.streams:
             yield stream
-    
+
     def __bool__(self):
         return bool(self.streams)
-    
+
     def __invert__(self):
         invs = set(chain.from_iterable(_chain_streams(~stream) for stream in self.streams))
         invs = chain.from_iterable(_stream_shadows(*tuple(invs)+tuple(self.streams))[:len(invs)])
         invs = set(inv for inv in invs if inv not in self)
         return type(self)(*invs)
-    
+
     def __eq__(self, other)->bool:
         if isinstance(other, PhStream):
             return len(self.steams) == 1 and list(self.streams)[0] == other
         elif not isinstance(other, PhSel):
             return False
         return self.streams == other.streams
-    
+
     def __leq__(self, other):
         return other in self
-    
+
     def __lt__(self, other):
         return (other in self) and (self not in other)
-    
+
     def __geq__(self, other):
         return self in other
-    
+
     def __gt__(self, other):
         return (self in other) and (other not in self)
-    
+
     def __and__(self, other):
         if not isinstance(other, (PhStream, PhSel)):
             raise TypeError(f"unsupported operand types for &: PhStream and {other.__name__}")
@@ -822,7 +832,7 @@ class PhSel:
         elif isinstance(other, PhSel):
             streams = chain.from_iterable(_chain_streams(self & stream) for stream in other.streams)
         return PhSel(*streams)
-    
+
     def __or__(self, other)->"PhSel":
         if not isinstance(other, (PhStream, PhSel)):
             raise TypeError(f"unsupported operand types for |: PhStream and {other.__name__}")
@@ -831,24 +841,24 @@ class PhSel:
         elif isinstance(other, PhSel):
             streams = chain.from_iterable(_chain_streams(self | stream) for stream in other.streams)
         return PhSel(*streams)
-    
+
     def __xor__(self, other)->"PhSel":
         if not isinstance(other, (PhStream, PhSel)):
             raise TypeError(f"unsupported operand types for ^: PhStream and {other.__name__}")
         shaddows = chain.from_iterable(_stream_shadows(*tuple(self.streams)+tuple(_chain_streams(other))))
         xor = (stream for stream in shaddows if not ((stream in self) and (stream in other)))
         return PhSel(*xor)
-    
+
     def __matmul__(self, other)->"PhSel":
         if not isinstance(other, (PhStream, PhSel)):
             raise TypeError(f"unsupported operand types for @: PhStream and {other.__name__}")
         return ~(self ^ other)
-    
+
     def __add__(self, other)->"PhSel":
         if not isinstance(other, (PhStream, PhSel)):
             raise TypeError(f"unsupported operand types for +: PhStream and {other.__name__}")
         return self | other
-    
+
     def __sub__(self, other)->"PhSel":
         if not isinstance(other, (PhStream, PhSel)):
             raise TypeError(f"unsupported operand types for -: PhStream and {other.__name__}")
@@ -857,20 +867,19 @@ class PhSel:
         shaddows = chain(*_stream_shadows(*tuple(_chain_streams(self))+tuple(_chain_streams(other))))
         xor = (stream for stream in shaddows if (stream in self) and (stream not in other))
         return PhSel(*xor)
-    
+
     def __str__(self):
         if not self.streams:
             return 'none'
         elif self == phsel_all:
             return 'all'
         return '_'.join(str(stream) for stream in self.streams)
-        
-    
+
     def __repr__(self):
         text = str(self.__class__) + '\n'
         text += '\n'.join(stream.__repr__() for stream in self.streams)
         return text
-    
+
     def render_positive(self, detdef:"DetDef", convert_all:bool=False)->"PhSel":
         """
         Returns a :class:`PhSel` object with all positive stream definitions, meaning
@@ -892,7 +901,7 @@ class PhSel:
         """
         return type(self)(*(phs.render_positive(detdef, convert_all=convert_all) 
                             for phs in self.streams))
-    
+
     def write_group(self, group:tb.Group, name:Union[str,None]=None)->tb.Array:
         """
         Record a PhSel object in an HDF5 file.
@@ -935,7 +944,7 @@ class PhSel:
 
         """
         return cls(group.phsel.decode())
-    
+
     @property
     def attr_str(self)->str:
         r"""Alpha-numeric string representation suitable for name of HDF5 nodes 
@@ -944,7 +953,7 @@ class PhSel:
         for key, val in self._attr_repl_dict.items():
             string = string.replace(key, val)
         return string
-    
+
     @classmethod
     def from_attr_str(cls, attr:str)->"PhSel":
         """
@@ -965,17 +974,17 @@ class PhSel:
         for key, val in cls._attr_repl_dict.items():
             attr = attr.replace(val, key)
         return cls(attr)
-    
+
     @property
     def positive(self)->bool:
         """If curret object only defines channels with possitive definitions"""
         return all(s.positive for s in self.streams)
-    
+
     @property
     def positive_all(self)->bool:
         """True if is positive, or all channels empty negative (all)"""
         return all(s.positive_all for s in self.streams)
-    
+
     def _get_union_set(self, stream:str)->ChannelSet:
         """Get :class:`ChannelSet of maximal cross section along given stream"""
         st_iter = iter(self)
@@ -983,27 +992,27 @@ class PhSel:
         for st in st_iter:
             cset |= st[stream]
         return cset
-    
+
     @property
     def ex(self)->ChannelSet:
         """:class:`ChannelSet` of maximal cross section of excitation"""
         return self._get_union_set('ex')
-    
+
     @property
     def em(self)->ChannelSet:
         """:class:`ChannelSet` set of maximal cross section of emission"""
         return self._get_union_set('em')
-    
+
     @property
     def pol(self)->ChannelSet:
         """:class:`ChannelSet` set of maximal cross section of polarization"""
         return self._get_union_set('pol')
-    
+
     @property
     def split(self)->ChannelSet:
         """:class:`ChannelSet` set of maximal cross section of split"""
         return self._get_union_set('split')
-    
+
     def tex_str(self, detdef:"DetDef"=None, name:str='f', 
                 stream_names:dict[str:dict[int|frozenset[int]:str]]=None, reduce:bool=True)->str:
         """
@@ -1039,6 +1048,11 @@ class PhSel:
         return r'\:+\:'.join(stream.tex_str(detdef, name, stream_names) 
                              for stream in streams)
     
+    @property
+    def _sort_tuple(self)->tuple[tuple[bool,int,...],...]:
+        return tuple(sorted(stream._sort_tuple for stream in self.streams))
+
+
 
 def str_long_less(a:str, b:str)->int:
     """
@@ -1227,10 +1241,13 @@ class DetDef:
     """
     __slots__ = ('shape', 'strides')
     _params:ClassVar[tuple[str]] = _StreamTypes
-    
+    #: Array of [nex, nem, npol, nspol] ie the shape of the detector space
     shape:np.ndarray[np.uint8]
+    #: Array of the "stride" for each channel, 
+    #: ie by how many indexes does increasing a given channel by 1 
+    #: shift the detector index
     strides:np.ndarray[np.uint8]
-    
+
     def __init__(self, *args, **kwargs):
         if len(args) > len(self._params):
             raise TypeError("too many arguments for DetDef")
@@ -1268,20 +1285,20 @@ class DetDef:
             if name == attr_:
                 return array[i]
         raise AttributeError(f"DetDef has no attribute {attr}")
-    
+
     def __getitem__(self, key):
         return self.__getattr__(key)
-    
+
     def __hash__(self):
         return hash(_tuple_array(self.shape))
-    
+
     def __eq__(self, o):
         return np.all(self.shape == o.shape)
 
     def items(self)->Iterator[tuple[str, int]]:
         """Iterator over each channel, yielding (channel name, size) as tuples of (str, int)."""
         yield from zip(self._params, self.shape)
-    
+
     def write_group(self, group:tb.Group, name:str|None=None)->tb.Array:
         """
         Write detdef to group of name ``name`` inside hdf5 group ``group``
@@ -1322,7 +1339,7 @@ class DetDef:
         """
         shape = group.read()
         return cls(*shape)
-    
+
     def get_det_id(self, idxs:np.ndarray[np.integer])->int:
         """
         From size 4 array of channel index, get the detector id.
@@ -1339,27 +1356,27 @@ class DetDef:
 
         """
         return np.sum(idxs*self.strides)
-    
+
     @property
     def size(self)->int:
         """Total number of single streams in DetDef"""
         return np.prod(self.shape)
-    
+
     def _get_stream_id(self, phstream:PhStream)->np.ndarray[np.uint8]:
         """Get stream_ids (indices in dets array) from phstream"""
         stream = phstream.render_positive(self)
         pstream = product(*(tuple((name, i) for i in ids) for name, ids in stream._all_items()))
         idxs = [sum(self[f'{p}_stride']*i for p, i in ds) for ds in pstream]
         return np.unique(idxs).astype(np.uint8)
-        
-    def get_stream_ids(self, phsel:PhSel)->np.ndarray[np.uint8]:
+
+    def get_stream_ids(self, phsel:PhSel|PhStream)->np.ndarray[np.uint8]:
         """
         Retrieve the stream ids (det ids) of a :class:`PhSel` object based
         on self.
 
         Parameters
         ----------
-        phsel : PhSel
+        phsel : PhSel | PhStream
             Object to convert to stream ids (det ids).
 
         Returns
@@ -1371,7 +1388,7 @@ class DetDef:
         if isinstance(phsel, PhStream):
             phsel = (phsel, )
         return union_multi(*(self._get_stream_id(phs) for phs in phsel))
-    
+
     def _stream_id_to_PhStream(self, stream_id:int)->PhStream:
         """Convert single stream_id (must be int) to :class:`PhStream`"""
         kwargs = dict()
@@ -1383,7 +1400,7 @@ class DetDef:
             kwargs[param], stream_id = divmod(stream_id, stride)
         kwargs = {k:[v] for k, v in kwargs.items()} # because PhStream assumes inputs are sequences
         return PhStream(**kwargs)
-    
+
     def stream_ids_to_PhSel(self, stream_ids:np.ndarray[np.uint8], convert_all:bool=True)->PhSel:
         """
         Convert stream_ids (sequence of ints, preferable numpy array dtype=uint8)
@@ -1405,13 +1422,13 @@ class DetDef:
         if convert_all:
             out = out.render_positive(self, convert_all=True)
         return out
-    
+
     def __str__(self):
         return 'DetDef' + ''.join(f'{n}{p}' for n, p in zip(self.shape, self._params) if n != 1)
-    
+
     def __repr__(self):
         return str(self) + f" at 0x{id(self):x}"
-
+        
 
 def check_PhSel(val:PhSel, render_positive:bool=False, detdef:DetDef=None)->PhSel:
     """
@@ -1552,7 +1569,7 @@ def sort_phsels(detdef:DetDef, phsels:Sequence[PhSel], return_index:bool=False)-
     Parameters
     ----------
     detdef : DetDef
-        Definition of detectos being used in current space, used to normalize
+        Definition of detectos being used in current space, used to regularize
         for negatively defined PhSels.
     phsels : Sequence[PhSel]
         Sequence of :class:`PhSel` objects to be sorted.

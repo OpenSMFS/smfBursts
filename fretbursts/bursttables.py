@@ -27,7 +27,7 @@ from .datamodel.tables import ParamDef, ParentDef, ColumnDef, Param, Column, as_
 from .datamodel.citations import cite, add_citation
 from .photondata import (
     PhotonData, PhotonTable, BasePhotonTable, ChildPhotonTable, BasePhotonTableLike, 
-    _normalize_column_startstop, _normalize_ph_sel, 
+    _regularize_column_startstop, _regularize_ph_sel, 
     _title_sels, _title_startstop_append, _title_unit_append, _pol_ps,
     TV_str_start, TV_str_stop, make_base_column_defs,
     ColKeyStart, ColKeyStop
@@ -76,7 +76,9 @@ def _iter_ratio(table:PhotonTable, nph_name:str, phsel_num:PhSel, phsel_dem:PhSe
 
 def _calc_ratio(table:PhotonTable, nph_name:str, phsel_num:PhSel, phsel_dem:PhSel, starttype:str, stoptype:str):
     """General getter function for ratio_[]"""
-    return table[nph_name, phsel_num, starttype, stoptype] / table[nph_name, phsel_dem, starttype, stoptype]
+    with np.errstate(divide='ignore'):
+        out = table[nph_name, phsel_num, starttype, stoptype] / table[nph_name, phsel_dem, starttype, stoptype]
+    return out
 
 
 def _get_ratio_title(col:Column, name:str, include_unit:bool, origin:PhotonData)->str:
@@ -99,7 +101,9 @@ def _calc_anisotropy(table:PhotonTable, nph_name:str, phsel_p:PhSel, phsel_s:PhS
     """General igetter function for anisotropy_[]"""
     p = table[nph_name, phsel_p, starttype, stoptype]
     s = table[nph_name, phsel_s, starttype, stoptype]
-    return (p-s)/(p+2*s)
+    with np.errstate(divide='ignore'):
+        out = (p-s)/(p+2*s)
+    return out
 
 
 def _get_anisotropy_title(col:Column, name:str, include_unit:bool=False, origin:PhotonData=None)->str:
@@ -197,12 +201,6 @@ class Bursts(BasePhotonTable):
                    )
     #: :meta private:
     column_defs = make_base_column_defs()
-    # column_defs = (
-    #     ColumnDef('start', tuple(), 0, 'all', dtype=np.int64, title='start', unit='clk_p'), 
-    #     ColumnDef('stop', tuple(), 0, 'all', dtype=np.int64, title='stop', unit='clk_p'), 
-    #     ColumnDef('istart', tuple(), 0, 'all', dtype=np.int64, title='istart'), 
-    #     ColumnDef('istop', tuple(), 0, 'all', dtype=np.int64, title='istop'), 
-    #                ) + basetimecoldefs
 
     @cite('slidingwindowsearch', purpose='sliding window burst search')
     def __init_columns__(self):
@@ -260,7 +258,7 @@ class Bursts(BasePhotonTable):
 
     @classmethod
     def param_preprocess(cls, params:Sequence[tuple[str,Any]]|tupledict, parents:dict[str:Param])->tuple[dict, dict]:
-        """Normalize params, relicating arrays, filling defaults etc for burst search"""
+        """Regularize params, relicating arrays, filling defaults etc for burst search"""
         params = as_paramdict(params, tuple(pdef.name for pdef in cls.param_defs))
         # Step 1 of processing burst param: determine and sort number of streams
         streams = params.get('streams', phsel_all)
@@ -270,7 +268,7 @@ class Bursts(BasePhotonTable):
         bg = parents['bg']
         bg = (bg, ) if isinstance(bg, Param) else bg
         detdef = bg[0].tp._detdef(bg[0]) # get detdef so proper conversion of PhSels to posiive can take place
-        streams = _normalize_ph_sel(streams, detdef, convert_all=True) # PhSels positively defined
+        streams = _regularize_ph_sel(streams, detdef, convert_all=True) # PhSels positively defined
         nstream = len(streams)
         if len(bg) == 1:
             bg = bg * nstream
@@ -412,35 +410,35 @@ class NphBG(ChildPhotonTable):
     column_defs = (
         ColumnDef('nph_bg', (PhSel,TV_str_start, TV_str_stop), 0, 'some', 
                   get_func='_get_nph_bg', iter_func='_iter_nph_bg',
-                  norm_func='_normalizecolumn_nph_bg_sbr', title_func='_get_nph_bg_title',
+                  reg_func='_regularizecolumn_nph_bg_sbr', title_func='_get_nph_bg_title',
                   unit='cnts s^{-1}', index_unit='cnts s-1', title_is_tex=True),
         ColumnDef('sbr', (PhSel, TV_str_start, TV_str_stop), 0, 'user', 
                   get_func='_get_sbr', iter_func='_iter_sbr', 
-                  norm_func='_normalizecolumn_nph_bg_sbr',
+                  reg_func='_regularizecolumn_nph_bg_sbr',
                   title_func='_get_sbr_title', title_is_tex=True),
         ColumnDef('brightness_bg', (PhSel, TV_str_start, TV_str_stop), 0, 'never', 
-                  get_func='_get_brightness_bg', norm_func='_normalizecolumn_brightness_bg',
+                  get_func='_get_brightness_bg', reg_func='_regularizecolumn_brightness_bg',
                   title_func='_get_brightness_bg_title', unit='cnts s^{-1}',
                   index_unit='cnts s-1', title_is_tex=True),
         ColumnDef('ratio_bg', (PhSel, PhSel, TV_str_start, TV_str_stop), 0, 'never', 
                   get_func='_get_ratio_bg', iter_func='_iter_ratio_bg',
-                  norm_func='_normalizecolumn_ratio_bg', title_func='_get_ratio_bg_title',
+                  reg_func='_regularizecolumn_ratio_bg', title_func='_get_ratio_bg_title',
                   title_is_tex=True),
         ColumnDef('anisotropy_bg', (PhSel, PhSel, TV_str_start, TV_str_stop), 0, 'never', 
                   get_func='_get_anisotropy_bg', iter_func='_iter_anisotropy_bg',
-                  norm_func='_normalizecolumn_ratio_bg', title_func='_get_anisotropy_bg_title',
+                  reg_func='_regularizecolumn_ratio_bg', title_func='_get_anisotropy_bg_title',
                   title_is_tex=True),
-        ColumnDef('E_bg', (TV_str_start, TV_str_stop), 0, remap='_replace_E_bg', norm_func='_normalizecolumn_ES_bg'),
-        ColumnDef('S_bg', (TV_str_start, TV_str_stop), 0, remap='_replace_S_bg', norm_func='_normalizecolumn_ES_bg'),
+        ColumnDef('E_bg', (TV_str_start, TV_str_stop), 0, remap='_replace_E_bg', reg_func='_regularizecolumn_ES_bg'),
+        ColumnDef('S_bg', (TV_str_start, TV_str_stop), 0, remap='_replace_S_bg', reg_func='_regularizecolumn_ES_bg'),
                    )
 
     def __init_columns__(self):
         pass
 
     @classmethod
-    def _normalizecolumn_nph_bg_sbr(cls, *args):
-        """Column normalization for nph_bg and sbr columns"""
-        return args[0:1] +  _normalize_column_startstop(*args[1:])
+    def _regularizecolumn_nph_bg_sbr(cls, *args):
+        """Column regularization for nph_bg and sbr columns"""
+        return args[0:1] +  _regularize_column_startstop(*args[1:])
 
     def _iter_nph_bg(self, phsel:PhSel, starttype:str, stoptype:str)->Iterator[float]:
         """Iter function for nph_bg column"""
@@ -474,9 +472,9 @@ class NphBG(ChildPhotonTable):
         return _get_nph_title(col, '^{ii}I', include_unit, origin)
 
     @classmethod
-    def _normalizecolumn_brightness_bg(cls, *args):
-        """Column normalization function for brightness_bg function"""
-        return args[0:1] +  _normalize_column_startstop(*args[1:])
+    def _regularizecolumn_brightness_bg(cls, *args):
+        """Column regularization function for brightness_bg function"""
+        return args[0:1] +  _regularize_column_startstop(*args[1:])
 
     def _get_brightness_bg(self, phsel:PhSel, starttype:str, stoptype:str)->np.ndarray[np.double]:
         """Getter function for brightness_bg column"""
@@ -488,9 +486,9 @@ class NphBG(ChildPhotonTable):
         return _get_brightness_title(col, '_{bg}br', include_unit, origin)
 
     @classmethod
-    def _normalizecolumn_ratio_bg(cls, *args):
-        """Column normalization function for ratio_bg column"""
-        return args[0:2] +  _normalize_column_startstop(*args[2:])
+    def _regularizecolumn_ratio_bg(cls, *args):
+        """Column regularization function for ratio_bg column"""
+        return args[0:2] +  _regularize_column_startstop(*args[2:])
 
     def _iter_ratio_bg(self, num_phsel:PhSel, dem_phsel:PhSel, 
                          starttype:ColKeyStart, stoptype:ColKeyStop)->Iterator[float]:
@@ -500,6 +498,7 @@ class NphBG(ChildPhotonTable):
     def _get_ratio_bg(self, num_phsel:PhSel, dem_phsel:PhSel, 
                          starttype:ColKeyStart, stoptype:ColKeyStop)->Sequence[float]:
         """Getter function for ratio_bg column"""
+        
         return _calc_ratio(self, 'nph_bg', num_phsel, dem_phsel, starttype, stoptype)
 
     @classmethod
@@ -548,9 +547,9 @@ class NphBG(ChildPhotonTable):
         return 'ratio_bg', (PhSel('0ex'), PhSel('0ex_1ex1em'),)+keytup, {'title':'^{ii}S_{app}'}
 
     @classmethod
-    def _normalizecolumn_ES_bg(cls, *args:str)->tuple[str, str]:
-        """Mapped Column normalization function fro E/S_bg"""
-        return _normalize_column_startstop(*args)
+    def _regularizecolumn_ES_bg(cls, *args:str)->tuple[str, str]:
+        """Mapped Column regularization function fro E/S_bg"""
+        return _regularize_column_startstop(*args)
     
     def _iter_sbr(self, phsel:PhSel, starttype:ColKeyStart, stoptype:ColKeyStop)->float:
         """Iter function for sbr column"""
@@ -633,29 +632,29 @@ class Ratios(ChildPhotonTable):
     
     Params
     ------
-    corr_mat : np.ndarray[np.double]
-        correction matrix used to compute corrected streams
-        :math:`\mathbf{M}\vec{^{bg}n}` where :math:`\vec{^{bg}n}` is the
-        background correcte intensity of each stream.
+        corr_mat : np.ndarray[np.double]
+            correction matrix used to compute corrected streams
+            :math:`\mathbf{M}\vec{^{bg}n}` where :math:`\vec{^{bg}n}` is the
+            background correcte intensity of each stream.
 
     Remapped Params
     ---------------
-    scheme : str
-        One of '1ex', 'ALEX', 'PAM'. Default is 'ALEX'
-    alpha : float
-        leakage factor- remaps to lk. Default is 0.0.
-    lk : float
-        leakage factor. Default is 0.0.
-    delta : float
-        direct excitation factor, remaps to dir_ex. Default is 0.0.
-    dir_ex : float
-        direct excitation factor. Default is 0.0.
-    gamma : float
-        gamma correction factor for donor/acceptor emmission sensitivity.
-        Default is 1.0.
-    beta : float
-        beta correction factor for donor/acceptor excitation sensitivity.
-        Default is 1.0.
+        scheme : str
+            One of '1ex', 'ALEX', 'PAM'. Default is 'ALEX'
+        alpha : float
+            leakage factor- remaps to lk. Default is 0.0.
+        lk : float
+            leakage factor. Default is 0.0.
+        delta : float
+            direct excitation factor, remaps to dir_ex. Default is 0.0.
+        dir_ex : float
+            direct excitation factor. Default is 0.0.
+        gamma : float
+            gamma correction factor for donor/acceptor emmission sensitivity.
+            Default is 1.0.
+        beta : float
+            beta correction factor for donor/acceptor excitation sensitivity.
+            Default is 1.0.
     
     Parents
     -------
@@ -694,18 +693,18 @@ class Ratios(ChildPhotonTable):
     #: :meta private:
     column_defs = (
         ColumnDef('nph_c', (PhSel, TV_str_start, TV_str_stop), 0, 'never', get_func='_get_nph_c', 
-                  norm_func='_normalizecolumn_nph_c', title_func='_get_nph_c_title',
+                  reg_func='_regularizecolumn_nph_c', title_func='_get_nph_c_title',
                   unit='cnts s^{-1}', index_unit='cnts s-1', title_is_tex=True),
         ColumnDef('brightness_c', (PhSel, TV_str_start, TV_str_stop), 0, 'never', get_func='_get_brightness_c', 
-                  norm_func='_normalizecolumn_brightness_c', title_func='_get_brightness_c_title',
+                  reg_func='_regularizecolumn_brightness_c', title_func='_get_brightness_c_title',
                   unit='cnts s^{-1}', index_unit='cnts s-1', title_is_tex=True),
         ColumnDef('ratio_c', (PhSel, PhSel, TV_str_start, TV_str_stop), 0, 'user', get_func='_get_ratio_c', 
-                  norm_func='_normalizecolumn_ratio_c', title_func='_get_ratio_c_title'),
+                  reg_func='_regularizecolumn_ratio_c', title_func='_get_ratio_c_title'),
         ColumnDef('anisotropy_c', (PhSel, PhSel, str, str), 0, 'user', 
-                  get_func='_get_anisotropy_c', norm_func='_normalizecolumn_anisotropy_c',
+                  get_func='_get_anisotropy_c', reg_func='_regularizecolumn_anisotropy_c',
                   title_func='_get_anisotropy_c_title'),
-        ColumnDef('E', (TV_str_start, TV_str_stop), 0, remap='_replace_E', norm_func='_normalizecolumn_ES'),
-        ColumnDef('S', (TV_str_start, TV_str_stop), 0, remap='_replace_S', norm_func='_normalizecolumn_ES'),
+        ColumnDef('E', (TV_str_start, TV_str_stop), 0, remap='_replace_E', reg_func='_regularizecolumn_ES'),
+        ColumnDef('S', (TV_str_start, TV_str_stop), 0, remap='_replace_S', reg_func='_regularizecolumn_ES'),
                    )
     _fret_factors = ('alpha', 'lk', 'gamma', 'delta', 'dir_ex', 'beta', 
                      'scheme', 'npol', 'nsplit', 'matchstreams')
@@ -786,9 +785,9 @@ class Ratios(ChildPhotonTable):
             raise ValueError("corr_mat must have both dimensions of size equal to the number of streams in detdef")
     
     @classmethod
-    def _normalizecolumn_nph_c(cls, *args):
-        """Column normalization function for nph_c column"""
-        return args[0:1] +  _normalize_column_startstop(*args[1:])
+    def _regularizecolumn_nph_c(cls, *args):
+        """Column regularization function for nph_c column"""
+        return args[0:1] +  _regularize_column_startstop(*args[1:])
 
     def _get_nph_c(self, phsel:PhSel, starttype:str, stoptype:str)->Iterator[float]:
         stream_ids = self.origin.detdef.get_stream_ids(phsel)
@@ -812,9 +811,9 @@ class Ratios(ChildPhotonTable):
         return _get_nph_title(col, 'F', include_unit, origin)
 
     @classmethod
-    def _normalizecolumn_brightness_c(cls, *args):
-        """Column normalization function for brightness_c column"""
-        return args[0:1] + _normalize_column_startstop(*args[1:])
+    def _regularizecolumn_brightness_c(cls, *args):
+        """Column regularization function for brightness_c column"""
+        return args[0:1] + _regularize_column_startstop(*args[1:])
 
     def _get_brightness_c(self, phsel:PhSel, starttype:str, stoptype:str)->np.ndarray[np.double]:
         """Getter function for brightness_c column"""
@@ -826,9 +825,9 @@ class Ratios(ChildPhotonTable):
         return _get_brightness_title(col, '_{c}br', include_unit, origin)
 
     @classmethod
-    def _normalizecolumn_ratio_c(cls, *args):
-        """Column normalization function for ratio_c column"""
-        return args[0:2] +  _normalize_column_startstop(*args[2:])
+    def _regularizecolumn_ratio_c(cls, *args):
+        """Column regularization function for ratio_c column"""
+        return args[0:2] +  _regularize_column_startstop(*args[2:])
 
     def _get_ratio_c(self, num_phsel:PhSel, dem_phsel:PhSel, starttype:str, stoptype:str)->np.ndarray[np.float64]:
         """Getter function for ratio_c column"""
@@ -840,9 +839,9 @@ class Ratios(ChildPhotonTable):
         return _get_ratio_title(col, 'F', include_unit, origin)
 
     @classmethod
-    def _normalizecolumn_anisotropy_c(cls, *args):
-        """Column normalization function for anisotropy_c column"""
-        return args[0:2] +  _normalize_column_startstop(*args[2:])
+    def _regularizecolumn_anisotropy_c(cls, *args):
+        """Column regularization function for anisotropy_c column"""
+        return args[0:2] +  _regularize_column_startstop(*args[2:])
 
     def _get_anisotropy_c(self, phsel_p:PhSel, phsel_s:PhSel, starttype:str, stoptype:str)->np.ndarray[np.float64]:
         """Getter function for anisotropy_c column"""
@@ -854,9 +853,9 @@ class Ratios(ChildPhotonTable):
         return _get_anisotropy_title(col, 'F', include_unit, origin)
 
     @classmethod
-    def _normalizecolumn_ES(cls, *args:str)->tuple[str, str]:
-        """Column normalization function for re-mapped columns E/S"""
-        return _normalize_column_startstop(*args)
+    def _regularizecolumn_ES(cls, *args:str)->tuple[str, str]:
+        """Column regularization function for re-mapped columns E/S"""
+        return _regularize_column_startstop(*args)
 
     @classmethod
     def _replace_E(cls, col:str, keytup:tuple[str,str])->tuple:
@@ -1095,8 +1094,8 @@ register_2cde_func(gaussian_kde_2cde, shortcut=partial(fbc.kde_photons, func=1))
 
 class KDE(ChildPhotonTable):
     """
-    
     This is still untested
+    
     .. note::
         
         The original paper contains some ambiguities, and supplementary original
@@ -1106,19 +1105,19 @@ class KDE(ChildPhotonTable):
         
     
     """
-    _param_defs = (
+    param_defs = (
         ParamDef('kernel', TV_PyCode, default=laplace_kde_2cde),
         ParamDef('tau', TV_float(mn=0.0), default=5e-5),
         ParamDef('thresh', TV_float(mn=0.0), default=5.0)
         )
-    _parent_defs = (ParentDef('base', BasePhotonTableLike, is_base=True), )
-    _column_defs = (
-        ColumnDef('fret', (PhSel, PhSel), 0, 'user', iter_func='_iter_fret2cde', norm_func='_normalizecolumn_2cde'),
-        ColumnDef('alex', (PhSel, PhSel), 0, 'user', iter_func='_iter_alex2cde', norm_func='_normalizecolumn_2cde')
+    parent_defs = (ParentDef('base', BasePhotonTableLike, is_base=True), )
+    column_defs = (
+        ColumnDef('fret', (PhSel, PhSel), 0, 'user', iter_func='_iter_fret2cde', reg_func='_regularizecolumn_2cde'),
+        ColumnDef('alex', (PhSel, PhSel), 0, 'user', iter_func='_iter_alex2cde', reg_func='_regularizecolumn_2cde')
         )
     
     @classmethod
-    def _normalizecolumn_2cde(cls, *args):
+    def _regularizecolumn_2cde(cls, *args):
         phsel_d, phsel_a, = args[0:1], args[1:2]
         phsel_d = PhSel('0ex0em') if len(phsel_d) == 0 else phsel_d[0]
         phsel_a = PhSel('0ex1em') if len(phsel_a) == 0 else phsel_a[0]

@@ -21,16 +21,17 @@ import numpy as np
 from scipy.stats import linregress, expon
 from scipy.optimize import leastsq
 
-from .datamodel.utils import tupledict
+from .datamodel.utils import tupledict, arr_slc
 from .datamodel.immutabledata import (TypeValidator, TV_float, TV_str, TV_bool, 
-                                      TV_PyCode, register_PyCode, get_pycode_subval)
+                                      TV_PyCode, TV_ndarray, register_PyCode, get_pycode_subval)
 from .datamodel.tables import ParamDef, ParentDef, ColumnDef, Param, Column, DataSet, as_paramdict
 from .datamodel.citations import cite
 from .ph_sel import PhSel, DetDef, TV_DetDef
 from .photondata import (
     BasePhotonTable, ChildPhotonTable, PhotonData, 
-    _normalize_column_startstop, _title_sels, _title_startstop_append, _title_unit_append, 
-    make_base_column_defs, ColKeyStart, ColKeyStop)
+    _regularize_column_startstop, _title_sels, _title_startstop_append, _title_unit_append, 
+    make_base_column_defs, ColKeyStart, ColKeyStop
+    )
 
 import fretbursts.cfuncs as fbc
 
@@ -52,42 +53,42 @@ class Periods(BasePhotonTable):
     
     Params
     ------
-    period : float
-        The duration of each period (time range) in seconds.
-    start_at : {'time_min', 'zero', 'under', 'over'}
-        One of ``'time_min'``, ``'zero'``, ``'under'``, or ``'over'``. Defines when 
-        first period starts relative to first photon in data.
-        
-        Options:
-                
-            - ``'time_min'`` start of first period is first photon in data
-            - ``'zero'`` start of first period is time = 0
-            - ``'under'`` start of first period is the time that is a integer multiple of 
-              period, and less than (greatest possible) the time of the first photon
-            - ``'over'`` similar to under, the least possible integer multiple of 
-              period greater than the time of the first photon
-        
-        ``start_at`` must be specified with ``stop_at```, and these are exclusive of 
-        specifying ``start`` and ``stop``. Default (if ``start`` is not defined)
-        is ``'time_min'``
-    stop_at : {'under', 'over'}
-        One of ``'under'`` or ``'over'``. Defines stop time of last period.
-        
-        Options:
+        period : float
+            The duration of each period (time range) in seconds.
+        start_at : {'time_min', 'zero', 'under', 'over'}
+            One of ``'time_min'``, ``'zero'``, ``'under'``, or ``'over'``. Defines when 
+            first period starts relative to first photon in data.
             
-            - ``'under'`` last period ends before last time of data
-            - ``'over'`` last period ends after last time of data
-        
-        Default (if ``stop`` is not defined) is ``'over'``.
-    start : float
-        Start of first period (in seconds). Must be specified with ``stop``, 
-        cannot be specified with ``start_at`` or ``stop_at``
-    stop : float
-        End of final period (in seconds), rounded down to integer multiple of 
-        periods + start. Must be specified with ``start``, cannot be specified
-        with ``start_at`` or ``stop_at``
-    detdef : DetDef
-        DetDet object that the data must have to be compatible.
+            Options:
+                    
+                - ``'time_min'`` start of first period is first photon in data
+                - ``'zero'`` start of first period is time = 0
+                - ``'under'`` start of first period is the time that is a integer multiple of 
+                  period, and less than (greatest possible) the time of the first photon
+                - ``'over'`` similar to under, the least possible integer multiple of 
+                  period greater than the time of the first photon
+            
+            ``start_at`` must be specified with ``stop_at```, and these are exclusive of 
+            specifying ``start`` and ``stop``. Default (if ``start`` is not defined)
+            is ``'time_min'``
+        stop_at : {'under', 'over'}
+            One of ``'under'`` or ``'over'``. Defines stop time of last period.
+            
+            Options:
+                
+                - ``'under'`` last period ends before last time of data
+                - ``'over'`` last period ends after last time of data
+            
+            Default (if ``stop`` is not defined) is ``'over'``.
+        start : float
+            Start of first period (in seconds). Must be specified with ``stop``, 
+            cannot be specified with ``start_at`` or ``stop_at``
+        stop : float
+            End of final period (in seconds), rounded down to integer multiple of 
+            periods + start. Must be specified with ``start``, cannot be specified
+            with ``start_at`` or ``stop_at``
+        detdef : DetDef
+            DetDet object that the data must have to be compatible.
     
     Parents
     -------
@@ -102,7 +103,7 @@ class Periods(BasePhotonTable):
     """
     row_name:ClassVar[str] = "Periods"
     _origin: PhotonData
-    
+    #: :meta private:
     param_defs = (
         ParamDef('period', TV_float(mn=0.0), default=60.0),
         ParamDef('start_at', TV_str(isin=('time_min', 'zero', 'under', 'over')), required=False),
@@ -111,22 +112,16 @@ class Periods(BasePhotonTable):
         ParamDef('stop', TV_float, required=False),
         ParamDef('detdef', TV_DetDef, required=True)
                   )
+    #: :meta private:
     parent_defs = tuple()
+    #: :meta private:
     column_defs = (
         ColumnDef('periods', tuple(), 1, 'all', dtype=np.int64, 
                   title_func='_get_periods_title', index_func='_get_periods_index', unit='clk_p'),
         ColumnDef('start', tuple(), 0, remap='_replace_column_startstop'),
         ColumnDef('stop', tuple(), 0, remap='_replace_column_startstop')
                   ) + make_base_column_defs(skip=('start', 'stop'))
-    # column_defs = (
-    #     ColumnDef('periods', tuple(), 1, 'all', dtype=np.int64, 
-    #               title_func='_get_periods_title', index_func='_get_periods_index', unit='clk_p'),
-    #     ColumnDef('istart', tuple(), 0, 'all', dtype=np.int64, title='istart', unit='clk_p'), 
-    #     ColumnDef('istop', tuple(), 0, 'all', dtype=np.int64, title='istop', unit='clk_p'),
-    #     ColumnDef('start', tuple(), 0, remap='_replace_column_startstop'),
-    #     ColumnDef('stop', tuple(), 0, remap='_replace_column_startstop')
-    #                ) + basetimecoldefs
-    
+
     def __init_columns__(self):
         period = np.int64(np.round(self.param.params['period']/self.origin.clk_p))
         # find start time
@@ -154,7 +149,7 @@ class Periods(BasePhotonTable):
         istart, istop = fbc.index_ranges(self.origin.times, periods[:-1], periods[1:])
         self._add_column('istart', tuple(), istart)
         self._add_column('istop', tuple(), istop)
-        
+
     @classmethod
     def param_preprocess(cls, params:Union[Sequence,dict,tupledict], parents:dict[str,Param])->dict:
         params = as_paramdict(params, tuple(pdef.name for pdef in cls.param_defs))
@@ -169,17 +164,17 @@ class Periods(BasePhotonTable):
         if 'stop' not in params and 'stop_at' not in params:
             params['stop_at'] = 'over'
         return params, parents
-    
+
     @classmethod
     def _replace_column_startstop(cls, col:str, keys)->tuple[str,tuple[Hashable,...],int]:
         """Remap function for remapped coluns start and stop"""
         return 'periods', keys, 0 if col == 'start' else 1
-    
+
     @classmethod
     def _detdef(cls, param:Param)->DetDef:
         """Return :class:`DetDef` of Periods :class:`Param`."""
         return param.params['detdef']
-    
+
     @classmethod
     def _get_periods_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
         """Title func for periods column"""
@@ -190,12 +185,12 @@ class Periods(BasePhotonTable):
         if include_unit:
             out += ' clk_p'
         return out
-    
+
     @classmethod
     def _get_periods_index(cls, col:Column, include_unit:bool=False)->str:
         """Index name func for periods column"""
         return cls._periods_title_func(col, include_unit)
-    
+
 
 #########################################################
 ### Functions for computing BackGround
@@ -203,8 +198,28 @@ class Periods(BasePhotonTable):
 BGFuncType = Callable[[np.ndarray[np.int64],float,...], float]
 
 
+def _make_default_bg_preprocess(params:dict, parents:dict)->dict:
+    return params
+
+def _make_default_bg_paramdefs(params:dict)->tuple[ParamDef,...]:
+    params = tuple(inspect.signature(params['func']).parameters.values())
+    params = params[1:] if params[0].kind == params[0].VAR_POSITIONAL else params[2:]
+    return tuple(param_to_ParamDef(param) for param in params)
+
+
+def _make_default_bg_postvalidate(params:tupledict, parents:tupledict)->None:
+    pass
+
+
+def _make_default_bg_streamconversion(param:tupledict, stream_ids:np.ndarray[np.uint8])->dict:
+    return param 
+
+
 def register_bg_func(func:BGFuncType, 
-                     param_validator:Callable[[dict,],tuple[ParamDef,...]]=None)->None:
+                     param_preprocess:Callable[[dict, dict],dict]=None,
+                     param_validator:Callable[[dict,],tuple[ParamDef,...]]=None,
+                     post_init_validator:Callable[[tupledict,tupledict],None]=None,
+                     stream_conversion:Callable[[tupledict,np.ndarray[np.uint8]],dict[str:Hashable]]=None)->None:
     """
     Register a method in PyCode for computing background with :class:`BG`.
     Includes ability to add special param_validator
@@ -240,18 +255,26 @@ def register_bg_func(func:BGFuncType,
     if sum(p.default is inspect._empty and p.kind not in (p.VAR_POSITIONAL, p.KEYWORD_ONLY) 
            for p in func_params) > 2:
         raise ValueError("Too many required artuments for bg_func")
+    # check param_preprocess
+    param_preprocess = _make_default_bg_preprocess if param_preprocess is None else param_preprocess
     # Check param validator
     if param_validator is not None:
         if not callable(param_validator):
             raise TypeError("param_validator must be callable accepting single dict and returning tuple of ParamDefs")
             val_params = tuple(p for p in inspect.signature(param_validator))
+            # make sure param_validator will accept single positional argument
             if sum(p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD) or p.default is not inspect._empty
                    for p in val_params) > 1:
                 raise ValueError("param_validator required too many positional ")
             if any(p.kind == p.KEYWORD_ONLY for p in val_params):
                 raise ValueError("param_validator cannot have keyword-only arguments")
-    register_PyCode(func, 'BG_func', param_validator)
-            
+    else:
+        param_validator = _make_default_bg_paramdefs
+    # check post_init_validator
+    # TODO: Write signature checkers for param_preprocess, post_init_validator and stream_conversion
+    post_init_validator = _make_default_bg_postvalidate if post_init_validator is None else post_init_validator
+    stream_conversion = _make_default_bg_streamconversion if stream_conversion is None else stream_conversion
+    register_PyCode(func, 'BG_func', (param_preprocess, param_validator, post_init_validator, stream_conversion))
 
 
 def get_ecdf(s:np.ndarray, offset:float=0.5):
@@ -276,6 +299,46 @@ def get_ecdf(s:np.ndarray, offset:float=0.5):
     """
     return np.sort(s), np.arange(offset, s.size+offset)*1.0/s.size
 
+
+def _bg_get_ndet(params:dict, parents:dict)->int:
+    """Get number of streams expected to require tail_min specification from param"""
+    if params['compute_stream'] == 'any':
+        return 1
+    ndet = parents['base'].tp._detdef(parents['base']).size
+    if params['compute_stream'] == 'single_all':
+        ndet += 1
+    return ndet
+
+
+def _bg_tailmin_preprocess(params:tupledict, parents:dict)->tuple[dict]:
+    parents = parents.asdict if isinstance(parents, tupledict) else dict(parents)
+    params = params.asdict if isinstance(params, tupledict) else dict(params)
+    tail_min = np.asarray(params.get('tail_min', 5e-4), dtype=np.float64).reshape(-1)
+    ndet = _bg_get_ndet(params, parents)
+    if tail_min.size == 1:
+        params['tail_min'] = np.repeat(tail_min, ndet)
+    elif tail_min.size != ndet:
+        raise ValueError(f"Incompatible size of tail_min: Base DetDef requires {ndet} streams, tail_min only has {tail_min.size}")
+    parents['base'] = parents['base'].degate()
+    return params, parents
+
+
+def _bg_tailmin_postvalidate(param:Param)->None:
+    if param.params['tail_min'].size != _bg_get_ndet(param.params, param.parents):
+        raise ValueError("Incorrect number of streams in tail_min")
+    
+
+def _bg_tailmin_stream_conversion(params:tupledict, stream_ids:np.ndarray[np.uint8])->dict[str:Hashable]:
+    params = params.asdict
+    compute_stream = params.pop('compute_stream')
+    params.pop('func', None)
+    if compute_stream == 'any':
+        params['tail_min'] = params['tail_min'][0]
+    elif stream_ids.size != 1:
+        params['tail_min'] = params['tail_min'][-1]
+    else:
+        params['tail_min'] = params['tail_min'][stream_ids[0]]
+    return params
 
 
 def exp_mlefit(times:np.ndarray[np.int64], clk_p:float, tail_min:float=500e-6, 
@@ -304,16 +367,20 @@ def exp_mlefit(times:np.ndarray[np.int64], clk_p:float, tail_min:float=500e-6,
     """
     deltaT = np.diff(times)
     tlmin = int(tail_min/clk_p)
-    if auto_threshold:
-        tlmin = F_bg * np.mean(deltaT[deltaT>=tlmin]-tlmin)
-        if np.isnan(tlmin):
-            return np.nan
-        tlmin = int(tlmin)
-    return 1.0/np.mean(deltaT[deltaT>=tlmin]-tlmin) / clk_p
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        if auto_threshold:
+            tlmin = F_bg * np.mean(deltaT[deltaT>=tlmin]-tlmin)
+            if np.isnan(tlmin):
+                return np.nan
+            tlmin = int(tlmin)
+        out = 1.0/np.mean(deltaT[deltaT>=tlmin]-tlmin) / clk_p
+    return out
+
 
 #: ParamDefs for exp_mlefit type BG Param
 _bg_mle_paramdefs = (
-    ParamDef('tail_min', TV_float(mn=0.0), default=500e-6, unit="s"),
+    ParamDef('tail_min', TV_ndarray(dims=arr_slc[:], mn=0.0), default=500e-6, unit="s"),
     ParamDef('auto_threshold', TV_bool, default=False),
     ParamDef('F_bg', TV_float(mn=0.0), default=2.0),
     )
@@ -322,9 +389,10 @@ _bg_mle_paramdefs = (
 def _make_bg_mle_paramdefs(params:dict)->tuple[ParamDef,...]:
     """Generate append_params tuple for :func:`exp_mlefit`"""
     return  _bg_mle_paramdefs if params.get('auto_threshold', False) else _bg_mle_paramdefs[:-1]
-    
 
-register_bg_func(exp_mlefit, _make_bg_mle_paramdefs)
+
+register_bg_func(exp_mlefit, _bg_tailmin_preprocess, _make_bg_mle_paramdefs,
+                 _bg_tailmin_postvalidate, _bg_tailmin_stream_conversion)
 
 
 def exp_cdffit(times:np.ndarray, clk_p:float, tail_min:float=500e-6, offset:float=0.5,
@@ -352,16 +420,20 @@ def exp_cdffit(times:np.ndarray, clk_p:float, tail_min:float=500e-6, offset:floa
     """
     tlmin = int(tail_min / clk_p)
     deltaT = np.diff(times)
-    if auto_threshold:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        if auto_threshold:
+            x_cdf, y_cdf = get_ecdf(deltaT[deltaT>=tlmin] - tlmin, offset)
+            decr_line = np.log(1-y_cdf)
+            tlmin = F_bg/linregress(x_cdf, decr_line).slope
+            if np.isnan(tlmin):
+                return np.nan
+        deltaT = deltaT[deltaT>=tlmin] - tlmin
         x_cdf, y_cdf = get_ecdf(deltaT[deltaT>=tlmin] - tlmin, offset)
         decr_line = np.log(1-y_cdf)
-        tlmin = F_bg/linregress(x_cdf, decr_line).slope
-        if np.isnan(tlmin):
-            return np.nan
-    deltaT = deltaT[deltaT>=tlmin] - tlmin
-    x_cdf, y_cdf = get_ecdf(deltaT[deltaT>=tlmin] - tlmin, offset)
-    decr_line = np.log(1-y_cdf)
-    return linregress(x_cdf, decr_line).slope / clk_p
+        out = -linregress(x_cdf, decr_line).slope / clk_p
+    return out
+
 
 #: ParamDefs for exp_cdffit type BG Param
 _bg_cdf_paramdefs = ( 
@@ -375,7 +447,8 @@ def _make_bg_cdf_paramdefs(params:dict)->tuple[ParamDef,...]:
     return  _bg_cdf_paramdefs if params.get('auto_threshold', False) else _bg_cdf_paramdefs[:-1]
 
 
-register_bg_func(exp_cdffit, _make_bg_cdf_paramdefs)
+register_bg_func(exp_cdffit, _bg_tailmin_preprocess, _make_bg_cdf_paramdefs,
+                 _bg_tailmin_postvalidate, _bg_tailmin_stream_conversion)
 
 
 def expon_fit_hist(s:np.ndarray[np.int64], bins:float|np.ndarray[np.int64], 
@@ -389,9 +462,9 @@ def expon_fit_hist(s:np.ndarray[np.int64], bins:float|np.ndarray[np.int64],
     s : np.ndarray[np.int64]
         array of exponetially-distributed samples.
     bins : float|np.ndarray[np.int64]
-        DESCRIPTION.
+        Bins of histogram used to fit data.
     s_min : float, optional
-        DESCRIPTION. The default is 0.0.
+        Minimum sample value to count. The default is 0.0.
     weights : {'none', 'hist_counts','inv_hist_counts'},  optional
         One of the following:
         
@@ -411,7 +484,7 @@ def expon_fit_hist(s:np.ndarray[np.int64], bins:float|np.ndarray[np.int64],
 
     Returns
     -------
-    Lambda : float
+    lam : float
         photon rate.
 
     """
@@ -426,23 +499,21 @@ def expon_fit_hist(s:np.ndarray[np.int64], bins:float|np.ndarray[np.int64],
     y = counts
     x = x[y > 0]
     y = y[y > 0]
-
-    if weights in ('none', None):
-        w = np.ones(y.size)
-    elif weights == 'hist_counts':
-        w = np.sqrt(y*s.size*(bins[1]-bins[0]))
-    elif weights == 'inv_hist_counts':
-        w = np.sqrt(1./y*s.size*(bins[1]-bins[0]))
-    else:
-        raise ValueError('Weighting scheme not valid (use: None, or '
-                         '"hist_counts")')
-
-    exp_fun = lambda x, rate: rate*np.exp(-x*rate)
-    err_fun = lambda rate, x, y, w: (exp_fun(x, rate) - y)*w
-
-    res = leastsq(err_fun, x0=1./(s.mean()), args=(x, y, w))
-    lam = res[0]
-
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        if weights in ('none', None):
+            w = np.ones(y.size)
+        elif weights == 'hist_counts':
+            w = np.sqrt(y*s.size*(bins[1]-bins[0]))
+        elif weights == 'inv_hist_counts':
+            w = np.sqrt(1./y*s.size*(bins[1]-bins[0]))
+        else:
+            raise ValueError('Weighting scheme not valid (use: None, or '
+                             '"hist_counts")')
+        exp_fun = lambda x, rate: rate*np.exp(-x*rate)
+        err_fun = lambda rate, x, y, w: (exp_fun(x, rate) - y)*w
+        res, _ = leastsq(err_fun, x0=1.0/s.mean(), args=(x, y, w))
+        lam = res[0] # convert to int
     return lam
 
 
@@ -487,13 +558,10 @@ def exp_histfit(times:np.ndarray[np.int64], clk_p:float, tail_min:float=500e-6, 
     binw_clk = binw/clk_p
     bins = np.arange(0, deltaT.max() - tail_min + 1, binw_clk)
     if auto_threshold:
-        lamtemp = expon_fit_hist(deltaT, bins=bins, s_min=tail_min, weights=weights)[0]
+        lamtemp = expon_fit_hist(deltaT, bins=bins, s_min=tail_min, weights=weights)
         tail_min = F_bg / lamtemp
-    res = expon_fit_hist(deltaT, bins=bins, s_min=tail_min, weights=weights)
-
-    lam, residuals, x_residuals, s_size = res
-    lam /= clk_p
-    return lam
+    lam = expon_fit_hist(deltaT, bins=bins, s_min=tail_min, weights=weights)
+    return lam/clk_p
 
 
 #: ParamDefs for exp_histfit
@@ -507,7 +575,8 @@ def _make_bg_histfit_ParamDefs(param:dict)->tuple[ParamDef,...]:
     return _bg_hist_paramdefs if param.get('auto_threshold', False) else _bg_hist_paramdefs[:-1]
 
 
-register_bg_func(exp_histfit, _make_bg_histfit_ParamDefs)
+register_bg_func(exp_histfit, _bg_tailmin_preprocess, _make_bg_histfit_ParamDefs,
+                 _bg_tailmin_postvalidate, _bg_tailmin_stream_conversion)
 
 
 def get_residuals(deltaT:np.ndarray, Lambda:float, offset:float=0.5)->tuple[np.ndarray, np.ndarray]:
@@ -534,7 +603,9 @@ def get_residuals(deltaT:np.ndarray, Lambda:float, offset:float=0.5)->tuple[np.n
             x values of residuals
     """
     x, y = get_ecdf(deltaT, offset=offset)
-    ye = expon.cdf(x, scale=1.0/Lambda)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ye = expon.cdf(x, scale=1.0/Lambda)
     residuals = y - ye
     return residuals, x
 
@@ -569,11 +640,11 @@ def param_to_ParamDef(param:inspect.Parameter)->ParamDef:
 def _append_param_bg_func(params:dict)->tuple[ParamDef,...]:
     """Create ParamDefs from registered bg function"""
     func = params.get('func', BG.param_defs[1].default)
-    validator = get_pycode_subval('BG_func', func)
-    if validator is None:
-        params = tuple(inspect.signature(func))
-        params = params[1:] if params[0].kind == params[0].VAR_POSITIONAL else params[2:]
-        return tuple(param_to_ParamDef(param) for param in params)
+    _, validator, _, _ = get_pycode_subval('BG_func', func)
+    # if validator is None:
+    #     params = tuple(inspect.signature(func).parameters.values())
+    #     params = params[1:] if params[0].kind == params[0].VAR_POSITIONAL else params[2:]
+    #     return tuple(param_to_ParamDef(param) for param in params)
     return validator(params)
 
 
@@ -583,19 +654,19 @@ class BG(ChildPhotonTable):
     
     Params
     ------
-    compute_stream : str
-        How background for multi-stream ph_sel columns is computed.
-        Must be one of:
+        compute_stream : str
+            How background for multi-stream ph_sel columns is computed.
+            Must be one of:
+            
+                - ``'single'`` compund ph_sel columns always computed as sum of single streams
+                - ``'single_all'`` like single, but if ph_sel is *all*, then compute stream separately
+                - ``'any'`` all streams computed separately
         
-            - ``'single'`` compund ph_sel columns always computed as sum of single streams
-            - ``'single_all'`` like single, but if ph_sel is *all*, then compute stream separately
-            - ``'any'`` all streams computed separately
-    
-    
-    func : Callable[[np.ndarray[np.int64], ...], float]
-        Callable accepting array of times and outputing background.
-    
-    Additional params defined by ``func``
+        
+        func : Callable[[np.ndarray[np.int64], ...], float]
+            Callable accepting array of times and outputing background.
+        
+        Additional params defined by ``func``
     
     
     Parents
@@ -641,158 +712,180 @@ class BG(ChildPhotonTable):
         ColumnDef('tail_min', (PhSel, ), 0, 'never', get_func='_get_tail_min', 
                   dtype=np.float64, check_func='_check_tail_min', title='tail min', unit='(s)'),
         ColumnDef('rangecounts', (PhSel, str, str), 0, iter_func='_iter_rangecounts',
-                  dtype=np.float64, norm_func='_normalizecolumn_rangecounts', mapto=BasePhotonTable,
+                  dtype=np.float64, reg_func='_regularizecolumn_rangecounts', mapto=BasePhotonTable,
                   title='bg photons'),
                    )
     
-    def __init_columns__(self):
-        pass
-    
-    def _compute_stream(self, stream_id:np.ndarray[np.int8])->bool:
-        """Determine if stream should be computed or split, based on 'compute_stream' param"""
-        cstr = self.param.params['compute_stream']
-        return stream_id.size == 1 or cstr == 'any' or (cstr == 'all' and stream_id.size == self.origin.setup.detdef.size)
-    
-    def _get_tail_min(self, ph_sel:PhSel)->np.ndarray[np.double]:
-        """Getter function for determining tail-min threshold. Only useful when 'auto_threshold' is Ture"""
-        if not self.param.params['auto_threshold']:
-            return self.param.params['tail_min']
-        stream_id = self.origin.setup.detdef.get_stream_ids(ph_sel)
-        if not self._compute_stream(stream_id):
-            warnings.warn("getting tail_min for compound stream, this tail_min is not used to compute background")
-        periods = self.parents['base']
-        out = np.empty(self.size, dtype=np.double)
-        times = self.origin.times
-        mask = np.isin(self.origin.dets, stream_id)
-        kwargs = self.param.params.asdict
-        for key in ('compute_stream', 'func'):
-            kwargs.pop(key)
-        kwargs['auto_threshold'] = False
-        for i, (start, stop) in enumerate(zip(periods['istart',], periods['istop',])):
-            out[i] = self.param.params['F_bg'] / self.param.params['func'](times[start:stop][mask[start:stop]], self.origin.clk_p, **kwargs)
-        return out
+    @classmethod
+    def param_preprocess(cls, params, parents):
+        params = params.asdict if isinstance(params, tupledict) else dict(params)
+        params.setdefault('compute_stream', 'single_all')
+        preprocess, _, _ , _ = get_pycode_subval('BG_func', params.get('func',exp_mlefit))
+        return preprocess(params, parents)
     
     @classmethod
-    def _check_tail_min(cls, param:Param):
+    def validate_param(cls, param:Param)->None:
+        _, _, validate, _ = get_pycode_subval('BG_func', param.params['func'])
+        validate(param)
+
+    def _compute_stream(self, phsel:PhSel)->bool:
+        """Determine if stream should be computed or split, based on 'compute_stream' param"""
+        detdef = self.origin.setup.detdef
+        stream_id = detdef.get_stream_ids(phsel)
+        cstr = self.param.params['compute_stream']
+        if cstr == 'any':
+            return True
+        elif cstr == 'single':
+            return stream_id.size == 1
+        return stream_id.size == 1 or stream_id.size == detdef.size
+    
+    def _get_tail_min(self, phsel:PhSel)->np.ndarray[np.double]:
+        """Getter function for determining tail-min threshold. Only useful when 'auto_threshold' is Ture"""
+        phsel = phsel.render_positive(self.origin.setup.detdef, convert_all=True)
+        params = self.param.params.asdict
+        func = params.pop('func')
+        _, _, _, stream_proc = get_pycode_subval('BG_func', func)
+        stream_id = self.origin.setup.detdef.get_stream_ids(phsel)
+        params = stream_proc(self.param.params, stream_id)
+        tail_min = params['tail_min']
+        if not self.param.params['auto_threshold']:
+            return np.repeat(tail_min, self.size)
+        out = np.empty(self.size, dtype=np.double)
+        params['auto_threshold'] = False
+        F_bg = params.pop('F_bg')
+        for i, ph_times in enumerate(self.parents['base'].iter_column('ph_times', phsel)):
+            out[i] = F_bg / func(ph_times, self.origin.clk_p, **params)
+        return out
+
+    @classmethod
+    def _check_tail_min(cls, column:Column):
         """
         Column existence check func for tail_min, 
         will prevent creating column of BG param that lacks 'auto_threshold' in param.
         """
-        if 'tail_min' not in param.params:
+        if 'tail_min' not in column.param.params:
             raise ValueError("tail_min column only specified for bg functions that include tail_min argument")
-    
+        params = column.param.params
+        if params['compute_stream'] != 'any':
+            detdef = column.param.tp._detdef(column.param)
+            stream_ids = detdef.get_stream_ids(column.keytup[0])
+            if stream_ids.size != 1:
+                if stream_ids.size != detdef.size or params['compute_stream'] != 'single_all':
+                    raise ValueError("Cannot get non-all multi-stream tail_min for single stream bg column")
+
     @cite('IngargiolaPLOSOne2016', purpose='background analysis with FRETBursts')
-    def _get_bg(self, ph_sel:PhSel):
+    def _get_bg(self, phsel:PhSel):
         """Getter function for bg column"""
-        ph_sel = ph_sel.render_positive(self.origin.setup.detdef, convert_all=True) # ensures consistent representation in DiskDict
-        if ('bg', ph_sel) in self._cache:
-            return self._cache['bg', ph_sel]
-        stream_id = self.origin.setup.detdef.get_stream_ids(ph_sel)
-        if self._compute_stream(stream_id):
-            out = self._calc_bg(stream_id)
-            self._add_column('bg', (ph_sel,), out)
+        phsel = phsel.render_positive(self.origin.setup.detdef, convert_all=True) # ensures consistent representation in DiskDict
+        if self._compute_stream(phsel):
+            out = self._calc_bg(phsel)
+            self._add_column('bg', (phsel,), out)
         else:
+            stream_id = self.origin.setup.detdef.get_stream_ids(phsel)
             out = sum(self['bg', self.origin.setup.detdef.stream_ids_to_PhSel(st_id)] for st_id in stream_id)
         return out
-    
+
     @classmethod
     def _get_bg_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
         """Title getter function for bg column"""
         title = _title_sels('bg', origin, col.keytup[0])[0]
         title = _title_unit_append(title, 'cnts s^{-1}', include_unit)
         return f'${title}$'
-    
-    def _calc_bg(self, stream_id:np.ndarray[np.uint8])->np.ndarray[np.float64]:
+
+    def _calc_bg(self, phsel:PhSel)->np.ndarray[np.float64]:
         """Compute bg column if cannot compute as sum from existing columns"""
-        times = self.origin.times
-        mask = np.isin(self.origin.dets, stream_id)
         periods = self.parents['base']
         out = np.empty(self.size, dtype=np.float64)
-        params = self.param.params.asdict
-        params.pop('compute_stream')
-        func = params.pop('func')
-        for i, (start, stop) in enumerate(zip(periods['istart',], periods['istop',])):
-            out[i] = func(times[start:stop][mask[start:stop]], self.origin.clk_p, **params)
+        params = self.param.params
+        func = params['func']
+        _, _, _, stream_proc = get_pycode_subval('BG_func', func)
+        stream_id = self.origin.setup.detdef.get_stream_ids(phsel)
+        params = stream_proc(params, stream_id)
+        for i, ph_times in enumerate(periods.iter_column('ph_times', phsel)):
+            out[i] = func(ph_times, self.origin.clk_p, **params)
         return out
-    
-    def _get_err_KS(self, ph_sel):
+
+    def _get_err_KS(self, phsel):
         """Getter function for err_KS column (Kolmogrov-Smirnov error)"""
-        ph_sel = ph_sel.render_positive(self.origin.detdef, convert_all=True) # ensures consistent representation in DiskDict
-        if ('err_KS', ph_sel) in self._cache:
-            return self._cache['err_KS', ph_sel]
-        stream_id = self.origin.setup.detdef.get_stream_ids(ph_sel)
-        if self._compute_stream(stream_id):
-            out = self._calc_err_KS(ph_sel)
-            self._add_column('err_KS', (ph_sel, ), out)
+        phsel = phsel.render_positive(self.origin.detdef, convert_all=True) # ensures consistent representation in DiskDict
+        if self._compute_stream(phsel):
+            out = self._calc_err_KS(phsel)
+            self._add_column('err_KS', (phsel, ), out)
         else:
+            stream_id = self.origin.setup.detdef.get_stream_ids(phsel)
             out = sum(self['err_KS', self.origin.setup.detdef.stream_ids_to_Ph_sel(st_id)] for st_id in stream_id)
         return out
-    
+
     @classmethod
     def _err_KS_title(cls, col:Column, include_unit:bool=False, origin:DataSet=None)->str:
         """Title getter function for err_KS column"""
         title = _title_sels('bg', origin, col.keytup[0])[0]
         return fr'$KS error:\: D({title})$'
-    
+
     @classmethod
     def _err_KS_index(cls, col:Column, include_unit:bool=False, origin:DataSet=None)->str:
         """Index name getter function for err_KS column"""
         return f'KS err BG {str(col.keytup[0])}'
-    
-    def _calc_err_KS(self, ph_sel:PhSel)->np.ndarray[np.float64]:
+
+    def _calc_err_KS(self, phsel:PhSel)->np.ndarray[np.float64]:
         """Compute err_KS column if cannot compute as sum from existing columns"""
-        tail_min = self.param.params['tail_min']/self.origin.clk_p
+        phsel = phsel.render_positive(self.origin.setup.detdef, convert_all=True)
+        _, _, _, stream_proc = get_pycode_subval('BG_func', self.param.params['func'])
+        params = stream_proc(self.param.params, self.origin.setup.detdef.get_stream_ids(phsel))
+        tail_min = params['tail_min']/self.origin.clk_p
         offset = self.param.params.get('offset', 0.5)
         out = np.empty(self.size, dtype=np.float64)
-        for i, (times, bg) in enumerate(zip(self.parents['base'].iter_column('ph_times', ph_sel), self.iter_column('bg', ph_sel))):
+        for i, (times, bg) in enumerate(zip(self.parents['base'].iter_column('ph_times', phsel), self.iter_column('bg', phsel))):
             s = np.diff(times) - tail_min
             out[i] = np.abs(get_residuals(s[s >= 0], bg*self.origin.clk_p, offset)[0]).max()
         return out
-    
+
     @classmethod
     def _err_CM_title(cls, col:Column, include_unit:bool=False, origin:DataSet=None)->str:
         """Title getter function for err_CM column"""
         title = _title_sels('bg', origin, col.keytup[0])[0]
         return fr'$CM error:\: T({title})$'
-    
+
     @classmethod
     def _err_CM_index(cls, col:Column, include_unit:bool=False, origin:DataSet=None)->str:
         """Index name getter function for err_CM column"""
         return f'CM err BG {str(col.keytup[0])}'
-    
-    def _get_err_CM(self, ph_sel):
+
+    def _get_err_CM(self, phsel:PhSel):
         """TGetter function for err_CM column (Cramer von Misses error)"""
-        ph_sel = ph_sel.render_positive(self.origin.detdef, convert_all=True) # ensures consistent representation in DiskDict
-        if ('err_CM', ph_sel) in self._cache:
-            return self._cache['err_CM', ph_sel]
-        stream_id = self.origin.setup.detdef.get_stream_ids(ph_sel)
-        if self._compute_stream(stream_id):
-            out = self._calc_err_CM(ph_sel)
-            self._add_column('err_CM', (ph_sel, ), out)
+        phsel = phsel.render_positive(self.origin.detdef, convert_all=True) # ensures consistent representation in DiskDict
+        if self._compute_stream(phsel):
+            out = self._calc_err_CM(phsel)
+            self._add_column('err_CM', (phsel, ), out)
         else:
+            stream_id = self.origin.setup.detdef.get_stream_ids(phsel)
             out = sum(self['err_CM', self.origin.setup.detdef.stream_ids_to_Ph_sel(st_id)] for st_id in stream_id)
         return out
-    
-    def _calc_err_CM(self, ph_sel:PhSel)->np.ndarray[np.float64]:
+
+    def _calc_err_CM(self, phsel:PhSel)->np.ndarray[np.float64]:
         """Compute err_CM column if cannot compute as sum from existing columns"""
-        tail_min = int(self.param.params['tail_min']/self.origin.clk_p)
+        phsel = phsel.render_positive(self.origin.setup.detdef, convert_all=True)
+        _, _, _, stream_proc = get_pycode_subval('BG_func', self.param.params['func'])
+        params = stream_proc(self.param.params, self.origin.setup.detdef.get_stream_ids(phsel))
+        tail_min = params['tail_min']/self.origin.clk_p
         offset = self.param.params.get('offset', 0.5)
         out = np.empty(self.size, dtype=np.float64)
-        for i, (times, bg) in enumerate(zip(self.parents['base'].iter_column('ph_times', ph_sel),self.iter_column('bg', ph_sel))):
+        for i, (times, bg) in enumerate(zip(self.parents['base'].iter_column('ph_times', phsel), 
+                                            self.iter_column('bg', phsel))):
             s = np.diff(times) - tail_min
             resid, x_resid = get_residuals(s[s >= 0], bg*self.origin.clk_p, offset)
-            out[i] = np.trapz(resid**2, x=x_resid)
+            out[i] = np.trapezoid(resid**2, x=x_resid)
         return out
-    
+
     @classmethod
-    def _normalizecolumn_rangecounts(cls, *args)->tuple[PhSel, str, str]:
-        """Column normalization function for mapped column range-counts"""
+    def _regularizecolumn_rangecounts(cls, *args)->tuple[PhSel, str, str]:
+        """Column regularization function for mapped column range-counts"""
         if len(args) < 2:
             raise ValueError("no defaults for destination param or Ph_sel, must specify")
         param, ph_sel, startstoptype = args[0], args[1], args[2:]
-        starttype, stoptype = _normalize_column_startstop(*startstoptype)
+        starttype, stoptype = _regularize_column_startstop(*startstoptype)
         return param, ph_sel, starttype, stoptype
-            
+
     def _iter_rangecounts(self, param:Param, ph_sel:PhSel, starttype:ColKeyStart, stoptype:ColKeyStop)->Iterator[float]:
         """Iter function for rangecounts mapped column"""
         dest_table = self.origin.get_table(param)
@@ -825,7 +918,7 @@ class BG(ChildPhotonTable):
             if not np.isnan(bgc):
                 bgc += bg*(dstop-cstart)*self.origin.clk_p
             yield bgc
-    
+
     @classmethod
     def _get_rangecounts_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
         """Title getter function for rangecounts column"""
@@ -843,7 +936,7 @@ def make_bg_param(data:PhotonData, tail_min:float=500e-6, period:float=60.0,
     Parameters
     ----------
     data : PhotonData
-        DESCRIPTION.
+        Data for which gate should be created.
     tail_min : float, optional
         Minimum photon separation (in seconds) to consider in bg computation. 
         The default is 500e-6.
@@ -861,8 +954,7 @@ def make_bg_param(data:PhotonData, tail_min:float=500e-6, period:float=60.0,
 
     """
     prd = Param(Periods, {'period':period, 'detdef':data.detdef})
-    args = {'func':exp_mlefit, 'tail_min':tail_min}
-    args.update(kwargs)
+    kwargs.update({'func':func, 'tail_min':tail_min})
     return Param(BG, kwargs, {'base':prd})
 
 
@@ -874,7 +966,7 @@ def get_bg_table(data:PhotonData, tail_min:float=500e-6, period:float=60.0,
     Parameters
     ----------
     data : PhotonData
-        DESCRIPTION.
+        Data for which gate should be created.
     tail_min : float, optional
         Minimum photon separation (in seconds) to consider in bg computation. 
         The default is 500e-6.

@@ -331,7 +331,7 @@ def _apply_mask(mask:np.ndarray[np.bool_], *args:np.ndarray)->tuple[np.ndarray,.
     return tuple(None if arg is None else arg[mask] for arg in args)
 
 
-def normalize_photon_data(setup:PhSpec,
+def regularize_photon_data(setup:PhSpec,
                           times:np.ndarray[np.int64]|tb.Node,
                           dets:np.ndarray[np.uint8]|tb.Node,
                           nanos:tuple[np.ndarray[np.uint16]]|tb.Node|None=None,
@@ -630,7 +630,7 @@ class PhotonData(DataSet):
 
     def _check_irf(self, phsel:PhSel, hst:np.ndarray)->tuple[PhSel,np.ndarray[np.int64]]:
         """Check irf key value pair- ie phsel in range and hst correct size/type"""
-        phsel = phsel.render_positive(self.detdef)
+        phsel = phsel.render_positive(self.detdef, convert_all=True)
         if self.detdef.get_stream_ids(phsel).size != 1:
             raise ValueError("PhSel must specifiy a single index for the given detdef")
         try:
@@ -644,7 +644,7 @@ class PhotonData(DataSet):
 
     def _check_irf_thresh(self, phsel:PhSel, thresh:int)->tuple[PhSel,int]:
         """Check irf_thresh key value pair- phsel in range and thresh in range"""
-        phsel = phsel.render_positive(self.detdef)
+        phsel = phsel.render_positive(self.detdef, convert_all=True)
         if self.detdef.get_stream_ids(phsel).size != 1:
             raise ValueError("PhSel must specifiy a single index for the given detdef")
         try:
@@ -676,6 +676,13 @@ class PhotonData(DataSet):
         if isinstance(self._reference, weakref.ReferenceType):
             return self._reference()
         return self._reference
+    
+    def _get_from_pharray(self, name:str, phsel:PhSel)->np.ndarray:
+        """Get masked photon data array"""
+        if phsel == phsel_all:
+            return self._pharray[name]
+        stream_ids = self.detdef.get_stream_ids(phsel)
+        return self._pharray[name][np.isin(self._pharray['dets'], stream_ids)]
 
     @property
     def times(self)->np.ndarray[np.int64]:
@@ -684,12 +691,46 @@ class PhotonData(DataSet):
             raise AttributeError("PhArray not recorded, cannot access original times")
         return self._pharray['times']
 
+    def get_times(self, phsel:PhSel=phsel_all)->np.ndarray[np.int64]:
+        """
+        Get photon arrival times (macrotimes) of photons belonging to phsel.
+
+        Parameters
+        ----------
+        phsel : PhSel, optional
+            PhSel defining streams to return. The default is PhSel('all').
+
+        Returns
+        -------
+        np.ndarray[np.int64]
+            photon arival times (macrotimes) masked by phsel.
+
+        """
+        return self._get_from_pharray('times', phsel)
+
     @property
     def dets(self)->np.ndarray[np.uint8]:
         """*Sorted* detector indexes of photons"""
         if not hasattr(self, '_pharray'):
             raise AttributeError("PhArray not recorded, cannot access original dets")
         return self._pharray['dets']
+
+    def get_dets(self, phsel:PhSel=phsel_all)->np.ndarray[np.uint8]:
+        """
+        Get detectors array, of photon belonging to phsel.
+
+        Parameters
+        ----------
+        phsel : PhSel, optional
+            PhSel defining streams to return. The default is PhSel('all').
+
+        Returns
+        -------
+        np.ndarray[np.uint8]
+            Detectors array masked by phsel.
+
+        """
+        return self._get_from_pharray('dets', phsel)
 
     @property
     def nanos(self)->np.ndarray[np.uint16]:
@@ -699,6 +740,23 @@ class PhotonData(DataSet):
         if 'nanos' not in self._pharray:
             raise AttributeError("non-pulsed excitation data")
         return self._pharray['nanos']
+
+    def get_nanos(self, phsel:PhSel=phsel_all)->np.ndarray[np.uint16]:
+        """
+        Get nanotimes of photon belonging to phsel. Pulsed excitation only.
+
+        Parameters
+        ----------
+        phsel : PhSel, optional
+            PhSel defining streams to return. The default is PhSel('all').
+
+        Returns
+        -------
+        np.ndarray[np.uint16]
+            Photon nanotimes, of photons in phsel.
+
+        """
+        return self._get_from_pharray('nanos', phsel)
 
     @property
     def pulsed(self)->bool:
@@ -714,6 +772,23 @@ class PhotonData(DataSet):
         if 'particles'not in self._pharray:
             raise AttributeError("real data, no particles array")
         return self._pharray['particles']
+    
+    def get_particles(self, phsel:PhSel=phsel_all)->np.ndarray[np.uint8]:
+        """
+        Get particle indexes on photons in phsel. Simulated data only.
+
+        Parameters
+        ----------
+        phsel : PhSel, optional
+            PhSel defining streams to return. The default is PhSel('all').
+
+        Returns
+        -------
+        np.ndarray[np.uint8]
+            Indexes of particles in phsel.
+
+        """
+        return self._get_from_pharray('particles', phsel)
 
     @property
     def simulated(self)->bool:
@@ -877,26 +952,162 @@ class PhotonDataList(DataSetList):
         """Tuple of :class:`PhSpec` objects, 1 for each :class:`PhotonData`"""
         return tuple(d._pharray['setup'] for d in self._datas)
 
-    def iter_times(self)->Iterator[np.ndarray[np.int64]]:
-        """Iterate over times in each :class:`PhotonData`"""
+    def iter_times(self, phsel:PhSel=phsel_all)->Iterator[np.ndarray[np.int64]]:
+        """
+        Iterate over macrotimes arrays in each :class:`PhotonData`
+
+        Parameters
+        ----------
+        phsel : PhSel, optional
+            PhSel defining streams to incldue in array. The default is PhSel('all').
+        
+        Yields
+        ------
+        np.ndarray[np.uint8]
+            Array of macrotimes filtered by phsel.
+
+        """
         for data in self._datas:
-            yield data.times
+            yield data.get_times(phsel)
+
+    def get_times(self, phsel:PhSel=phsel_all)->np.ndarray[np.ndarray[np.int64]]:
+        """
+        Get macrotimes arrays (pulsed excitation only) in each :class:`PhotonData`
+        
+        Parameters
+        ----------
+        phsel : PhSel, optional
+            PhSel defining streams to incldue in array. The default is PhSel('all').
+        
+        Returns
+        -------
+        np.ndarary[np.ndarray[np.uint8]]
+            Array of arrays of macrotimes filetered by phsel.
+        """
+        return np.array(list(self.iter_times(phsel)), dtype=np.object_)
     
-    def iter_dets(self)->Iterator[np.ndarray[np.uint8]]:
-        """Iterate over dets in each :class:`PhotonData`"""
-        for data in self._datas:
-            yield data.dets
+    @property
+    def times(self)->np.ndarray[np.ndarray[np.int64]]:
+        """All photon macrotimes"""
+        return np.array(list(self.iter_times()), dtype=np.object_)
     
-    def iter_nanos(self)->Iterator[np.ndarray[np.uint16]]:
-        """Iterate over nanos in each :class:`PhotonData`"""
+    def iter_dets(self, phsel:PhSel=phsel_all)->Iterator[np.ndarray[np.uint8]]:
+        """
+        Iterate over detector arrays in each :class:`PhotonData`
+
+        Parameters
+        ----------
+        phsel : PhSel, optional
+            PhSel defining streams to incldue in array. The default is PhSel('all').
+        
+        Yields
+        ------
+        np.ndarray[np.uint8]
+            Array of detector indexes filtered by phsel.
+
+        """
         for data in self._datas:
-            yield data.nanos
+            yield data.get_dets(phsel)
+
+    def get_dets(self, phsel:PhSel=phsel_all)->np.ndarray[np.ndarray[np.uint8]]:
+        """
+        Get detectors arrays (pulsed excitation only) in each :class:`PhotonData`
+        
+        Parameters
+        ----------
+        phsel : PhSel, optional
+            PhSel defining streams to incldue in array. The default is PhSel('all').
+        
+        Returns
+        -------
+        np.ndarary[np.ndarray[np.uint8]]
+            Array of arrays of detectors filetered by phsel.
+        """
+        return np.array(list(self.iter_nanos(phsel)), dtype=np.object_)
+
+    @property
+    def dets(self)->np.ndarray[np.ndarray[np.uint8]]:
+        """All detectors in each PhotonData group"""
+        return np.array(list(self.iter_dets()), dtype=np.object_)
+
+    def iter_nanos(self, phsel:PhSel=phsel_all)->Iterator[np.ndarray[np.uint16]]:
+        """
+        Iterate over nanotime arrays (pulsed excitation only) in each :class:`PhotonData`
+
+        Parameters
+        ----------
+        phsel : PhSel, optional
+            PhSel defining streams to incldue in array. The default is PhSel('all').
+        
+        Yields
+        ------
+        np.ndarray[np.uint16]
+            Array of nanotimes filtered by phsel.
+
+        """
+        for data in self._datas:
+            yield data.get_nanos(phsel)
     
-    def iter_particles(self)->Iterator[np.ndarray[np.uint8]]:
-        """Iterate over particles (simulated data only) in each :class:`PhotonData`"""
+    def get_nanos(self, phsel:PhSel=phsel_all)->np.ndarray[np.ndarray[np.uint16]]:
+        """
+        Get nanotimes arrays (pulsed excitation only) in each :class:`PhotonData`
+        
+        Parameters
+        ----------
+        phsel : PhSel, optional
+            PhSel defining streams to incldue in array. The default is PhSel('all').
+        
+        Returns
+        -------
+        np.ndarary[np.ndarray[np.uint16]]
+            Array of arrays of nanotimes filtered by phsel.
+        """
+        return np.array(list(self.iter_nanos(phsel)), dtype=np.object_)
+
+    @property
+    def nanos(self)->np.ndarray[np.ndarray[np.uint16]]:
+        """All nanotimes in each PhotonData group"""
+        return np.array(list(self.iter_times()), dtype=np.object_)
+
+    def iter_particles(self, phsel:PhSel=phsel_all)->Iterator[np.ndarray[np.uint8]]:
+        """
+        Iterate over particles arrays (simulated data only) in each :class:`PhotonData`
+
+        Parameters
+        ----------
+        phsel : PhSel, optional
+            PhSel defining streams to incldue in array. The default is PhSel('all').
+        
+        Yields
+        ------
+        np.ndarray[np.uint8]
+            Array of particle indexes filtered by phsel.
+
+        """
         for data in self._datas:
-            yield data.particles
-            
+            yield data.get_particles(phsel)
+    
+    def get_particles(self, phsel:PhSel=phsel_all)->np.ndarray[np.ndarray[np.uint8]]:
+        """
+        Get particles arrays (simulated data only) in each :class:`PhotonData`
+        
+        Parameters
+        ----------
+        phsel : PhSel, optional
+            PhSel defining streams to incldue in array. The default is PhSel('all').
+        
+        Returns
+        -------
+        np.ndarary[np.ndarray[np.uint8]]
+            Array of arrays of particles indexes.
+        """
+        return np.array(list(self.iter_particles(phsel)), dtype=np.object_)
+
+    @property
+    def particles(self)->np.ndarray[np.ndarray[np.int64]]:
+        """All particle indexes in each PhotonData group"""
+        return np.array(list(self.iter_particles()), dtype=np.object_)
+
     def save(self, *args:Param, group:tb.Group=None, name:Callable[[int],str]=None, 
              save_sorted:bool=None)->list[tb.Group]:
         """
@@ -983,8 +1194,8 @@ def _mask_byset(mask:np.ndarray, inset:np.ndarray)->np.ndarray:
     return mask[np.isin(mask, inset)]
 
 
-def _normalize_ph_sel(val:PhSel|Sequence[PhSel], 
-                      detdef:DetDef, convert_all:bool=False)->PhSel|Sequence[PhSel]:
+def _regularize_ph_sel(val:PhSel|Sequence[PhSel], 
+                      detdef:DetDef, convert_all:bool=True)->PhSel|Sequence[PhSel]:
     """
     Ensure all ph_sels are rendered positive based on detef.
 
@@ -995,7 +1206,7 @@ def _normalize_ph_sel(val:PhSel|Sequence[PhSel],
     detdef : DetDef
         DetDef definition.
     convert_all : bool, optional
-        Whether to convert PhSel('all') to stream enumeration. The default is False.
+        Whether to convert PhSel('all') to stream enumeration. The default is True.
 
     Returns
     -------
@@ -1006,19 +1217,19 @@ def _normalize_ph_sel(val:PhSel|Sequence[PhSel],
     if isinstance(val, PhSel):
         return val.render_positive(detdef, convert_all=convert_all)
     if isinstance(val, tupledict):
-        return tupledict(*((k, _normalize_ph_sel(v, detdef, convert_all)) for k, v in val.items()))
+        return tupledict(*((k, _regularize_ph_sel(v, detdef, convert_all)) for k, v in val.items()))
     if isinstance(val, dict):
-        return {k:_normalize_ph_sel(v, detdef, convert_all) for k, v in val.items()}
+        return {k:_regularize_ph_sel(v, detdef, convert_all) for k, v in val.items()}
     if isinstance(val, (list, tuple)):
-        return type(val)((_normalize_ph_sel(v, detdef, convert_all)for v in val))
+        return type(val)((_regularize_ph_sel(v, detdef, convert_all)for v in val))
     if isinstance(val, np.ndarray) and val.dtype == np.object_:
-        return np.array([_normalize_ph_sel(v, detdef, convert_all) for v in val.reshape(-1)]).reshape(val.shape)
+        return np.array([_regularize_ph_sel(v, detdef, convert_all) for v in val.reshape(-1)]).reshape(val.shape)
     return val
 
 
-def _normalize_column_startstop(*args:Hashable)->tuple[str,str]:
+def _regularize_column_startstop(*args:Hashable)->tuple[str,str]:
     r"""
-    Convenience function for column normalization of columns whose keytup
+    Convenience function for column regularization of columns whose keytup
     ends in `starttime, stoptime`. \*args should be the args after other
     keys peeled off of beginning.
     If one or the other is not specified, defaults them to `istarttime` and
@@ -1061,19 +1272,19 @@ class PhotonTable:
     def _validate_param(cls, param:Param)->None:
         """Validate intercept to ensure all phsel are positive, convert all based on detdef"""
         detdef = cls._detdef(param)
-        pdict = tupledict(*((k,_normalize_ph_sel(v, detdef, convert_all=True)) 
+        pdict = tupledict(*((k,_regularize_ph_sel(v, detdef, convert_all=True)) 
                             for k, v in param.params.items()))
         super(_ImData, param).__setattr__('params', pdict)
         cls.validate_param(param)
 
     @classmethod
-    def _normalize_column_kwargs(cls, **kwargs)->dict[str:Any]:
+    def _regularize_column_kwargs(cls, **kwargs)->dict[str:Any]:
         """
-        Intercept normalize_column_kwargs ensuring all phsel are positive, 
+        Intercept regularize_column_kwargs ensuring all phsel are positive, 
         convert all based on detdef
         """
         detdef = cls._detdef(kwargs['source_param'])
-        kwargs['keytup'] = _normalize_ph_sel(kwargs['keytup'], detdef, convert_all=True)
+        kwargs['keytup'] = _regularize_ph_sel(kwargs['keytup'], detdef, convert_all=True)
         return kwargs
 
     def _get_keys(self, keys:tuple[str,Hashable,...])->tuple[ColumnDef,tuple[Hashable,...],int,Any]:
@@ -1082,7 +1293,7 @@ class PhotonTable:
         convert all based on detdef
         """
         coldef, keys, offset, fill = super()._get_keys(keys)
-        keys = tuple(key.render_positive(self._detdef(self.param)) 
+        keys = tuple(key.render_positive(self._detdef(self.param), convert_all=True) 
                      if isinstance(key, PhSel) else key for key in keys)
         return coldef, keys, offset, fill
     
@@ -1231,6 +1442,12 @@ class BasePhotonTable(PhotonTable, BaseTable):
         bva : float, (ph_sel_num:PhSel, ph_sel_dem:PhSel, n:int) 
             variance of ratio of :math:`N(ph\_sel\_num)/N(ph\_sel\_dem)` of chuncks 
             of size ``n``.
+        ebva : float, (ph_sel_num:PhSel, ph_sel_dem:PhSel, n:int) 
+            "Excess" variance of bva, defined as :math:`S^{2} = s^{2} - \sigma^{2}`
+            where :math:`s` is the classical BVA, and 
+            :math:`$\sigma^{2}=\frac{\langle\epsilon\rangle (1-\langle\epsilon\rangle)}{m}$`
+            and :math:`\epsilon` is the ratio of the raw number of photons in
+            phsel_num to phsel_dem of the entire burst.
         nanohist : np.ndarray[np.int64] (phsel:PhSel, full:bool)
             histogram (1 per range) of nanotimes of photons in range. If full, the
             return histogram using TCSPC raw bins, if full=False, then trim to excitation range.
@@ -1396,7 +1613,10 @@ class BasePhotonTable(PhotonTable, BaseTable):
 
     def _get_ratio_raw(self, phsel_num:PhSel, phsel_dem:PhSel)->np.ndarray[np.float64]:
         """Getter function for ratio_raw column"""
-        return self['nph_raw', phsel_num] / self['nph_raw', phsel_dem]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            out = self['nph_raw', phsel_num] / self['nph_raw', phsel_dem]
+        return out
 
     @classmethod
     def _get_ratio_raw_title(cls, col:Column, include_unit:Real=False, origin:PhotonData=None)->str:
@@ -1415,7 +1635,9 @@ class BasePhotonTable(PhotonTable, BaseTable):
     def _get_anisotropy_raw(self, phsel_p:PhSel, phsel_s:PhSel)->np.ndarray[np.float64]:
         """Getter function for anisotropy_raw column"""
         p, s = self['nph_raw', phsel_p], self['nph_raw', phsel_s]
-        return (p-s)/(p+2*s)
+        with np.errstate(divide='ignore'):
+            out = (p-s)/(p+2*s)
+        return out
 
     @classmethod
     def _get_anisotropy_raw_title(cls, col:Column, include_unit:Real=False, origin:PhotonData=None)->str:
@@ -1440,7 +1662,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
     def _iter_meanT(self, ph_sel:PhSel)->Iterator[float]:
         """Iterator function for meanT column, mean time of given photon stream"""
         for time, s in zip(self.iter_column('ph_times', ph_sel), self.iter_column('istart')):
-            yield (np.mean(time-s)+s)*self.origin.clk_p
+            yield (np.mean(time-s)+s)*self.origin.clk_p if time.size else np.nan
 
     @classmethod
     def _get_meanT_title(cls, col:Column, include_unit:Real=False, origin:PhotonData=None)->str:
@@ -1452,7 +1674,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
     def _iter_mTdiff(self, phsel_a:PhSel, phsel_b:PhSel)->Iterator[float]:
         """Iterator function for mTdiff, difference in s in mean time between phsel_a and phsel_b"""
         for timea, timeb, s in zip(self.iter_column('ph_times', phsel_a), self.iter_column('ph_times', phsel_b), self.iter_column('istart')):
-            yield (np.mean(timea-s) - np.mean(timeb-s))*self.origin.clk_p
+            yield (np.mean(timea-s) - np.mean(timeb-s))*self.origin.clk_p if timea.size and timeb.size else np.nan
 
     @classmethod
     def _get_mTdiff_title(cls, col:Column, include_unit:Real=False, origin:PhotonData=None)->str:
@@ -1462,9 +1684,9 @@ class BasePhotonTable(PhotonTable, BaseTable):
         return f'${title}$'
 
     @classmethod
-    def _normalizecolumn_brightness(cls, *args):
-        """Column normalzation function for brightness column"""
-        return args[:1] + cls._normalize_column_startstop(*args[1:])
+    def _regularizecolumn_brightness(cls, *args):
+        """Column regularizetion function for brightness column"""
+        return args[:1] + cls._regularize_column_startstop(*args[1:])
 
     def _get_brightness(self, phsel:PhSel, starttype:ColKeyStart, stoptype:ColKeyStop)->np.ndarray[np.double]:
         """Getter function for brightness column"""
@@ -1478,14 +1700,14 @@ class BasePhotonTable(PhotonTable, BaseTable):
         return f'${title}$'
 
     @classmethod
-    def _normalize_column_startstop(cls, *args):
-        """Sub function for normalizing start/stop times of columns using said keys"""
-        return _normalize_column_startstop()
+    def _regularize_column_startstop(cls, *args):
+        """Sub function for regularizing start/stop times of columns using said keys"""
+        return _regularize_column_startstop()
 
     @classmethod
-    def _normalizecolumn_middur(cls, *args:str)->tuple[str, str]:
-        """Normalization function for midtime and dur columns"""
-        return cls._normalize_column_startstop(*args)
+    def _regularizecolumn_middur(cls, *args:str)->tuple[str, str]:
+        """regularization function for midtime and dur columns"""
+        return cls._regularize_column_startstop(*args)
 
     def _get_dur(self, starttype:ColKeyStart, stoptype:ColKeyStop)->np.ndarray[np.float64]:
         """Getter function for dur column"""
@@ -1504,15 +1726,15 @@ class BasePhotonTable(PhotonTable, BaseTable):
         return f'${title}$'
 
     @classmethod
-    def _normalizecolumn_sep(cls, *args:str)->tuple[str, str]:
-        """Column normalization function for sep column"""
+    def _regularizecolumn_sep(cls, *args:str)->tuple[str, str]:
+        """Column regularization function for sep column"""
         if len(args) > 1 and not isinstance(args[-2], str):
             args, post = args[:-2], args[-2:]
         elif len(args) > 0 and  not isinstance(args[-1], str):
             args, post = args[:-1], args[-1:]
         else:
             post = tuple()
-        return cls._normalize_column_startstop(*args) + post
+        return cls._regularize_column_startstop(*args) + post
 
     def _get_sep(self, starttype:ColKeyStart, stoptype:ColKeyStop)->np.ndarray[np.float64]:
         """Getter function for sep column"""
@@ -1530,8 +1752,8 @@ class BasePhotonTable(PhotonTable, BaseTable):
         return f'${title}$'
 
     @classmethod
-    def _normalizecolumn_max_rate(self, *args)->tuple[PhSel, int]:
-        """Column normalization function for max_rate column"""
+    def _regularizecolumn_max_rate(self, *args)->tuple[PhSel, int]:
+        """Column regularization function for max_rate column"""
         phsel, m = args[0:1], args[1:2]
         phsel = phsel_all if not phsel else phsel[0]
         m = 10 if not m else m[0]
@@ -1559,8 +1781,8 @@ class BasePhotonTable(PhotonTable, BaseTable):
         return f'${title}$'
 
     @classmethod
-    def _normalizecolumn_bva(cls, *args)->tuple[PhSel, int]:
-        """Column normalization function for bva column"""
+    def _regularizecolumn_bva(cls, *args)->tuple[PhSel, int]:
+        """Column regularization function for bva column"""
         phsel_num, phsel_dem, n = args[0:1], args[1:2], args[2:3]
         phsel_num = PhSel('0ex0em') if not phsel_num else phsel_num[0]
         phsel_dem = PhSel('0ex') if not phsel_dem else phsel_dem[0]
@@ -1594,7 +1816,9 @@ class BasePhotonTable(PhotonTable, BaseTable):
     def _get_ebva(self, phsel_num:PhSel, phsel_dem:PhSel, n:int)->np.ndarray[np.float64]:
         """Getter function for ebva column"""
         bva, r = self['bva', phsel_num, phsel_dem, n], self['ratio_raw', phsel_num, phsel_dem]
-        return np.sqrt(bva**2 - ((r*1-r)/n))
+        with np.errstate(divide='ignore'):
+            out = bva**2 - ((r*(1-r))/n)
+        return out
 
     @classmethod
     def _get_ebva_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
@@ -1610,7 +1834,10 @@ class BasePhotonTable(PhotonTable, BaseTable):
             tcspc_unit = self.origin.setup['tcspc_unit'][stream_ids[0] % self.origin.detdef.ex_stride]
             thresh = self.origin.irf_thresh[phsel]
             for nanos in self.iter_column('ph_nanos', phsel):
-                yield np.mean((nanos[nanos>=thresh]-thresh)*tcspc_unit)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    out = np.mean((nanos[nanos>=thresh]-thresh)*tcspc_unit)
+                yield out
         else:
             thresh_dict = {i:self.origin.irf_thresh[self.detdef.stream_ids_to_PhSel(i)] for i in stream_ids}
             threshs = np.array([thresh_dict.get(i, 0) for i in range(self.origin.detdef.size)])
@@ -1620,7 +1847,8 @@ class BasePhotonTable(PhotonTable, BaseTable):
                 offset = threshs[dets]
                 mask = nanos >= offset
                 tcspc_unit = tcspc_unit_ref[dets % exstride]
-                yield np.mean((nanos[mask] - offset[mask])*tcspc_unit)
+                nano_off = nanos[mask] - offset[mask]
+                yield np.mean((nano_off)*tcspc_unit) if nano_off.size else np.nan
 
     @classmethod
     def _get_nanomean_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
@@ -1645,7 +1873,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
 
     @classmethod
     def _noramlizecolumn_nanohist(self, *args)->tuple[PhSel, bool]:
-        """Column normalization function for nanohist column"""
+        """Column regularization function for nanohist column"""
         phsel, fill, err = args[:1], args[1:2], args[2:]
         if err:
             raise TypeError("too many keys for nanohist, maximumn two, PhSel and full, (full optional)")
@@ -1691,16 +1919,16 @@ _basetimecolumndefs = (
     ColumnDef('mTdiff', (PhSel, PhSel), 0, 'user', iter_func='_iter_mTdiff', get_derived=True,
               title_func='_get_mTdiff_title', unit='s'),
     ColumnDef('max_rate', (PhSel, int), 0, 'user', get_func='_get_max_rate',
-              dtype=np.dtype('<f8'), get_derived=True, norm_func='_normalizecolumn_max_rate',
+              dtype=np.dtype('<f8'), get_derived=True, reg_func='_regularizecolumn_max_rate',
               title_func='_get_max_rate_title', unit=r'cnts\: s^{-1}', index_unit='cnts s-1'),
     ColumnDef('bva', (PhSel, PhSel, int), 0, 'user', get_func='_get_bva', 
-              dtype=np.dtype('<f8'), get_derived=True, norm_func='_normalizecolumn_bva',
+              dtype=np.dtype('<f8'), get_derived=True, reg_func='_regularizecolumn_bva',
               title_func='_get_bva_title'),
     ColumnDef('ebva', (PhSel, PhSel, int), 0, 'user', get_func='_get_ebva', 
-              dtype=np.dtype('<f8'), get_derived=True, norm_func='_normalizecolumn_bva',
+              dtype=np.dtype('<f8'), get_derived=True, reg_func='_regularizecolumn_bva',
               title_func='_get_ebva_title'),
     ColumnDef('nanohist', (PhSel, bool), 0, 'never', iter_func='_iter_nanohist',
-              norm_func='_noramlizecolumn_nanohist',
+              reg_func='_noramlizecolumn_nanohist',
               get_derived=True, dtype=np.dtype('<i8'), ndim=2),
     ColumnDef('nanomean', (PhSel, ), 0, 'user', iter_func='_iter_nanomean', get_derived=True,
               dtype=np.dtype('<f8'), title_func='_get_nanomean_title', unit='s'),
@@ -1713,17 +1941,17 @@ def make_base_column_defs(startV:TypeValidator=TV_str_start, stopV:TypeValidator
     skip = tuple() if skip is None else skip
     out = _basetimecolumndefs + (
         ColumnDef('midtime', (startV, stopV), 0, 'never', get_func='_get_midtime', 
-                  get_derived=True, norm_func='_normalizecolumn_middur', 
+                  get_derived=True, reg_func='_regularizecolumn_middur', 
                   title_func='_get_midtime_title', unit='(s)'),
         ColumnDef('sep', (startV, stopV), -1, 'never', get_func='_get_sep', atomic=False, 
-                  dtype=np.dtype('<f8'), norm_func='_normalizecolumn_sep', 
+                  dtype=np.dtype('<f8'), reg_func='_regularizecolumn_sep', 
                   title_func='_get_sep_title', unit='s', index='sep', index_unit='s'),
         ColumnDef('brightness', (PhSel, startV, stopV), 0, 'user', dtype=np.dtype('<f8'), 
                   get_func='_get_brightness', get_derived=True, 
-                  norm_func='_normalizecolumn_brightness', title_func='_get_brightness_title',
+                  reg_func='_regularizecolumn_brightness', title_func='_get_brightness_title',
                   unit=r'cnts\: s^{-1}', index_unit='cnts s-1'),
         ColumnDef('dur', (startV, stopV), 0, 'never', dtype=np.dtype('<f8'), get_func='_get_dur', 
-                  get_derived=True, norm_func='_normalizecolumn_middur', 
+                  get_derived=True, reg_func='_regularizecolumn_middur', 
                   title_func='_get_dur_title', unit='s', index='dur', index_unit='s')
         )
     return tuple(o for o in out if o.name not in skip)

@@ -2041,7 +2041,8 @@ class _ImData(_DataLike):
     """
     _hashskip = tuple() #: values that need not be considered in equality or hashing
     _typeconversions:ClassVar[ImDict[str,Union[TypeValidator,type]]] = ImDict()
-    _registered:ClassVar[FixedDict[str,"_ImData"]] = FixedDict() #: stores all subclasses of _ImData, subclasses MUST NOT overwrite
+    #: stores all subclasses of _ImData, subclasses MUST NOT overwrite previous names
+    _registered:ClassVar[FixedDict[str,"_ImData"]] = FixedDict() 
 
     def __init_subclass__(cls):
         cls._registered[_type_name(cls)] = cls
@@ -2075,12 +2076,12 @@ class _ImData(_DataLike):
         Raises
         ------
         ValueError
-            DESCRIPTION.
+            One or more fields cannot be changed or removed.
 
         Returns
         -------
-        "_ImData"
-            DESCRIPTION.
+        _ImData
+            Copy of object with specified fields replaced or pop.
 
         """
         fields = dict() if fields is None else fields

@@ -23,7 +23,7 @@ from .datamodel.utils import (_DataLike, MutDict, tupledict, make_objectarray,
                          enumerate_intersects, _FileFinalizer, ImDict, _eq, 
                          _GroupFuture, GroupFuture)
 from .datamodel.diskdict import MappedAttrDD, TypedValueDD
-from .photondata import PhSpec, normalize_photon_data, PhotonData, PhotonDataList, TV_pharray_mtch, PhArray
+from .photondata import PhSpec, PhotonData, PhotonDataList, TV_pharray_mtch, PhArray, regularize_photon_data
 from .ph_sel import DetDef, PhSel
 
 
@@ -713,18 +713,19 @@ def load(filename:Union[str,PathLike], ondisk:bool=False):
     return PhotonHDF5Data.load_hdf5(filename, ondisk)
 
 
-def normalize(raw:PhotonHDF5Data, alex_type:str=None, autosave:bool=False, keepraw:Union[None,bool]=False,
-              group:GroupFuture=None, track:bool=True, load_saved:bool=True,
-              asdatalist:bool=True, unpack:bool=True)->Union[PhotonData,tuple[PhotonData,...],PhotonDataList]:
+def regularize_dets(raw:PhotonHDF5Data, alex_type:str=None, autosave:bool=False, 
+                    keepraw:Union[None,bool]=False, group:GroupFuture=None, 
+                    track:bool=True, load_saved:bool=True, asdatalist:bool=True, 
+                    unpack:bool=True)->Union[PhotonData,tuple[PhotonData,...],PhotonDataList]:
     """
-    Create PhotonDataList object from PhotonHDF5Data. Assigns photons soretd dets
+    Create PhotonDataList object from PhotonHDF5Data. Assigns photons sorted dets
     indexes based on ex, em, pol, and split channels, and removes photons outside
     of excitation windows.
 
     Parameters
     ----------
     raw : PhotonHDF5Data
-        Raw data to normalize.
+        Raw data to regularize.
     alex_type : str, optional
         One of ``'macro'``, ``'nano'``, ``'none'``. Specifies at which level
         laster alternation occurs, if ``None`` the value is automatially assigned
@@ -758,7 +759,6 @@ def normalize(raw:PhotonHDF5Data, alex_type:str=None, autosave:bool=False, keepr
             file = None
         if not isinstance(group, _GroupFuture):
             group = _GroupFuture(group)
-    # pharras = _normalize(raw, alex_type, group)
     pharrays = list()
     detdef = DetDef(ex=raw.get_ex(), em=raw.get_em(), pol=raw.get_pol(), split=raw.get_split())
     raw_setup = raw.setup
@@ -788,7 +788,7 @@ def normalize(raw:PhotonHDF5Data, alex_type:str=None, autosave:bool=False, keepr
             skwargs['nanos'] = pd.nanos
         if hasattr(pd, 'particles'):
             skwargs['particles'] = pd.nanos
-        pharrays.append(normalize_photon_data(setup, pd.times, pd.dets, **skwargs))
+        pharrays.append(regularize_photon_data(setup, pd.times, pd.dets, **skwargs))
     if keepraw is None:
         keepraw = raw.file is None or raw.ondisk
     ref = raw if keepraw else weakref.ref(raw)

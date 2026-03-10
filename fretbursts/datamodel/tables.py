@@ -67,7 +67,7 @@ objects combine with logical operations.
 """
 
 # from abc import ABC, abstractmethod
-from itertools import chain, product, permutations
+from itertools import chain, product, permutations, combinations
 from collections import Counter
 from collections.abc import Callable, Sequence, Hashable, Iterator
 import weakref
@@ -163,20 +163,21 @@ class ParentDef(_ImData):
     
     Parameters
     ----------
-    name : str
-        The name given to the parent, used as key in parents tupledict
-    table_type : type
-        A type object, must be subclass of :class:`Table`, defines what type of
-        parents (``Param.tp`` is ``table_type`` or subclass thereof)
-    is_base : bool, optional
-        Whether the parent defines the base_param of the table or not. The default is False.
-    share_base : bool, optional
-        If the parent must have the same ``base_param`` as table. If ``is_base``
-        is ``True``, then  ``share_base`` must be ``False``. The default is False.
-    size_func : str, optional
-        string name of classmethod used to determine the correct number of
-        params in parent (for array parents only) If set, parent will be tuple
-        of params, if not set, parent is single param. Default is empty string.
+        name : str
+            The name given to the parent, used as key in parents tupledict
+        table_type : type
+            A type object, must be subclass of :class:`Table`, defines what type of
+            parents (``Param.tp`` is ``table_type`` or subclass thereof)
+        is_base : bool, optional
+            Whether the parent defines the base_param of the table or not. The default is False.
+        share_base : bool, optional
+            If the parent must have the same ``base_param`` as table. If ``is_base``
+            is ``True``, then  ``share_base`` must be ``False``. The default is False.
+        size_func : str, optional
+            string name of classmethod used to determine the correct number of
+            params in parent (for array parents only) If set, parent will be tuple
+            of params, if not set, parent is single param. Default is empty string.
+    
     """
     __slots__ = ('name', 'table_type', 'is_base', 'share_base', 'size_func')
     _typeconversions = ImDict(name=TV_str, 
@@ -285,7 +286,7 @@ def _proc_TV_param_defs(imdata:"Param", *args)->dict:
 
 
 def _check_TV_param_defs(val:tupledict, _kwargs:dict=None, **kwargs)->tupledict:
-    """Check and normalize Param params so correct ordered tupledict"""
+    """Check and regularize Param params so correct ordered tupledict"""
     param_defs = kwargs['pdefs']
     for pdef in param_defs:
         if 'append_params' in pdef and (pdef.name in val or 'default' in pdef or pdef.required):
@@ -304,7 +305,7 @@ def _proc_TV_parent_defs(imdata:"Param", *args)->dict:
 
 
 def _check_parent_defs(val:tupledict["Param"], tp:type=None, params:tupledict=None, **kwargs)->tupledict["Param"]:
-    """Check function for Param parents, ensure correct types and normalize to tupledict of correct order"""
+    """Check function for Param parents, ensure correct types and regularize to tupledict of correct order"""
     if not tp.parent_defs:
         if val:
             raise ValueError("parents must be empty for the given Table type")
@@ -609,7 +610,13 @@ class Param(_ImData):
         return self.tp.get_param_description(self)
 
     def __str__(self):
-        return f'Param of {self.tp.__name__} at 0x{id(self):x}'
+        return f'Param of {self.tp.__module__}.{self.tp.__name__} at 0x{id(self):x}'
+    
+    @property
+    def _sort_tuple(self)->tuple[Hashable,...]:
+        return (f'{self.tp.__module__}.{self.tp.__name__}', 
+                _make_sortable(self.parents), _make_sortable(self.params))
+        
 
 
 def _param_validator(val:Param, table_type:type|Sequence[type]=None, **kwargs)->Param:
@@ -773,10 +780,10 @@ class ColumnDef(_ImDataLike):
         The value used as the default fill value for the column.
         Only for non-atomic or columns with offset. Default is nan for floating
         columns, -1 for integral columns, and None for object columns.
-    norm_func : str, optional
+    reg_func : str, optional
         name of method to call from Table (should be classmethod) that will 
-        normalize and raise appropriate errors for out of range columns. 
-        If not present, no normalization will take place. Default is empty string.
+        regularize and raise appropriate errors for out of range columns. 
+        If not present, no regularization will take place. Default is empty string.
     check_func : str, optional
         name of method to call from Table (should be classmethod) that verifies 
         all values of column are valid (similar to validate_param). 
@@ -816,7 +823,7 @@ class ColumnDef(_ImDataLike):
     """
     __slots__ = ('name', 'keytypes', 'offset', 'store', 'atomic', 'get_func', 
                  'iter_func', 'get_derived', 'dtype', 'typedef', 'ndim', 
-                 'dimlimits', 'fill', 'norm_func', 'check_func', 'mapto', 'remap',
+                 'dimlimits', 'fill', 'reg_func', 'check_func', 'mapto', 'remap',
                  'title', 'title_func', 'unit', 'index_func', 'index','index_unit', 'title_is_tex')
     _setfuncs = ImDict(
         name=TV_str(pattern=_column_regex).check_val, 
@@ -827,11 +834,11 @@ class ColumnDef(_ImDataLike):
         dtype=TV_dtype.check_val, typedef=TV_dtype.check_val, ndim=TV_int(mn=1).check_val,
         dimlimits=TV_ndarray(mn=0, validator=_check_dimlimits, data_proc=_proc_dimlimits).check_val,
         mapto=TV_type(validator=_check_map_to).check_val, remap=TV_attrstr.check_val, 
-        norm_func=TV_attrstr_allow_empty.check_val, check_func=TV_attrstr_allow_empty.check_val,
+        reg_func=TV_attrstr_allow_empty.check_val, check_func=TV_attrstr_allow_empty.check_val,
         title=str, title_func=TV_attrstr_allow_empty.check_val, unit=TV_str.check_val, 
         index=_TV_indexable.check_val, index_func=TV_attrstr.check_val,
         index_unit=_TV_indexable.check_val, title_is_tex=_check_title_is_tex)
-    _defaults = ImDict(keytypes=lambda: tuple(), offset=0, norm_func='')
+    _defaults = ImDict(keytypes=lambda: tuple(), offset=0, reg_func='')
     _required = frozenset({'name', 'keytypes', 'offset'})
 
     name: str  #: name of column
@@ -859,7 +866,7 @@ class ColumnDef(_ImDataLike):
     #: ndim-1 x 2 array defining minimum and maximum size of each dimension (excluding 1st)
     dimlimits: np.ndarray[np.int64]
     fill:Any #. Fill value for column
-    norm_func: str #: function to call on Table to normalize or check column values
+    reg_func: str #: function to call on Table to regularize or check column values
     check_func: str #: function to call on Table to check column values
     mapto: type  #: the type of table that the column maps to
     remap: str  #: if present, column is an alias, string is attr that will convert 
@@ -874,7 +881,7 @@ class ColumnDef(_ImDataLike):
         if 'remap' in self:
             self.__post_init_remap__()
         else:
-            self.__post_init_norm__()
+            self.__post_init_reg__()
 
     def __post_init_remap__(self):
         # Check that remapped column has no "standard" specifications
@@ -887,7 +894,7 @@ class ColumnDef(_ImDataLike):
                              'typedef, atomic, ndim, dimlimits, fill, check_func, title, '
                              'title_func, unit, index, index_func, undex_unit, title_is_tex')
 
-    def __post_init_norm__(self):
+    def __post_init_reg__(self):
         if 'atomic' not in self:
             super(_ImDataLike, self).__setattr__('atomic', True)
         if 'mapto' in self or not self.atomic:
@@ -1090,7 +1097,7 @@ def _make_column_keytup(val:tuple[Hashable,...], coldef:ColumnDef=None, **kwargs
     if len(keytup) != len(coldef.keytypes):
         raise ValueError(f"incorrect number of keys to specify {coldef.name} column, "+
                          f"expected {len(coldef.keytypes)}, got {len(keytup)}")
-    out = tuple(tv.check_any(kt) for kt, tv in zip(keytup, coldef.keytypes))
+    out = tuple(tv.check_val(kt) for kt, tv in zip(keytup, coldef.keytypes))
     if 'mapto' in coldef:
         out = (val[0],) + out
     return out
@@ -1168,7 +1175,7 @@ class Column(_ImData):
               offset:int=None, fill:Any=None, gategroup:"GateGroup"=None, 
               title:str=None, unit:str=None, index_title:str=None, index_unit:str=None):
         coldef = source_param.tp._get_columndef(col)
-        # normalize ketup and offset into kwargs for processing
+        # regularize ketup and offset into kwargs for processing
         keytup = tuple() if keytup is None else keytup
         keytup = tuple(keytup) if isinstance(keytup, Sequence) else (keytup, )
         kwargs = dict(source_param=source_param, col=col, keytup=keytup)
@@ -1184,17 +1191,17 @@ class Column(_ImData):
             if coldef.offset != 0 and fill is not None:
                 kwargs['fill'] = fill
         if 'remap' in coldef:
-            if coldef.norm_func:
-                kwargs['keytup'] = getattr(kwargs['source_param'].tp, coldef.norm_func)(*kwargs['keytup'])
+            if coldef.reg_func:
+                kwargs['keytup'] = getattr(kwargs['source_param'].tp, coldef.reg_func)(*kwargs['keytup'])
             args = tuple(kwargs[k] for k in ('col', 'keytup', 'offset', 'fill') if k in kwargs)
             remapped = getattr(kwargs['source_param'].tp, coldef.remap)(*args)
             ukwargs = kwarg_like(cls.__slots__[1:], remapped)
             kwargs.update(**{key:val for key, val in ukwargs.items() 
                              if key not in cls._hashskip or key not in kwargs}) # skip user set names
             coldef = kwargs['source_param'].tp._get_columndef(kwargs['col'])
-        if coldef.norm_func:
-            kwargs['keytup'] = getattr(kwargs['source_param'].tp, coldef.norm_func)(*kwargs['keytup'])
-        kwargs.update(kwargs['source_param'].tp._normalize_column_kwargs(**{k:v for k, v 
+        if coldef.reg_func:
+            kwargs['keytup'] = getattr(kwargs['source_param'].tp, coldef.reg_func)(*kwargs['keytup'])
+        kwargs.update(kwargs['source_param'].tp._regularize_column_kwargs(**{k:v for k, v 
                                                                             in kwargs.items() 
                                                                             if k not in cls._hashskip}))
         if gategroup is not None:
@@ -1258,7 +1265,7 @@ class Column(_ImData):
                                  f"{coldef.dtype}, got {type(self.fill)}")
             super(_ImData, self).__setattr__('fill', fill)
         if coldef.check_func:
-            getattr(self.source_param.tp, coldef.checkfunc)(self)
+            getattr(self.source_param.tp, coldef.check_func)(self)
 
     @property
     def param(self)->Param:
@@ -1456,6 +1463,15 @@ class Column(_ImData):
     def description(self)->str:
         """A YAML-like description of the Column"""
         return self.source_param.tp.get_column_description(self)
+    
+    @property
+    def _sort_tuple(self)->tuple[Hashable]:
+        out = [self.source_param._sort_tuple, self.col, _make_sortable(self.keytup)]
+        if 'offset' in self:
+            out.append(self.offset)
+        if 'fill' in self:
+            out.append(_make_sortable(self.fill))
+        return tuple(out)
 
 
 register_type(Column)
@@ -1467,12 +1483,7 @@ def _column_sort(column:Column)->tuple:
     Generate tuple from Column that can be used to sort columns. 
     Function used in as value of key in sorted
     """
-    out = column.source_param.tp.__name__, column.col, _make_sortable(column.keytup)
-    if 'offset' in column:
-        out += (column.offset,)
-    if 'fill' in column:
-        out += (column.fill, )
-    return out
+    return column._sort_tuple
 
 
 ###############################################################################
@@ -1664,7 +1675,7 @@ class GateDefinition:
     @property
     def name(self)->str:
         """Name of function of gate"""
-        return self.func.__name__
+        return f'{self.func.__module__}.{self.func.__name__}'
 
 
 def _parent_overlap(code, gateA, gateB):
@@ -1699,21 +1710,31 @@ class GateDef(GateDefinition, _ImData):
     ----------
     func : Callable[[np.ndarray,...],np.ndarray[np.bool\_]]
     params : tupledict
-    nparents : tuple[int, int]
-    atomic : bool
-    sortcol : bool
-    normalize : Callable[[dict],dict]
-    verify : Callable[[tuple[Column, ...], tupledict], None]
+    nparents : np.ndarray[Number, Number], optional
+        Min and Max (inclusive) number of columns in gate. The default is [1, inf].
+    atomic : bool, optional
+        If gate is atomic (each row is independent of other rows). The default is True.
+    sortcol : bool, optional 
+    regularize : Callable[[dict],dict]|Callable[[dict,tuple[int,...]],dict], optional
+        Regularizaton function, if sortcol is True, has signature
+        ``regularize(params:dict, sortcol:tuple[int,...])->dict``, 
+        if sortcol is False, has signature
+        ``regularize(params:dict)->dict``, returned dictionary should be
+        regularized params. If not set the default is to pass.
+    verify : Callable[[tuple[Column, ...], tupledict], None], optional
+        Function to call in post_init to check Gate is valid.
+        Has signature ``verify(column:tuple[Column,...], params:tupledict)->None``
+        If not set the default is to pass.
     """
-    __slots__ = ('func', 'params', 'nparents', 'atomic', 'sortcol', 'normalize', 'verify', 'defaults')
+    __slots__ = ('func', 'params', 'nparents', 'atomic', 'sortcol', 'regularize', 'verify', 'defaults')
     _typeconversions = ImDict(func=TV_PyCode, params=TV_tupledict(typedefs=TV_type),
                        nparents=TV_ndarray(dims=arr_slc[2], mn=0, superdtype=np.number),
                        atomic=TV_bool, sortcol=TV_bool,
-                       verify=TV_PyCode, normalize=TV_PyCode)
+                       verify=TV_PyCode, regularize=TV_PyCode)
     _required = frozenset({'func', })
-    _defaults = ImDict(params=lambda: dict(), nparents=lambda: np.array([0, np.inf]),
+    _defaults = ImDict(params=lambda: dict(), nparents=lambda: np.array([1, np.inf]),
                        atomic=True, sortcol=False, 
-                       normalize=lambda: _echo, verify=lambda: _gatedef_verify_nooffset)
+                       regularize=lambda: _echo, verify=lambda: _gatedef_verify_nooffset)
     _hashskip = ('defaults', )
     _registered_funcs = FixedDict()
 
@@ -1722,7 +1743,7 @@ class GateDef(GateDefinition, _ImData):
     nparents: tuple[Real, Real]
     atomic: bool
     sortcol: bool
-    normalize: Callable[[dict],dict]
+    regularize: Callable[[dict],dict]
     verify: Callable[[tuple[Column, ...], tupledict], None]
     defaults: dict[str, Any]
 
@@ -1813,10 +1834,10 @@ TT_int_map = ImDict(
 
 
 def _check_TV_gateparam(val:dict, imdata:"Gate", colorder:tuple[int,...]=None, **kwargs):
-    """Check function for :attr:`Gate.params` attribute, calls normalize for colorder"""
+    """Check function for :attr:`Gate.params` attribute, calls regularize for colorder"""
     if imdata['gatedef']['sortcol']:
-        return imdata['gatedef']['normalize'](val, colorder)
-    return imdata['gatedef']['normalize'](val)
+        return imdata['gatedef']['regularize'](val, colorder)
+    return imdata['gatedef']['regularize'](val)
 
 
 def _proc_TV_gateparam(dct:"Gate", kwarg_append:dict)->dict:
@@ -2079,28 +2100,32 @@ class Gate(Gate_, _ImData):
         out = f'Gate: {self.gatedef.name}\nParams:\n{_indent(self.get_param_descr(),2)}\nColumns:\n'
         out += _indent(self.get_column_descrs(include_param, include_source), 2)
         return _indent(out, indent)
+    
+    @property
+    def description(self)->str:
+        """Descripton of gate"""
+        return self.get_gate_description(include_param=True, include_source=True)
+    
+    @property
+    def _sort_tuple(self)->tuple[Hashable,...]:
+        """Tuple that can unambiguously be used to sort against other like objects"""
+        out = [self.atomic, "Gate", self.gatedef.func.__name__, len(self.columns)]
+        out += [tuple(col._sort_tuple for col in self.columns), _make_sortable(self.params)]
+        return tuple(out)
 
 
-def _gate_sort(gate:Gate)->tuple:
+def _gate_sort(gate:Gate_)->tuple:
     """Sorting function so gates can be unambiguously sorted into unchanging order"""
-    if isinstance(gate, Gate):
-        out = gate.atomic, gate.gatedef.func.__name__, len(gate.columns)
-        out += tuple(_make_sortable(p) for p in gate.params.values())
-    else:
-        out = ((-1, ) + tuple(_make_sortable(p) for p in gate.params.values()) + 
-               tuple(_gate_sort(g) for g in gate.source_gate.gates) + 
-               _make_sortable(gate.source_gate.truthtable) +
-               tuple(_gate_sort(g) for g in gate.mask_gate.gates) + 
-               _make_sortable(gate.mask_gate.truthtable))
-    return out
+    return gate._sort_tuple
 
 
 register_type(Gate)
 TV_Gate = TV_ImData(subclass=Gate)
 
 
-def _gate_locmask(gate:Gate, gategroup:Union[Gate,"GateGroup"])->tuple[bool,...]:
-    """make mask """
+def _gate_locmask(gate:Gate, gategroup:Union[Gate,"GateGroup"])->bool:
+    """Used to make tuple of if g should be true/false index in truthtable- 
+    determines if gate is gategroup or a component thereof"""
     if isinstance(gategroup, GateGroup):
         return gate in gategroup.gates
     return gate == gategroup
@@ -2138,6 +2163,17 @@ def _check_gategroup_truthtable(val:np.ndarray[np.bool_], **kwargs):
     if any(s != 2 for s in val.shape):
         raise ValueError("truthtable must have all dimensions of size 2")
     return val
+
+
+def _tt_index_single(n:int, i:int, j:int, vi:int, vj:int)->slice|int:
+    if n == i:
+        return vi
+    if n == j:
+        return vj
+    return slice(None)
+
+def _tt_tuple_index(n:int, i:int, j:int, vi:int, vj:int)->tuple[slice|int,...]:
+    return tuple(_tt_index_single(nn, i, j, vi, vj) for nn in range(n))
 
 
 class GateGroup(_ImData):
@@ -2192,8 +2228,9 @@ class GateGroup(_ImData):
         #    2. Perform expansion
         #        a. broadcast truthtable, as gates argument can include GateGroups
         #        b. Simplify/reduce truthtable and gates
+        #        c. sort gates so gates have cannonical form
         #    3. Initiate table with super().__new__(...)
-        # peel away args/kwargs specification
+        # peel away args/kwargs specification (part 1b)
         if truthtable is None and args:
             truthtable, args = args[0], args[1:]
         if param is None and args and isinstance(args[-1], Param):
@@ -2226,7 +2263,12 @@ class GateGroup(_ImData):
                 f"expected {truthtable.ndim} gates based on truthtable, got {len(gates)}")
         if any(d != 2 for d in truthtable.shape):
             raise ValueError("truthtable must have 2 elements per dimension")
-        # check gates are valid type
+        elif truthtable.ndim == 0:
+            if param is None:
+                return super().__new__(cls, truthtable, tuple())
+            else:
+                return super().__new__(cls, truthtable, tuple(), param)
+        # check gates are Gate/GateGroups (1c)
         if any(not isinstance(err := g, (Gate_, GateGroup)) for g in gates):
             raise TypeError(
                 f"all gates must be either Gate or GateGroup objects, not {type(err).__name__}")
@@ -2242,18 +2284,22 @@ class GateGroup(_ImData):
                     raise ValueError("Gates have inconsistent origin_params")
         else:
             param = param.origin_param
+        # Regularization requies gates to be list and truthtable needs to be modifiable
+        gates = list(gates)
+        truthtable = np.asarray(truthtable, dtype=np.int8)
+        truthtable = truthtable if truthtable.flags['WRITEABLE'] else truthtable.copy()
         # broadcast truthtable, part 2a
         if any(isinstance(g, GateGroup) for g in gates):
             truthtable, gates = cls._broadcast_truthtable(truthtable, gates)
         #simplify truthtable, part 2c
         truthtable, gates = cls._simplify_truthtable(truthtable, gates)
-        if np.all(truthtable == False):
-            truthtable, gates = _TT_none, tuple()
-        elif np.all(truthtable == True):
-            truthtable, gates = _TT_all, tuple()
         kws = dict() if title is None else {'title':title}
-        if param is None:
-            return super().__new__(cls, truthtable, gates, **kws)
+        # Check if table is all/none, can skip 2d, strait to initiation
+        # set cannonical column order 2d
+        if gates:
+            gates, sort = zip(*sorted(([gate, i] for i, gate in enumerate(gates)), 
+                                      key=lambda g: g[0]._sort_tuple))
+            truthtable = np.asarray(truthtable.transpose(sort) > 0)
         return super().__new__(cls, truthtable, gates, param, **kws)
 
     @classmethod
@@ -2262,15 +2308,16 @@ class GateGroup(_ImData):
                               )->tuple[np.ndarray[np.bool_],tuple[Union[Gate_,"GateGroup"]]]:
         """Expand a truthtable baesd on GateGroups into the form relying only on the Gates of each GateGroup"""
         # build set of all gates used
-        all_gates = set(chain.from_iterable(g.gates if isinstance(
-            g, GateGroup) else (g,) for g in gategroups))
-        all_gates = tuple(sorted(all_gates, key=_gate_sort))
-        gate_tt = tuple(g.truthtable if isinstance(
-            g, GateGroup) else _TT_ft for g in gategroups)
-        gate_idxmap = tuple(tuple(_gate_locmask(g, gg)
-                            for g in all_gates) for gg in gategroups)
+        # **NOTE** use of soted(set(..)) is necessary to remove duplicate gates
+        all_gates = sorted(set(
+            chain.from_iterable(g.gates if isinstance(g, GateGroup) else (g,) 
+                                for g in gategroups)),key=_gate_sort)
+        gate_tt = tuple(g.truthtable if isinstance(g, GateGroup) else _TT_ft 
+                        for g in gategroups)
+        gate_idxmap = tuple(tuple(_gate_locmask(g, gg) for g in all_gates)
+                            for gg in gategroups)
         # allocate new table
-        tt = np.empty([2 for _ in range(len(all_gates))], dtype=np.bool_)
+        tt = np.empty([2 for _ in range(len(all_gates))], dtype=np.int8)
         # iterate over every position of output table and assign appropriate value
         for loc in product(*(range(2) for _ in range(len(all_gates)))):
             sloc = tuple(int(gg[_mask_loc(gl, loc)])
@@ -2279,67 +2326,32 @@ class GateGroup(_ImData):
         return tt, all_gates
 
     @classmethod
-    def _check_dropJ(cls, truthtable:np.ndarray[np.bool_],
-                     i:int, j:int, code:int) -> tuple[np.ndarray[np.bool_],bool]:
-        """
-        check if it is possible to remove dim j from truthtable, given overlap
-        with gate in dim i
-        note: code: the overlap code of gate[i] and gate[j]
-
-        returns newtruthtable, True if can remove dim j, 
-        otherwise returns truthtable, False
-        """
-        # to determine if it is possible to drop gate j given overlap with gate i
-        # allocate new truthtable with 1 column dropped
-        new = np.empty(tuple(2 for _ in range(truthtable.ndim-1)), dtype=np.bool_)
-        # iterate over every position index in truthtable
-        for pos in product(*((slice(None),) if p == j else range(2) for p in range(truthtable.ndim))):
-            pi = pos[i]  # which position is specified for gate i
-            comp = truthtable[pos]  # extract pair of values to compare
-            # mask code for if i is False or True
-            bcode = (code & (0b0101 << pi)) >> pi
-            # check that it is possible for j to be eiher False or True given i
-            # being compared, if only one is possible, then can automatically drop
-            if bcode == 0b0101:
-                # check that given position has same value in both positions (ie dropable at given index)
-                if comp[0] != comp[1]:
-                    # since truthtable j is different for False/True, cannot drop
-                    return truthtable, False
-                # update new truthtable
-                new[tuple(p for p in pos if isinstance(p, int))] = comp[0]
-            else:
-                new[tuple(p for p in pos if isinstance(p, int))] = comp[0] if bcode & 0b0001 else comp[1]
-        return new, True
-
-    @classmethod
-    def _simplify_truthtable(cls, truthtable:np.ndarray[np.bool_],
-                             gates:Sequence[Gate_])->tuple[np.ndarray[np.bool_],list[Gate_]]:
+    def _simplify_truthtable(cls, truthtable:np.ndarray[np.int8],
+                             gates:list[Gate_])->tuple[np.ndarray[np.bool_],list[Gate_]]:
         """Return truthtable, list[Gate] with all redundant gates removed"""
-        i = 0
-        gates = list(gates)
-        # iterate over all combinations of gates, while loop so gates can be
-        # updated if a gate is dropable (ie iteration changes list size)
-        # must compare forward and backward in same loop so that gate_compare
-        # only needs to be compared once
-        while i < (len(gates) - 1):
-            j = i + 1
-            while j < len(gates):
-                code = GateDefinition.gate_compare(gates[i], gates[j])  # get comparison code
-                # check forward comparision
-                truthtable, drop = cls._check_dropJ(truthtable, i, j, code)
-                if drop:
-                    gates.pop(j)
+        for i in range(truthtable.ndim-1):
+            for j in range(i+1, truthtable.ndim):
+                overlap = GateDefinition.gate_compare(gates[i], gates[j])
+                if overlap == 0b1111:
                     continue
-                # check backward comparision, doing forward and reverse instead
-                truthtable, drop = cls._check_dropJ(truthtable, j, i, _GD_reverse(code))
-                if drop:
-                    gates.pop(i)
-                    i -= 1  # since i is droped, index decreased by 1, start new set of comparisons
-                    break
-                j += 1
-            i += 1
+                for vi in range(2):
+                    for vj in range(2):
+                        if not (overlap & 1<<(vi+2*vj)):
+                            truthtable[_tt_tuple_index(truthtable.ndim, i, j, vi, vj)] = -1
+        # check if truthtable is invariant relative to all gates, and reduce
+        axi = 0
+        while axi < truthtable.ndim:
+            tt_f = np.asarray(truthtable[tuple(0 if i == axi else slice(None) for i in range(truthtable.ndim))])
+            tt_t = np.asarray(truthtable[tuple(1 if i == axi else slice(None) for i in range(truthtable.ndim))])
+            ig_f, ig_t = tt_f == -1, tt_t == -1
+            if np.all(ig_f | ig_t | (tt_f == tt_t)):
+                truthtable = tt_f
+                truthtable[ig_f] = tt_t[ig_f]
+                gates.pop(axi)
+            else:
+                axi += 1
         return truthtable, gates
-
+    
     def __bool__(self):
         return True if len(self.gates) != 0 else bool(self.truthtable.reshape(1)[0])
 
@@ -2589,7 +2601,13 @@ class GateGroup(_ImData):
     def description(self)->str:
         """YAML-like definition of GateGroup."""
         return  self.get_description() + f'\n{_indent(self.param.description, 2)}'
-        
+    
+    @property
+    def _sort_tuple(self)->tuple[int,tuple[int,...],tuple[tuple[Hashable,...]]]:
+        """Tuple that can unambiguously be used to sort against other like objects"""
+        out = [self.truthtable.ndim, _make_sortable(self.truthtable)]
+        out += [g._sort_tuple for g in self.gates]
+        return tuple(out)
 
 
 register_type(GateGroup)
@@ -2729,6 +2747,18 @@ class MappedGate(Gate_, _ImData):
                f'Source Gate:\n{self.source_gate.get_description(2, include_param, include_source)}\n'+
                f'Mask Gate:\n{self.mask_gate.get_description(2, include_param, include_source)}')
         return _indent(out, indent)
+    
+    @property
+    def description(self)->str:
+        """Description of mapped gate"""
+        return self.get_gate_description(include_param=True, include_source=True)
+    
+    @property
+    def _sort_tuple(self):
+        """Tuple that can unambiguously be used to sort against other like objects"""
+        out = [False, "MappedGate", self.gatedef.name, _make_sortable(self.params)]
+        out += [self.source_gate._sort_tuple, self.mask_gate._sort_tuple]
+        return tuple(out)
 
 
 ###############################################################################
@@ -2801,7 +2831,7 @@ class DataSet:
     _autosave: bool #: interanal private variable storing autosave state
     _finalizers: WVD #: WeakValueDictionary of all files tracking files
 
-    def __init__(self, group:GroupFuture, autosave:bool=False, meta:dict=None, 
+    def __init__(self, group:GroupFuture=None, autosave:bool=False, meta:dict=None, 
                  track:bool=True, file:tb.File=None, group_no:int|bool=1, **kwargs):
         self._autosave = bool(autosave)
         self._track = bool(track)
@@ -3056,7 +3086,6 @@ class DataSet:
         return out
 
     def load_table(self, group:tb.Group, overwrite:bool=False)->"Table":
-        # TODO: consider removing this method, does not fit with rigid structure
         """
         Load a group storing the saved values for a :class:`Table`.
 
@@ -3490,6 +3519,18 @@ class DataSet:
                 if gate in rel:
                     return mask.sum()
         return None
+    
+    def clear_memory(self)->None:
+        """
+        Clear all cache dictionaries. 
+        This frees memeory, but all computations must be performed again.
+        :meth:`PhotonData.rebase` is usually more useful, as choice of rebase
+        gate allows selecting which arrays to keep, preventing recomputation of
+        columns with gates within the specified gate.
+        """
+        self._tables = dict()
+        self._gates = dict()
+        self._gategroups = dict()
 
     def get_gategroup(self, gategroup:GateGroup, relative:str|GateGroup='parent')->np.ndarray[np.bool_]:
         r"""
@@ -3706,20 +3747,25 @@ class DataSet:
         Parameters
         ----------
         *args : Column
-            DESCRIPTION.
-        path_or_buf : TYPE, optional
+            Columns to save in csv file.
+        path_or_buf : None|str|os.PathLike, optional
             File or buffer to write to. If None, and not specified as first
             arg, return str of csv. Internally, this uses
             `pd.DataFrame.csv <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.to_csv.html>`_ . 
             The default is None.
         names : Sequence[str], optional
-            DESCRIPTION. The default is None.
+            Sequence of names to give to each column, if specified must be same
+            length as number of columns specified. If None/not specified, will
+            use index_name of each column. The default is None.
         gate : GateGroup, optional
-            DESCRIPTION. The default is None.
+            GateGroup to apply to all input columns. The default is None.
         include_unit : bool, optional
             Include unit string in column heading. The default is False.
         multi_index : bool, optional
-            DESCRIPTION. The default is False.
+            Used for columns whose rows are arrays. Will cause arrays to be "flattened"
+            with index specified as multi-index. This is primarily for 'ph_...' 
+            columns. If True, the size of each row must be consistent between columns. 
+            The default is False.
         **kwargs : Any
             Additional keyword arguments passed to 
             `pd.DataFrame.csv <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.to_csv.html>`_ .
@@ -4387,8 +4433,7 @@ class Table:
         """
         Method called at end of init, should build and assign initial "default" columns
         """
-        raise NotImplementedError("Direct subclasses of Table should not be implemented. "
-                                  "Subclass from BaseTable or ChildTable instead")
+        pass
 
     def _validate_load_(self)->None:
         """Validate values loaded match sizes etc."""
@@ -4516,7 +4561,7 @@ class Table:
         pass
 
     @classmethod
-    def _normalize_column_kwargs(cls, **kwargs)->dict[str,Any]:
+    def _regularize_column_kwargs(cls, **kwargs)->dict[str,Any]:
         """
         Called before column is instantiated, primarily used to convert types
         in keytupto cannonical form and preventing disallowed keys.
@@ -4619,8 +4664,8 @@ class Table:
         if isinstance(keys, str):
             keys = (keys, )
         coldef, keys = self._get_columndef(keys[0]), keys[1:]
-        if coldef.norm_func:
-            keys = getattr(self, coldef.norm_func)(*keys)
+        if coldef.reg_func:
+            keys = getattr(self, coldef.reg_func)(*keys)
         offset_fill = len(keys) - coldef.keylen
         keytup = keys,
         # case of column with same size as table
@@ -4656,8 +4701,8 @@ class Table:
         if 'remap' in coldef:
             new_keys = getattr(self.param.tp, coldef.remap)(coldef.name, *keytup)
             return self._get_keys((new_keys[0],)+new_keys[1]+new_keys[2:])
-        if coldef.norm_func:
-            keytup = (getattr(self, coldef.norm_func)(*keytup[0]),) + keytup[1:]
+        if coldef.reg_func:
+            keytup = (getattr(self, coldef.reg_func)(*keytup[0]),) + keytup[1:]
         keytup = (coldef, ) + keytup + (None,)*(3-len(keytup))
         return keytup
 
