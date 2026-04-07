@@ -42,11 +42,10 @@ is is possible to recompute the exact values from scratch.
 
 .. note::
     
-    The class :class:`fretbursts.photondata.BasePhotonTable` and 
-    :class:`fretbursts.photondata.ChildPhotonTable` subclasses of :class:`BaseTable`
-    and :class:`ChildTable` respectively that are the main way in which these
-    two sub-types are used for :class:`Tables` that process single molecule
-    data.
+    The subclasses :class:`BasePhotonTable <fretbursts.photondata.BasePhotonTable>` 
+    and :class:`ChildPhotonTable <fretbursts.photondata.ChildPhotonTable>` of 
+    :class:`BaseTable` and :class:`ChildTable` respectively, are the main way in 
+    which these two sub-types are used when analyzing single molecule data.
 
 
 New instances of :class:`Table` are usually not created directly, but through the
@@ -65,9 +64,7 @@ rely on :class:`Gate` objects to define gate functions, that :class:`GateGroup`
 objects combine with logical operations.
 
 """
-
-# from abc import ABC, abstractmethod
-from itertools import chain, product, permutations, combinations
+from itertools import chain, product, permutations
 from collections import Counter
 from collections.abc import Callable, Sequence, Hashable, Iterator
 import weakref
@@ -468,6 +465,9 @@ class Param(_ImData):
             return self.params[attr]
         if attr in self.parents:
             return self.parents[attr]
+        for tp in self.tp.__mro__:
+            if hasattr(tp, '_parammethods') and attr in tp._parammethods:
+                return getattr(self.tp, attr)(self)
         raise AttributeError(f"Param[{self.tp.__name__}] has no param or parent {attr}")
 
     def degate(self)->"Param":
@@ -1133,7 +1133,7 @@ class Column(_ImData):
         The name of the column
     keytup : tuple[Hashable,...]
         tuple of hashables specifying sub-column (depends on col)
-    offset : int
+    offset : int, optional
         Offset of column (only for specific columns with offset). Optional even
         for negative offset column types. Note however that when creating a gate,
         the input columns must have offset if column offset is non-zero.
@@ -1144,11 +1144,11 @@ class Column(_ImData):
         For atomic columns, this attribute is never present, rather it is applied
         to the param. For non-atomic columns, the param defines the values for
         which the column is evaluated, and the gategroup is applied afterwards.
-    unit : str
+    unit : str, optional
         **Not hashed** string for unit of column
-    title : str
+    title : str, optional
         **Not hashed** string for title of column.
-    index_title : str
+    index_title : str, optional
         **Not hashed** string for name of column in csv files, must not contain
         commas.
     """
@@ -1436,6 +1436,7 @@ class Column(_ImData):
             String name for self.
 
         """
+        origin = origin.datas[0] if isinstance(origin, DataSetList) else origin
         kwargs = dict() if origin is None else {'origin':origin}
         return self._get_coldef().get_name(self, include_unit=include_unit, **kwargs)
         
@@ -3666,7 +3667,7 @@ class DataSet:
         cdict = dict()
         for i, (arg, name) in enumerate(zip(args, names)):
             if arg in args[:i]:
-                warnings.warn("column {arg} specified twice, skipping second instance")
+                warnings.warn(f"column {arg.col} {arg.keytup} specified twice, skipping second instance")
                 continue
             if name is None:
                 name = arg.index_name(include_unit, self) if index_name else arg.name(include_unit, self)
@@ -3763,7 +3764,7 @@ class DataSet:
             Include unit string in column heading. The default is False.
         multi_index : bool, optional
             Used for columns whose rows are arrays. Will cause arrays to be "flattened"
-            with index specified as multi-index. This is primarily for 'ph_...' 
+            with index specified as multi-index. This is primarily for 'ph\_...' 
             columns. If True, the size of each row must be consistent between columns. 
             The default is False.
         **kwargs : Any
@@ -4073,6 +4074,112 @@ class DataSetList:
             return self.get_table(comp, gate=gate)
         return self.get_column(comp, gate=gate)
     
+    def get_frame(self, *args:Column, names:Sequence[str]=None, gate:GateGroup=None,
+                  multi_index:bool=False, include_unit:bool=False, index_name:bool=False)->pd.DataFrame:
+        r"""
+        Create a pandas dataframe from the columns specified in \*args. Concatentes
+        each DataSet object in datas.
+
+        Parameters
+        ----------
+        *args : Column
+            :class:`Column` s to include in table.
+        names : Sequence[str], optional
+            Column names (must be same length as args) to give to each column. 
+            If None, use default names of columns supplied by :func:`Column.name` .
+            The default is None.
+        gate : GateGroup, optional
+            Gate to apply to all columns, over-rides any gates in columns.
+            If not specified, take intersect of gates of each column.
+            The default is None.
+        multi_index : bool, optional
+            When column rows are arrays, create mulit-index so each sub-value
+            is given a separte row. The default is False.
+        include_unit : bool, optional
+            Whether to include unit in column names. The default is False.
+        index_name bool, optional
+            If True use names compatible with saving to csv file. 
+            The default is False
+
+        Raises
+        ------
+        ValueError
+            One or more columns incmopatible with multi-index.
+
+        Returns
+        -------
+        pd.DataFrame
+            Pandas DataFrame of the selected columns.
+
+        """
+        return pd.concat((d.get_frame(*args, names=names, gate=gate, multi_index=multi_index, 
+                                      include_unit=include_unit, index_name=index_name) 
+                          for d in self.datas), ignore_index=True)
+    
+    def to_csv(self, *args:Column, path_or_buf:None|str|os.PathLike=None, names:Sequence[str]=None, 
+               gate:GateGroup=None, include_unit:bool=False, multi_index:bool=False, **kwargs)->str|None:
+        r"""
+        Create a CSV of :class:`Column` specified in \*args. If the first
+        argument is not a column, treat as argument to ``path_or_buf``.
+        Concatentates each DataSet object in datas.
+        
+        >>> data.to_csv(col1, col2, path_or_buf='save.csv')
+        
+        is equivalent to
+        
+        >>> data.to_csv('save.csv', col1, col2)
+        
+
+        Parameters
+        ----------
+        *args : Column
+            Columns to save in csv file.
+        path_or_buf : None|str|os.PathLike, optional
+            File or buffer to write to. If None, and not specified as first
+            arg, return str of csv. Internally, this uses
+            `pd.DataFrame.csv <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.to_csv.html>`_ . 
+            The default is None.
+        names : Sequence[str], optional
+            Sequence of names to give to each column, if specified must be same
+            length as number of columns specified. If None/not specified, will
+            use index_name of each column. The default is None.
+        gate : GateGroup, optional
+            GateGroup to apply to all input columns. The default is None.
+        include_unit : bool, optional
+            Include unit string in column heading. The default is False.
+        multi_index : bool, optional
+            Used for columns whose rows are arrays. Will cause arrays to be "flattened"
+            with index specified as multi-index. This is primarily for 'ph\_...' 
+            columns. If True, the size of each row must be consistent between columns. 
+            The default is False.
+        **kwargs : Any
+            Additional keyword arguments passed to 
+            `pd.DataFrame.csv <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.to_csv.html>`_ .
+
+        Raises
+        ------
+        TypeError
+            Incompatible input.
+
+        Returns
+        -------
+        str|None
+            If path_or_buf is None, returns string representation of csv, otherwise
+            None, and csv is written to path_or_buf.
+
+        """
+        if not args:
+            raise TypeError("must specify at least one column")
+        if not isinstance(args[0], Column):
+            if path_or_buf is not None:
+                raise TypeError("path_or_buf specified as arg and kwarg")
+            path_or_buf, args = args[0], args[1:]
+        if not args:
+            raise TypeError("must specify at least one column")
+        df = self.get_frame(*args, names=names, gate=gate, include_unit=include_unit,
+                            multi_index=multi_index, index_name=True)
+        return df.to_csv(path_or_buf=path_or_buf, **kwargs)
+    
     def save(self, *args:Param, group:tb.Group=None, name:Callable[[int],str]=None, **kwargs)->list[tb.Group]:
         """
         Save computed tables into HDF5 file. 
@@ -4126,6 +4233,8 @@ class DataSetList:
         for data in self._datas:
             data.close(strict)
 
+
+DataS = DataSet|DataSetList
 
 ###############################################################################
 #### Classes for getting partial parameters/delayed parameters from Table  ####
@@ -4341,6 +4450,8 @@ class Table:
     #: If columns are marked as non-atomic, they will not be saved in HDF5 format.
     #: **Should be specified per subclass.**
     column_defs:ClassVar[tuple[...,ColumnDef]] 
+    #: **Specific to subclass** Methods to use as classmethod on param
+    _parammethods:ClassVar[ImDict] = frozenset()
     
 
     @classmethod

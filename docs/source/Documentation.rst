@@ -8,7 +8,16 @@ Documentation
     photondatadoc
     backgrounddoc
     bursttablesdoc
+    fcsdoc
     plottingdoc
+    fretfactorydoc
+    cfuncs
+
+.. toctree::
+    :caption: Citations
+    :maxdepth: 1
+
+    citationsdoc
 
 .. toctree::
     :caption: Loading Data
@@ -25,6 +34,6 @@ Documentation
 
 .. toctree::
     :caption: Data Management
-    :maxdepth: 1
+    :maxdepth: 2
 
     datamodeldoc

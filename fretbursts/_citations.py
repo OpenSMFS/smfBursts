@@ -13,7 +13,7 @@ from importlib.resources import files
 import re
 import json
 
-from .datamodel import register_citation, create_citation_group
+from .cite import register_citation, create_citation_group
 
 
 _btdoiregex = re.compile(r'doi[^\S\r\n]*\=[^\S\r\n]*\{(([\w\d\-\./])+)\}')
@@ -73,3 +73,4 @@ _fbccite = tuple(register_citation(tag, citation, **_cite_kwargs(doi))
 fretbursts_citations = tuple(f.citation for f in _fbccite)
 
 create_citation_group('slidingwindowsearch', 'EggelingPNAS1988','FriesJPC1988', 'IngargiolaPLOSOne2016')
+create_citation_group('flcs', 'GhoshMethods2018', 'FelekyanChemPhysChem2012')

@@ -387,6 +387,7 @@ int bursts_max_rate(int64_t m, double clk_p, int64_t nphot, int64_t *times, uint
 	}
 	pthread_mutex_init(comp_mutex, NULL);
 #elif _WIN32
+	// Windows
 	HANDLE* tid = (HANDLE*)calloc(ncore, sizeof(HANDLE));
 	if (tid == NULL){
 		free(tid);

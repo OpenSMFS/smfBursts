@@ -22,7 +22,7 @@ Citations
 Importantly FRETBursts provides simple ways of obtaining a full description of all parameters and steps used in data analysis.
 This allows for supplementary material to describe without code the exact data analysis parameters used.
 
-Additionally the :func:`fretbursts.datamodel.citations.get_citations` function provides an easy way to obtain
+Additionally the :func:`fretbursts.cite.citations.get_citations` function provides an easy way to obtain
 citations for each method used in the current environment.
 
 
@@ -41,8 +41,10 @@ Contents
     :caption: Contents:
 
     Introduction
-    Tutorials
+    UserGuides
     Documentation
+    release
+    contributing
 
 .. _hellenkamp: https://doi.org/10.1038/s41592-018-0085-0
 .. _ALEX: https://doi.org/10.1073/pnas.0401690101

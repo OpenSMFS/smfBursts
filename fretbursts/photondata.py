@@ -4,10 +4,11 @@
 # author: Paul David Harris
 # email: harripd@gmail.com
 """
-Module defines the main handling of photon data for FRETBursts.
-This incldudes the primary class definitions for the handling of
-stream sorted photon data, and the various attributes and tables
-that can be defined thereof.
+The ``fretbursts.photondata`` module defines the main handling of photon data 
+for FRETBursts.
+This incldudes the primary class definitions for the handling of 
+stream sorted photon data, 
+and the various attributes and tables that can be defined thereof.
 """
 from typing import Union, Any, ClassVar, Literal
 from collections.abc import Sequence, Iterator, Hashable, Callable
@@ -32,7 +33,7 @@ from .datamodel.tables import (
     TableLike, BaseTable, ChildTable, DataSet, DataSetList, 
     Param, ColumnDef, Column, Gate, GateGroup, GroupFuture
     )
-from .datamodel import cite
+from .cite import cite
 
 import fretbursts.cfuncs as fbc
 
@@ -677,6 +678,10 @@ class PhotonData(DataSet):
             return self._reference()
         return self._reference
     
+    @property
+    def source_filename(self):
+        return self._meta['filename']
+    
     def _get_from_pharray(self, name:str, phsel:PhSel)->np.ndarray:
         """Get masked photon data array"""
         if phsel == phsel_all:
@@ -937,20 +942,24 @@ class PhotonDataList(DataSetList):
     """
     _group_name = 'photon_data'
     def __init__(self, datas:Sequence[PhotonData]):
-        if any(d.detset != datas[0].detset for d in datas[1:]):
+        if any(d.detdef != datas[0].detdef for d in datas[1:]):
             raise ValueError("Detector definitions of PhotonData objects incompatible")
         super().__init__(datas)
-        
+
     @property
     def detdef(self)->DetDef:
         """Detector definition of :class:`PhotonData`, since all must be same,
         can DetDef directly"""
         return self._datas[0].detdef
-    
+
     @property
     def setup(self)->tuple[PhSpec,...]:
         """Tuple of :class:`PhSpec` objects, 1 for each :class:`PhotonData`"""
         return tuple(d._pharray['setup'] for d in self._datas)
+
+    @property
+    def clk_p(self)->float:
+        return self.datas[0].clk_p
 
     def iter_times(self, phsel:PhSel=phsel_all)->Iterator[np.ndarray[np.int64]]:
         """
@@ -985,12 +994,12 @@ class PhotonDataList(DataSetList):
             Array of arrays of macrotimes filetered by phsel.
         """
         return np.array(list(self.iter_times(phsel)), dtype=np.object_)
-    
+
     @property
     def times(self)->np.ndarray[np.ndarray[np.int64]]:
         """All photon macrotimes"""
         return np.array(list(self.iter_times()), dtype=np.object_)
-    
+
     def iter_dets(self, phsel:PhSel=phsel_all)->Iterator[np.ndarray[np.uint8]]:
         """
         Iterate over detector arrays in each :class:`PhotonData`
@@ -1047,7 +1056,7 @@ class PhotonDataList(DataSetList):
         """
         for data in self._datas:
             yield data.get_nanos(phsel)
-    
+
     def get_nanos(self, phsel:PhSel=phsel_all)->np.ndarray[np.ndarray[np.uint16]]:
         """
         Get nanotimes arrays (pulsed excitation only) in each :class:`PhotonData`
@@ -1086,7 +1095,7 @@ class PhotonDataList(DataSetList):
         """
         for data in self._datas:
             yield data.get_particles(phsel)
-    
+
     def get_particles(self, phsel:PhSel=phsel_all)->np.ndarray[np.ndarray[np.uint8]]:
         """
         Get particles arrays (simulated data only) in each :class:`PhotonData`
@@ -1135,7 +1144,7 @@ class PhotonDataList(DataSetList):
 
         """
         return super().save(*args, group=group, name=name, save_sorted=save_sorted)
-    
+
     def save_photonHDF5(self, file:str|PathLike|tb.File, 
                                save_sorted:bool=False, close:bool=None)->tb.File:
         """
@@ -1268,6 +1277,8 @@ class PhotonTable:
     on detdef of most basal param.
     
     """
+    _parammethods = frozenset({'_detdef',})
+    
     @classmethod
     def _validate_param(cls, param:Param)->None:
         """Validate intercept to ensure all phsel are positive, convert all based on detdef"""

@@ -24,11 +24,7 @@ from .tables import (ParamDef, ColumnDef, ParentDef, GateDef,
                      DataSet, DataSetList, BaseTable, ChildTable
                      )
 
-from .citations import (register_citation, cite, add_citation, get_citations,
-    create_citation_group, set_prefered_style, list_citation_groups, list_tags,
-    registered_citations, registered_citation_groups)
-
-from .utils import has_numba
+from .utils import has_numba, SequenceDefaults
 
 if has_numba:
     from .utils import fjit, fnumba
@@ -43,4 +39,4 @@ else:
     has_matplotlib = True
 
 if has_matplotlib:
-    from . import plotting
+    from . import plot

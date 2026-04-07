@@ -1,5 +1,5 @@
 Citations module
 ----------------
 
-.. automodule:: fretbursts.datamodel.citations
+.. automodule:: fretbursts.cite.citations
     :members:

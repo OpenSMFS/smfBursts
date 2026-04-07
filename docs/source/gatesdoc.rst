@@ -1,5 +1,5 @@
-Basic Gate Definitions
-----------------------
+Gates module
+------------
 
 .. automodule:: fretbursts.datamodel.gates
     :members:

@@ -1,5 +1,5 @@
-Core datamodel classes
-----------------------
+Tables module
+-------------
 
 .. automodule:: fretbursts.datamodel.tables
     :members:

@@ -141,7 +141,7 @@ GateDefinition.set_gate_comparison(LIN_GT_gate, LIN_GEQ_gate, _comp_linear)
 def _ellipsoid_compute(columns:tuple[np.ndarray[np.floating]], transform:np.ndarray[np.floating],
                        center:np.ndarray[np.floating])->np.ndarray[np.floating]:
     """Compute values of transformed column vectors"""
-    return np.sum((transform @ np.array(columns)-center[:, np.newaxis])**2, axis=0)
+    return np.sum((transform @ (np.array(columns)-center[:, np.newaxis]))**2, axis=0)
 
 
 def ellipsoid_lt_gate(*columns:np.ndarray[np.floating], transform:np.ndarray[np.floating],
@@ -216,17 +216,20 @@ def _regularize_ellipsoide_gate(params:dict[str:np.ndarray[np.double]],
     Enure transform is upper triangular matrix and re-order transform and
     center according to colorder
     """
+    colorder = np.array(colorder)
     center = params.pop('center', np.zeros(len(colorder)))
+    transform = params.pop('transform', np.eye(len(colorder)))
     s = colorder.shape[0]
+    # check center and transform dimensions
     if center.ndim != 1 or center.shape[0] != s:
         raise ValueError(f"center must be 1-D array of shape {colorder.shape}, has shape {center.shape}")
-    transform = params.pop('transform', np.eye(len(colorder)))
     if transform.ndim != 2 or any(sh != s for sh in transform.shape):
-        raise ValueError("transform must be ")
-    transform = transform[colorder]
+        raise ValueError("transform must be square 2D matrix")
+    # reorder center/transform according to colorder
+    center = center[colorder]
+    transform = transform[colorder,:][:,colorder]
     if params:
         raise ValueError(f"unrecognized param(s) for elipsoid_gate: {tuple(params.keys())}")
-    center = center[colorder]
     if any(transform[i,j] != 0.0 for i, j in product(range(s), range(s)) if j > i):
         transform = _reg_upper(transform)
     return dict(transform=transform, center=center)
@@ -658,7 +661,7 @@ def _make_ellipsoid_gate(cx:float=0, cy:float=0, dx:float=1.0, dy:float=1.0,
     """Create params for ellipse gate based on center/w/h/rot"""
     if dx <= 0.0 or dy <= 0.0:
         raise ValueError("w and h must be positive")
-    center = -np.array([cx, cy], dtype=np.double)
+    center = np.array([cx, cy], dtype=np.double)
     stretch = np.array([dx, dy])[:,np.newaxis]
     theta = theta if radians else np.deg2rad(theta)
     rmat = _rotation_matrix(theta)
@@ -755,7 +758,7 @@ def make_ellipsoid_inclusive_gate(colx:Column, coly:Column,
 
     """
     params = _make_ellipsoid_gate(cx, cy, w, h, theta, radians)
-    return GateGroup.as_gategroup(Gate(ELLIPSOID_LEQ_gate, (colx, coly), params))
+    return GateGroup(_TT_ft, Gate(ELLIPSOID_LEQ_gate, (colx, coly), params))
 
 
 def make_inv_ellipsoid_gate(colx:Column, coly:Column, cx:float=0, cy:float=0, w:float=1.0, h:float=1.0, rot=0.0, radians:bool=False)->GateGroup:
@@ -798,7 +801,7 @@ def make_inv_ellipsoid_gate(colx:Column, coly:Column, cx:float=0, cy:float=0, w:
 
     """
     params = _make_ellipsoid_gate(cx, cy, w, h, rot, radians)
-    return ~Gate(ELLIPSOID_LEQ_gate, (colx, coly), params)
+    return GateGroup(_TT_tf, Gate(ELLIPSOID_LEQ_gate, (colx, coly), params))
 
 
 def make_inv_ellipsoid_inclusive_gate(colx:Column, coly:Column, cx:float=0, cy:float=0, w:float=1.0, h:float=1.0, rot=0.0, radians:bool=False)->GateGroup:
@@ -841,7 +844,7 @@ def make_inv_ellipsoid_inclusive_gate(colx:Column, coly:Column, cx:float=0, cy:f
 
     """
     params = _make_ellipsoid_gate(cx, cy, w, h, rot, radians)
-    return ~Gate(ELLIPSOID_LT_gate, (colx, coly), params)
+    return GateGroup(_TT_tf, Gate(ELLIPSOID_LT_gate, (colx, coly), params))
 
 
 def make_upper_inclusive_percentile_gate(column:Column, up:float)->GateGroup:
@@ -864,7 +867,7 @@ def make_upper_inclusive_percentile_gate(column:Column, up:float)->GateGroup:
         percentile or greater.
 
     """
-    return GateGroup.as_gategroup(Gate(PERCENTILE_GEQ_gate, column, dict(percentile=up)))
+    return GateGroup(_TT_ft, Gate(PERCENTILE_GEQ_gate, column, {'percentile':up}))
 
 
 def make_upper_exclusive_percentile_gate(column:Column, up:float)->GateGroup:
@@ -886,7 +889,7 @@ def make_upper_exclusive_percentile_gate(column:Column, up:float)->GateGroup:
         `up`\ :sup:`th` percentile.
 
     """
-    return GateGroup.as_gategroup(Gate(PERCENTILE_GT_gate, column, dict(percentile=up)))
+    return GateGroup(_TT_ft, Gate(PERCENTILE_GT_gate, column, dict(percentile=up)))
 
 
 def make_lower_inclusive_percentile_gate(column:Column, lp:float)->GateGroup:
@@ -909,7 +912,7 @@ def make_lower_inclusive_percentile_gate(column:Column, lp:float)->GateGroup:
         percentile or greater.
 
     """
-    return ~Gate(PERCENTILE_GT_gate, (column, ), dict(percentile=lp))
+    return GateGroup(_TT_tf, Gate(PERCENTILE_GT_gate, (column, ), dict(percentile=lp)))
 
 
 def make_lower_exclusive_percentile_gate(column:Column, low:float)->GateGroup:
@@ -932,3 +935,23 @@ def make_lower_exclusive_percentile_gate(column:Column, low:float)->GateGroup:
 
     """
     return ~Gate(PERCENTILE_GEQ_gate, (column, ), dict(percentile=low))
+
+
+def make_isin_gate(column:Column, vals:Real|np.ndarray)->GateGroup:
+    """
+    Create a gate for column that included only values in vals.
+
+    Parameters
+    ----------
+    column : Column
+        Column on which to base the gate, rows must match vals to be included.
+    vals : Real|np.ndarray
+        A single element.
+
+    Returns
+    -------
+    GateGroup
+        Gate of only rows where the column value matches one of the values in vals.
+
+    """
+    return GateGroup(_TT_ft, Gate(ISIN_gate, column, {'inset':vals}))

@@ -7,7 +7,7 @@
 Utility functions.
 """
 import weakref
-from itertools import chain, product
+from itertools import chain, product, repeat
 from collections.abc import Callable, Sequence, Iterator, Iterable, Hashable
 from textwrap import wrap
 from typing import ClassVar, Any, Union, Literal
@@ -729,32 +729,80 @@ class _ImDataLike(_DataLike):
         raise AttributeError("ImData does not support deletion of attributes")
 
 
-class HistData:
-    """Stores histogram counts and bins and provides derived fields.
+def _dict_update(dct:dict, update:dict)->dict:
+    """Return updated dictionary copy, used to combine dictionaries without changing originals"""
+    return {k:v for k, v in chain(dct.items(), update.items())}
 
-    Attributes:
-        counts (array, ints): array of counts in each bin
-        bins (array): array of bin edges. Size is size(counts) + 1.
-        bincenters (array): array of bin  centers. Size is size(counts).
-        pdf (array, floats): array of normalized counts (aka PDF)
+
+def _return_update(dct:dict, update:dict)->dict:
+    dct.update(update)
+    return update
+
+
+def _recurse_copy(val:Any):
+    if isinstance(val, (tuple, list)):
+        return [_recurse_copy(v) for v in val]
+    if isinstance(val, dict):
+        return {k:_recurse_copy(v) for k, v in val.items()}
+    if hasattr(val, 'copy'):
+        return val.copy()
+    return val
+
+
+class SequenceDefaults:
     """
-    def __init__(self, counts, bins):
-        self.counts = counts
-        self.bins = bins
-        self.binwidth = bins[1] - bins[0]
-
-    @property
-    def bincenters(self):
-        if not hasattr(self, '_bincenters'):
-            self._bincenters = self.bins[:-1] + 0.5*self.binwidth
-        return self._bincenters
-
-    @property
-    def pdf(self):
-        if not hasattr(self, '_pdf'):
-            self._pdf = np.array(self.counts, dtype=np.float64)
-            self._pdf /= (self.counts.sum() * self.binwidth)
-        return self._pdf
+    Special defaults object type, each input kwarg is assumed to be a sequence
+    of values.
+    Input kwargs become attributes, but when accessed, the value is always a copy
+    of the original, this way modifications can take place "inplace" when
+    using an attribute as a function input etc.
+    """
+    def __init__(self, **kwargs):
+        self._kwargs = kwargs
+    
+    def __getattr__(self, name):
+        try:
+            out = self[name]
+        except KeyError:
+            raise AttributeError(f"no attribute {name}")
+        return out
+        
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            if key in self._kwargs:
+                return _recurse_copy(self._kwargs[key])
+            raise KeyError(f"{key} not in SequenceDefaults")
+        if not isinstance(key, (list, tuple)):
+            return key
+        out = None
+        for k in key:
+            if isinstance(k, (list, tuple)):
+                name, val = k[0], self[k[1]]
+            else:
+                name, val = None, self[k]
+            if out is None:
+                if isinstance(val, (list, tuple)):
+                    out = val if name is None else [{name:v} for v in val]
+                else:
+                    out = val if name is None else {name:val}
+            elif isinstance(out, (list, tuple)):
+                val = val if isinstance(val, (list, tuple)) else repeat(val)
+                for o, v in zip(out, val):
+                    if name is None:
+                        o.update(_recurse_copy(v))
+                    else:
+                        o.update({name:_recurse_copy(v)})
+            elif isinstance(val, (list, tuple)):
+                if name is None:
+                    out = [_return_update(v, out) for v in val]
+                else:
+                    out = [_return_update({name:v}, out) for v in val]
+            else:
+                if name is None:
+                    out.update(val)
+                else:
+                    out.update({name:val})
+        return out
 
 
 def _ndarray_to_str(string:np.ndarray|bytes)->str:

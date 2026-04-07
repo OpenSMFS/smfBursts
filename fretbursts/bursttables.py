@@ -4,9 +4,9 @@
 # Author: Paul David Harris
 # email: harrip@gmail.com
 """
-Module defines base :class:`Burst` table that represents bursts data based on
-sinlge or multi-channel burst search, and child-tables to compute burst-based
-parameters.
+The ``fretbursts.bursttables`` module defines base :class:`Bursts` table that 
+represents bursts data based on single or multi-channel burst search, and 
+child-tables to compute burst-based parameters.
 """
 import os
 from typing import Any, ClassVar
@@ -17,6 +17,7 @@ from itertools import chain, repeat, permutations
 from numbers import Real
 
 import numpy as np
+from scipy.stats import erlang
 
 from .datamodel.utils import tupledict, arr_slc
 from .datamodel.immutabledata import (
@@ -24,7 +25,7 @@ from .datamodel.immutabledata import (
     TV_tuple
                                       )
 from .datamodel.tables import ParamDef, ParentDef, ColumnDef, Param, Column, as_paramdict
-from .datamodel.citations import cite, add_citation
+from .cite import cite, add_citation
 from .photondata import (
     PhotonData, PhotonTable, BasePhotonTable, ChildPhotonTable, BasePhotonTableLike, 
     _regularize_column_startstop, _regularize_ph_sel, 
@@ -34,7 +35,6 @@ from .photondata import (
     )
 from .background import BG
 from .ph_sel import PhSel, DetDef, TV_PhSel, sort_phsels, phsel_all
-from .poisson_threshold import find_optimal_T_bga
 
 import fretbursts.cfuncs as fbc
 
@@ -44,7 +44,7 @@ _alloc_size:int = 512
 
 def _get_nph_title(col:Column, name:str, include_unit:bool, origin:PhotonData)->str:
     """Sub-function to format title of nph-like columns, with "core" name of ``name`` """
-    title = _title_sels('_{bg}n', origin, col.keytup[0])[0]
+    title = _title_sels('_{%s}n'%name, origin, col.keytup[0])[0]
     title = _title_startstop_append(title, col.keytup[1], col.keytup[2])
     title = _title_unit_append(title, 'cnts', include_unit)
     return f'${title}$'
@@ -153,7 +153,7 @@ class Bursts(BasePhotonTable):
             of in-burst per stream to consider as part of actual burst.
             Default to 'and-gate' ie only when all streams are in-burst is the system
             considered in-burst
-        fuse : float
+        fuse : float | np.ndarray[np.float64]
             If separation between bursts in burst-search-gate is less than `fuse`
             (in seconds), merge bursts into one. If -1.0 no merge operation is performed,
             Therefore overlapping bursts are possible, if 0.0 overlapping bursts are
@@ -190,7 +190,7 @@ class Bursts(BasePhotonTable):
         ParamDef("F", TV_ndarray(mn=0.0, dtype=np.dtype('<f8'), dims=arr_slc[:])),
         ParamDef("c", TV_ndarray(dtype=np.dtype('<f8'), dims=arr_slc[:])),
         ParamDef('truthtable', TV_ndarray(dtype=np.dtype('|b1'), square=True, dims=arr_slc[2,...])),
-        ParamDef('fuse', TV_float, default=0.0), # positive or -1.0 negative allowed.
+        ParamDef('fuse', TV_ndarray(dtype=np.dtype('<f8'), dims=arr_slc[:]), default=0.0), # positive or -1.0 allowed.
         ParamDef('asP', TV_ndarray(dtype=np.bool_, dims=arr_slc[:])),
         # -1.0 no fuse in burst search, no fuse afterwards
         # only fuse in bursts search (equivalend to burst fuse 0)
@@ -212,11 +212,10 @@ class Bursts(BasePhotonTable):
         asPs = self.param.params['asP']
         phsels = self.param.params['streams']
         starts, stops = list(), list()
-        post_fuse = self.param.params['fuse'] > 0.0
         search_fused = self.param.params['fuse'] != -1.0
-        max_sep = int(self.param.params['fuse']/self.origin.clk_p)
+        max_sep = (self.param.params['fuse']/self.origin.clk_p).astype(np.int64)
         starttime, stoptime = np.inf, 0.0
-        for m, F, c, asP, phsel, bg in zip(ms,Fs, cs, asPs, phsels, bg_table):
+        for m, F, c, asP, phsel, bg, msep, sf in zip(ms,Fs, cs, asPs, phsels, bg_table, max_sep, search_fused):
             d_id = ddef.get_stream_ids(phsel)
             periods = bg.parents['base']['periods']
             if periods[0] < starttime:
@@ -224,22 +223,23 @@ class Bursts(BasePhotonTable):
             if periods[-1] > stoptime:
                 stoptime = periods[-1]
             if asP:
-                bg = find_optimal_T_bga(bg, m, F) / self.origin.clk_p
+                bg = erlang.ppf(F, m, scale=1.0/bg) / self.origin.clk_p
             start, stop = fbc.burstsearch(self.origin.times, self.origin.dets,
                                             periods, bg['bg', phsel],
                                             self.origin.clk_p, d_id, m=m, F=F, c=c,
-                                            fuse=search_fused, bg_is_thresh=asP,
+                                            fuse=sf, bg_is_thresh=asP,
                                             alloc_size=_alloc_size, ncore=os.cpu_count())
             starts.append(start)
             stops.append(stop)
         if ms.size != 1 or self.param.params['truthtable'][0] == True:
-            add_citation('NirJPCB2006', purpose='Dual Channel Burst Search')
+            if self.param.params['truthtable'].ndim != 1:
+                add_citation('NirJPCB2006', purpose='Dual Channel Burst Search')
             starts, stops = fbc.burstgate(starts, stops, self.param.params['truthtable'], 
                                           starttime=starttime, stoptime=stoptime)
         else:
             starts, stops = starts[0], stops[0]
-        if post_fuse:
-            starts, stops = fbc.fusebursts(starts, stops, max_sep)
+        if msep > 0:
+            starts, stops = fbc.fusebursts(starts, stops, msep)
         self._add_column('start', tuple(), starts)
         self._add_column('stop', tuple(), stops)
         istart, istop = fbc.index_ranges(self.origin.times, starts, stops)
@@ -278,6 +278,7 @@ class Bursts(BasePhotonTable):
         F = cls._cast_param_array(params, nstream, 'F', 6.0, '<f8')
         c = cls._cast_param_array(params, nstream, 'c', -1.0, '<f8')
         asP = cls._cast_param_array(params, nstream, 'asP', False, '|b1')
+        fuse = cls._cast_param_array(params, nstream, 'fuse', 0.0, '<f8')
         c[asP] = 0.0
         truthtable = params.get('truthtable', 'and')
         if isinstance(truthtable, str):
@@ -308,6 +309,7 @@ class Bursts(BasePhotonTable):
                     F = F[mask]
                     c = c[mask]
                     asP = asP[mask]
+                    fuse = fuse[mask]
                     truthtable = truthtable[tuple(idx if k in (i,j) else slc for k in range(truthtable.ndim))]
                     break
             cont = False
@@ -320,6 +322,7 @@ class Bursts(BasePhotonTable):
         params['F'] = F[order]
         params['c'] = c[order]
         params['asP'] = asP[order]
+        params['fuse'] = fuse[order]
         params['truthtable'] = truthtable
         parents['bg'] = tuple(bg[i] for i in order)
         return params, parents
@@ -343,6 +346,10 @@ class Bursts(BasePhotonTable):
             raise ValueError("F must be < 1.0 for poisson threshold burstsearches")
         if np.any(param.params['F'][~param.params['asP']] <= 1.0):
             warn("F < 1.0 for constant threshold burstsearches will encompase most photons")
+        if np.any((param.params['fuse'] < 0.0) & (param.params['fuse'] != -1.0)):
+            raise ValueError("fuse must contain only non-negative or -1.0 values")
+        if (nchan != 1 or param.params['truthtable'][0]) and np.any(param.params['fuse'] < 0.0):
+            raise ValueError("Cannot perform burstgateing operation on non-fused bursts")
 
     @classmethod
     def _param_nstreams(cls, params:tupledict)->int:
@@ -744,7 +751,7 @@ class Ratios(ChildPhotonTable):
         nsplit = param.get('nsplit', 1)
         corr_mat = np.eye(2 if scheme == '1ex' else 4)
         lk = param.get('alpha', param.get('lk', 0.0))
-        dir_ex = param.get('delta', ('dir_ex', 0.0))
+        dir_ex = param.get('delta', param.get('dir_ex', 0.0))
         gamma, beta = param.get('gamma', 1.0), param.get('beta', 1.0)
         if scheme == 'ALEX':
             corr_mat[0,0] = gamma
@@ -928,101 +935,8 @@ class Ratios(ChildPhotonTable):
 
 
 ###############################################################################
-######################## Conveniece creation functions ########################
+######################### Experimental CDE functions  #########################
 ###############################################################################
-def make_burst_search(bg:Param, m:int, F:float, stream:tuple[PhSel]=PhSel('0ex_1ex1em'))->Param:
-    """
-    Make a standard burst search :class:`Param`, makes ACBS burst search.
-
-    Parameters
-    ----------
-    bg : Param
-        Background :class:`Param` to use to set burst SNR thresholds.
-    m : int
-        Size of sliding window.
-    F : float
-        Minimum SNR to be considered in a burst.
-    stream : tuple[PhSel], optional
-        Photon stream on which to perform burst search. The default is PhSel('0ex_1ex1em').
-
-    Returns
-    -------
-    Param
-        ACBS burst search :class:`Param`. (Based on :class:`Bursts`)
-
-    """
-    return Param(Bursts, {'streams':(stream, ), 'm':m, 'F':F}, {'bg':bg})
-    
-
-def make_dcbs_burst_search(bg:Param, m:int, F:float, 
-                           streamA:PhSel=PhSel('0ex'), streamB:PhSel=PhSel('1ex1em'))->Param:
-    """
-    Make Dual-Channel-Burst-Search :class:`Param`.
-
-    Parameters
-    ----------
-    bg : Param
-        Background :class:`Param` to use to set burst SNR thresholds.
-    m : int
-        Size of sliding window.
-    F : float
-        Minimum SNR to be considered in a burst.
-    streamA : PhSel, optional
-        First photon stream on which to perform burst search. The default is PhSel('0ex').
-    streamB : PhSel, optional
-        Second photon stream on which to perform burst search. The default is PhSel('1ex1em').
-
-    Returns
-    -------
-    Param
-        DCBS :class:`Param`. (Based on :class:`Bursts`)
-
-    """
-    return Param(Bursts, {'streams':(streamA, streamB), 'm':m, 'F':F}, {'bg':bg})
-    
-
-def make_correction_factors(bursts:Param, alpha:float=None, sigma:float=None,
-                            gamma:float=1.0, beta:float=1.0, 
-                            lk:float=0.0, dir_ex:float=0.0)->tuple[Param, Param]:
-    """
-    Make backgrouch corrected and cross-talk corrected :class:`Param` from burst
-    search and information on correction factors.
-
-    Parameters
-    ----------
-    bursts : Param
-        Burst :class:`Param` to which to apply correction factors.
-    alpha : float, optional
-        Leakage factor, takes precedence over equivalent lk kwarg. 
-        The default is None.
-    sigma : float, optional
-        Direct excitation factor, takes precedence over equivalent dir_ex kwarg. 
-        The default is None.
-    gamma : float, optional
-        Correction coefficient for Donor Donor emission. The default is 1.0.
-    beta : float, optional
-        Correction coefficent for Acceptor Acceptor emission. The default is 1.0.
-    lk : float, optional
-        Leakage factor, overwritten by alpha. The default is 0.0.
-    dir_ex : float, optional
-        Direct excitation factor, overwritten by sigma. The default is 0.0.
-
-    Returns
-    -------
-    nph : Param
-        Background corrected :class:`Param` (based on :class:`NphBG`).
-    ratio : Param
-        Fully corrected stream intensity/ratio :class:`Param` 
-        (based on :class:`Ratos`)
-
-    """
-    nph = Param(NphBG, {'single':True}, {'base':bursts, 'bg':bursts.parents['bg'][0]})
-    alpha = lk if alpha is None else alpha
-    sigma = dir_ex if sigma is None else sigma
-    ratios = Param(Ratios, params={'gamma':gamma, 'beta':beta, 'alpha':alpha, 'sigma':sigma}, parents={'nph':nph})
-    return nph, ratios
-    
-
 def register_2cde_func(func:Callable[[int,int,float],float], shortcut:Callable=None)->None:
     """
     Add new function for computing KDE function to TypeValidator code.

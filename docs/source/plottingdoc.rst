@@ -1,8 +1,15 @@
 Plotting functions
 ------------------
 
-.. automodule:: fretbursts.datamodel.plotting
+``datamodel.plotting`` functions
+********************************
+
+.. automodule:: fretbursts.datamodel.plot
     :members:
+
+
+PhotonData specific functions
+*****************************
 
 .. automodule:: fretbursts.plot
     :members:

@@ -1,18 +1,15 @@
 Data Model
 ----------
 
+The ``datamodel`` sub-module 
+
 .. toctree::
     :caption: Main Modules
     :maxdepth: 1
 
     tablesdoc
     gatesdoc
-
-.. toctree::
-    :caption: Additional Modules
-    :maxdepth: 1
-
-    citationsdoc
+    multifitdoc
 
 .. toctree::
     :caption: Utility Modules

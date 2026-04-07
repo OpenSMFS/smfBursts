@@ -19,19 +19,22 @@ import matplotlib.pyplot as plt
 
 import phconvert.plotter as plotter
 
-from .datamodel.utils import get_unit_prefix
+from .datamodel.utils import get_unit_prefix, _dict_update, fjit
 from .datamodel.immutabledata import get_pycode_subval
 from .datamodel.tables import Param, Column, GateGroup
-from .datamodel.plotting import (
+from .datamodel.plot import (
     hist_bar, hist_stair, hist_line, hist_kdeoverlay, 
-    hist2d, hist, hexbin, kdeplot, scatter, jointplot,
+    hist2d, hist, hexbin, kdeplot, scatter, errorbars, jointplot,
     density_kde, rescale_size, density_kdesize, gaus_2Dkde, gaus_2Dkde_cmap,
-    _check_ax, _get_column_arrays, _rescale_value)
+    _check_ax, _get_column_arrays, _rescale_value, plot_meaninterval, 
+    scatter_meaninterval, colorcategory, plot_multi_dist
+    )
 
 
-from .ph_sel import PhSel, PhStream, phsel_union
+from .ph_sel import PhSel, phsel_union
 from .photondata import PhotonData, PhotonDataS, _title_sels
 from .background import BG
+from .bursttables import Bursts
 
 import fretbursts.cfuncs as fbc
 
@@ -68,14 +71,9 @@ def alternation_hist(raw:PhotonHDF5Data, ich:int=0, ax:plt.Axes=None, group_dets
     return plotter.alternation_hist(raw.as_photonHDF5_dict, ich=ich, ax=ax, group_dets=group_dets,**kwargs)
 
 
-def _dict_update(dct:dict, update:dict)->dict:
-    """Return updated dictionary copy, used to combine dictionaries without changing originals"""
-    dct.update(update)
-    return dct
-
-
 def _time_plot(func:str, ax:plt.Axes, data:PhotonDataS, col:Column, gate:GateGroup,
-               include_unit:bool, xlabel:str, xlabel_kwargs:dict, ylabel:str, ylabel_kwargs:dict,
+               include_unit:bool, plotlabel:str, 
+               xlabel:str, xlabel_kwargs:dict, ylabel:str, ylabel_kwargs:dict,
                kwargs:dict)->tuple[Any,plt.Text,plt.Text]:
     """
     Internal function for ploting time series. Avoids making gates to save memory.
@@ -83,18 +81,21 @@ def _time_plot(func:str, ax:plt.Axes, data:PhotonDataS, col:Column, gate:GateGro
     ax = _check_ax(ax)
     xlabel_kwargs = dict() if xlabel_kwargs is None else xlabel_kwargs
     ylabel_kwargs = dict() if ylabel_kwargs is None else ylabel_kwargs
+    plotlabel = col.name(origin=data) if plotlabel is None else plotlabel
+    if plotlabel and 'label' not in kwargs:
+        kwargs = _dict_update(kwargs, {'label':plotlabel})
     xcol = Column(col.base_param, 'midtime', ('istarttime', 'istoptime'))
     (xarr, yarr), (cxname, cyname) = _get_column_arrays(data, xcol, col, gate=gate, include_unit=include_unit)
     xlabel = cxname if xlabel is None else xlabel
     ylabel = cyname if ylabel is None else ylabel
     out = getattr(ax, func)(xarr, yarr, **kwargs)
-    xlbl = ax.set_xlabel(xlabel, **xlabel_kwargs)
-    ylbl = ax.set_ylabel(ylabel, **ylabel_kwargs)
+    xlbl = ax.set_xlabel(xlabel, **xlabel_kwargs) if xlabel else None
+    ylbl = ax.set_ylabel(ylabel, **ylabel_kwargs) if xlabel else None
     return out, xlbl, ylbl
 
 
 def time_plot(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
-              include_unit:bool=False, 
+              include_unit:bool=False, plotlabel:str=None,
               xlabel:str=None, xlabel_kwargs:dict=None, 
               ylabel:str=None, ylabel_kwargs:dict=None, 
               **kwargs:Any)->tuple[plt.Line2D,plt.Text,plt.Text]:
@@ -117,6 +118,10 @@ def time_plot(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.Axes=Non
         The default is None.
     include_unit : bool, optional
         Whether to include unit in column labels. The default is False.
+    plotlabel : str optional
+        Name to set the 'label' keyword argument handed to ax.plot, if None, will
+        automatically assigne based on col. If False, will not set 'label' kwarg.
+        The default is None.
     xlabel : str, optional
         Name to set xlabel, if None, will automatically assign based on col.
         The default is None.
@@ -144,11 +149,11 @@ def time_plot(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.Axes=Non
         Matplotlib Text object of ylabel.
 
     """
-    return _time_plot('plot', ax, data, col, gate, include_unit, xlabel, xlabel_kwargs, 
-                      ylabel, ylabel_kwargs, kwargs)
+    return _time_plot('plot', ax, data, col, gate, include_unit, plotlabel, 
+                      xlabel, xlabel_kwargs, ylabel, ylabel_kwargs, kwargs)
 
 def time_scatter(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
-                 include_unit:bool=False, 
+                 include_unit:bool=False, plotlabel:str=None,
                  xlabel:str=None, xlabel_kwargs:dict=None, 
                  ylabel:str=None, ylabel_kwargs:dict=None, 
                  **kwargs:Any)->tuple[mpl.collections.PathCollection,plt.Text,plt.Text]:
@@ -171,6 +176,10 @@ def time_scatter(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.Axes=
         The default is None.
     include_unit : bool, optional
         Whether to include unit in column labels. The default is False.
+    plotlabel : str optional
+        Name to set the 'label' keyword argument handed to ax.plot, if None, will
+        automatically assigne based on col. If False, will not set 'label' kwarg.
+        The default is None.
     xlabel : str, optional
         Name to set xlabel, if None, will automatically assign based on col.
         The default is None.
@@ -198,8 +207,8 @@ def time_scatter(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.Axes=
         Matplotlib Text object of ylabel.
 
     """
-    return _time_plot('scatter', ax, data, col, gate, include_unit, xlabel, xlabel_kwargs, 
-                      ylabel, ylabel_kwargs, kwargs)
+    return _time_plot('scatter', ax, data, col, gate, include_unit, plotlabel,
+                      xlabel, xlabel_kwargs, ylabel, ylabel_kwargs, kwargs)
 
 
 def _process_startstop(times:np.ndarray[np.int64], clk_p:float, period:int|float,
@@ -385,7 +394,7 @@ def _get_factor(data:PhotonData, rescale:Union[None,int,float])->tuple[str, floa
 
 def burst_dets(data:PhotonData, param:Param, burst:int, ax:plt.Axes=None, 
                time_direction:Literal['x', 'horizontal', 'y', 'vertical']='x', 
-               rescale:Real=None, det_pos:dict[int|PhSel:float]=None, 
+               rescale:Real=None, zerostart:bool=False, det_pos:dict[int|PhSel:float]=None, 
                det_kwargs:dict[int|PhSel:dict[str,Any]]=None, label_kwargs:dict[str:Any]=None,
                nanotime:bool=False, nanotime_scale:float=1e9,
                **kwargs:Any)->tuple[mpl.collections.PathCollection,...,plt.Text]:
@@ -409,6 +418,8 @@ def burst_dets(data:PhotonData, param:Param, burst:int, ax:plt.Axes=None,
         Direction of time axis. The default is 'x'.
     rescale : Real, optional
         Rescale factor for time axis. The default is None.
+    zerostart : bool, optional
+        If True, photon times start at 0. The default is True
     det_pos : dict[int|PhSel:float], optional
         Dictionary of detector to position mappings. The default is None.
     det_kwargs : dict[int|PhSel:dict[str,Any]], optional
@@ -464,6 +475,7 @@ def burst_dets(data:PhotonData, param:Param, burst:int, ax:plt.Axes=None,
     unit, factor = _get_factor(data, rescale)
     time_direction = time_direction.lower()
     nanotime_scale *= data.setup['tcspc_unit'][0]
+    times = times - times[0] if zerostart else times
     for k, p in det_pos.items():
         dids = detdef.get_stream_ids(k)
         mask = np.isin(dets, dids)
@@ -490,15 +502,108 @@ def burst_dets(data:PhotonData, param:Param, burst:int, ax:plt.Axes=None,
 def _sel_wrap(name:str, origin:PhotonData, *args:PhSel)->str:
     selstr = ', '.join(_title_sels(name, origin, *args))
     return f'${selstr}$'
+
+
+def _makebg_thresh(ax:plt.Axes, data:PhotonData, bg:Param, stream:PhSel, 
+                   bins:np.ndarray[np.float64], bsize:np.ndarray[np.float64], 
+                   factor:float, bg_kwargs:dict):
+    bg = data.get_table(bg)
+    periods = bg.parents['base']['periods', 1]
+    locs = np.searchsorted(periods, bins)
+    locs[locs >= periods.size-1] = periods.size - 2
+    bgr = bg['bg', stream][locs]*bsize*factor
+    return ax.plot(bins, bgr, **bg_kwargs)
+
+
+def _timetrace_bg_sort(bg:Param, sel:PhSel)->tuple[Param,float]:
+    if bg.tp == Bursts:
+        detdef = bg.tp._detdef(bg)
+        sub, sbg, sF, sublen = None, None, 0, np.inf
+        for bsel, b, F in zip(bg.params['streams'], bg.parents['bg'], bg.params['F']):
+            if bsel == sel:
+                return b, F
+            temp = sel - bsel
+            templen = detdef.get_stream_ids(temp).size
+            if  templen < sublen:
+                sub, sublen, sbg, sF = temp, templen, b, F
+        if sub is not None:
+            return sbg, sF
+        return bg.params['streams'][0], bg.params['F'][0]
+    if bg.tp != BG:
+        if 'bg' not in bg.parents:
+            raise ValueError("cannot determine background param from bg")
+        bg = bg.parents['bg']
+    return bg, 1.0
+
+
+def _trace_label_proc(data:PhotonData, labels:None|bool|Sequence[str], streams:None|Sequence[PhSel], name:str):
+    """Process label sequence for time/ratetrace labels"""
+    set_labels = labels is not None and labels is not False
+    if set_labels:
+        if labels is True:
+            labels = (True for _ in range(len(streams)))
+        labels = (_sel_wrap(name, data, s) if l is True else l for s, l in zip(streams, labels))
+    else:
+        labels = repeat(None)
+    return set_labels, labels
+
+
+def _trtrace_proc(data, streams, bg, stream_kwargs, bg_kwargs, labels, bg_labels, direction):
+    """Process args common to timetrace and ratetrace"""
+    # sort streams
+    if streams is None:
+        if isinstance(bg, Param) and bg.base_param.tp == Bursts:
+            bg = bg.base_param
+            streams = bg.params['streams']
+        else:
+            streams = tuple(data.detdef.stream_ids_to_PhSel(i) for i in range(data.detdef.size))
+        bg = repeat(bg)
+    bg = repeat(bg) if isinstance(bg, Param) or bg is None else bg
+    stream_kwargs = dict() if stream_kwargs is None else stream_kwargs
+    stream_kwargs = repeat(stream_kwargs) if isinstance(stream_kwargs, dict) else stream_kwargs
+    set_labels, labels = _trace_label_proc(data, labels, streams, 'n')
+    set_bglabels, bg_labels = _trace_label_proc(data, bg_labels, streams, 'bg')
+    set_legend = set_labels or set_bglabels
+    bg_kwargs = dict() if bg_kwargs is None else bg_kwargs
+    bg_kwargs = bg_kwargs if isinstance(bg_kwargs, Sequence) else repeat(bg_kwargs)
+    direction = repeat(True) if direction is None else direction
+    return set_legend, zip(bg, streams, stream_kwargs, bg_kwargs, labels, bg_labels, direction)
+
+
+def _idx_bounds(array:np.ndarray[np.int64], size:int)->np.ndarray[np.int64]:
+    array[array<0] = 0
+    array[array>=size] = size - 1
+    return array
+
+
+def _idx_sorted(array:np.ndarray[np.int64], loc:Integral|Sequence[Integral])->np.ndarray[np.int64]:
+    idx = np.searchsorted(array, loc) - 1
+    return _idx_bounds(idx, array.size)
+
+
+def _colapse_transitions(idx:np.ndarray)->tuple[np.ndarray,np.ndarray]:
+    tloc = np.diff(idx) != 0
+    mask = np.zeros(idx.shape, dtype=np.bool_)
+    mask[1:] |= tloc
+    mask[:-1] |= tloc
+    mask[0] = True
+    mask[-1] = True
+    y = idx[mask]
+    x = np.empty_like(y)
+    x[0] = y[0]
+    x[:-1] = y[1:]
+    x[-1] = y[-1]
+    return x, y
     
 
-def timetrace(data:PhotonData, ax:plt.Axes=None, streams:Sequence[PhSel]=None, 
-              bins:Integral|Real|np.ndarray=None, 
-              tmin:float=0.0, tmax:float=1.0, binwidth:float=1e-4, 
-              stream_kwargs:Sequence[dict]=None,
-              direction:Sequence[bool|int]=None, labels:Sequence[str]|bool=True, 
+def timetrace(data:PhotonData, ax:plt.Axes=None, streams:Sequence[PhSel]=None,
+              bg:Param=None, bins:Integral|Real|np.ndarray=None,
+              tmin:float=0.0, tmax:float=1.0, binwidth:float=1e-3,
+              stream_kwargs:Sequence[dict]=None, bg_kwargs:Sequence[dict]=None,
+              direction:Sequence[bool|int]=None, 
+              labels:Sequence[str]|bool=True, bg_labels:Sequence[str]|bool=True,
               xlabel:str=None, xlabel_kwargs:dict=None, ylabel:str=None, ylabel_kwargs:dict=None, 
-              **kwargs)->tuple[list[plt.Line2D],plt.Text,plt.Text,mpl.legend.Legend]:
+              **kwargs)->tuple[list[plt.Line2D],list[plt.Line2D],plt.Text,plt.Text,mpl.legend.Legend]:
     """
     Plot a binned timetrace of a section of photon arrival times in data.
 
@@ -514,6 +619,9 @@ def timetrace(data:PhotonData, ax:plt.Axes=None, streams:Sequence[PhSel]=None,
     streams : Sequence[PhSel], optional
         Sequence of photon streams to plot, if None, will plot each stream separately. 
         The default is None.
+    bg : Param, optional
+        If specified, overlay a plot the computed background photon rate. 
+        The default is None.
     bins : np.ndarray | int | float, optional
         Specification of bins for timetrace. If int will plot that number of bins
         in time range, if float will plot bins of that size (unit = s), if 
@@ -528,6 +636,8 @@ def timetrace(data:PhotonData, ax:plt.Axes=None, streams:Sequence[PhSel]=None,
         Size of single time bin, ignored if bins is specified. The default is 1e-4.
     stream_kwargs : Sequence[dict], optional
         Kwargs hannded to ax.plot per stream. The default is None.
+    bg_kwargs : dict, optional
+        kwargs handed to time_plot for plotting background/background threshold.
     direction : Sequence[bool|int], optional
         Direction for each stream, if stream is True/1 plot in positive direction, 
         if stream is False/-1 plot with higher values in negative direction.
@@ -536,6 +646,11 @@ def timetrace(data:PhotonData, ax:plt.Axes=None, streams:Sequence[PhSel]=None,
         Labels (sequence of str) per stream. If True, add labels with automatic
         names. If False, do not add labels. If sequence, can specify True to create
         automatic label for specific stream. The default is True.
+    bg_labels : Sequence[str|bool]|bool, optional
+        Labels (sequence of str) per stream for bg lines. If True, add labels 
+        with automatic names. If False, do not add labels. 
+        If sequence, can specify True to create automatic label for specific stream. 
+        The default is True.
     xlabel : str, optional
         Name to set xlabel, if None, will automatically assign based on col and normalize.
         The default is None.
@@ -551,12 +666,15 @@ def timetrace(data:PhotonData, ax:plt.Axes=None, streams:Sequence[PhSel]=None,
         `ax.set_ylabel <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_ylabel.html>`_. 
         The default is None.
     **kwargs : Any
-        DESCRIPTION.
+        Keyword arguments handed to each call to ax.plot for plotting interphton
+        time histograms.
 
     Returns
     -------
-    lines : list[plt.Line2D]
+    hst_lines : list[plt.Line2D]
         list of Matplotib line2D of histograms of bins per stream
+    bg_lines : list[plt.Line2D]
+        list of Matplotib line2D of background-rate or threshold
     xttl : plt.Text
         Text object from ax.set_xlabel.
     yttl : plt.Text
@@ -574,41 +692,140 @@ def timetrace(data:PhotonData, ax:plt.Axes=None, streams:Sequence[PhSel]=None,
         bins = np.arange(tmin, tmax+bins, bins)
     mbins = np.diff(bins)/2 + bins[:-1]
     # sort streams
-    if streams is None:
-        streams = tuple(range(data.detdef.size))
-    else:
-        streams = tuple(data.detdef.get_stream_ids(sel) if isinstance(sel, (PhSel, PhStream)) else sel for sel in streams)
-    stream_kwargs = repeat(dict()) if stream_kwargs is None else stream_kwargs
-    set_legend = labels is not None and labels is not False
-    if set_legend:
-        if labels is True:
-            labels = (True for _ in range(len(streams)))
-        labels = (_sel_wrap('n', data, data.detdef.stream_ids_to_PhSel(s)) if l is True else l 
-                  for s, l in zip(streams, labels))
-    else:
-        labels = repeat(None)
+    set_legend, stream_zip = _trtrace_proc(data, streams, bg, stream_kwargs, bg_kwargs, labels, bg_labels, direction)
     xlabel = 'time (s)' if xlabel is None or xlabel is True else xlabel
     xlabel_kwargs = dict() if xlabel_kwargs is None else xlabel_kwargs
     ylabel = 'cnts' if ylabel is None or ylabel is True else ylabel
     ylabel_kwargs = dict() if ylabel_kwargs is None else ylabel_kwargs
-    direction = repeat(True) if direction is None else direction
-    idx = fbc.index_range(data.times, int(bins[0]/data.clk_p), int(bins[-1]/data.clk_p), 0)
+    bins_clk = (bins / data.clk_p).astype(np.int64)
+    bsize = np.diff(bins)
+    bsize = np.concatenate([bsize, bsize[-1:]])
+    idx = fbc.index_range(data.times, bins_clk[0], bins_clk[-1], 0)
     times, dets = data.times[idx[0]:idx[1]], data.dets[idx[0]:idx[1]]
     times = times * data.clk_p
     # get axis if not supplied
     ax = plt.gca() if ax is None else ax
-    lines = list()
-    for stream, stream_kwarg, label, direct in zip(streams, stream_kwargs, labels, direction):
-        hst, _ = np.histogram(times[np.isin(dets, stream)], bins)
-        if direct < 1:
-            hst *= -1
+    hst_lines, bg_lines = list(), list()
+    # loop over all specified streams, adding to plot
+    for sbg, stream, stream_kws, bg_kws, label, bg_label, direct in stream_zip:
+        hst, _ = np.histogram(times[np.isin(dets, data.detdef.get_stream_ids(stream))], bins)
+        direct = -1 if direct < 1 else 1
+        hst *= direct
         if label is not None:
-            stream_kwarg.setdefault('label', label)
-        lines.append(ax.plot(mbins, hst, **_dict_update(stream_kwarg, kwargs)))
+            stream_kws.setdefault('label', label)
+        hst_lines.append(ax.plot(mbins, hst, **_dict_update(stream_kws, kwargs))[0])
+        if sbg is None:
+            bg_lines.append(None)
+            continue
+        sbg, factor = _timetrace_bg_sort(sbg, stream)
+        sbg = data.get_table(sbg)
+        prd = sbg.parents['base']['periods']
+        bgc = sbg['bg', stream]
+        idx = _idx_sorted(prd, bins_clk)
+        idx, idy = _colapse_transitions(idx)
+        ttemp = prd[idx] * data.clk_p
+        ttemp[0] = bins[0]
+        ttemp[-1] = bins[-1]
+        # corrections for overflows
+        bgc = bgc[idy]*factor*direct
+        bgc *= bsize[idx]
+        bg_kws = dict() if bg_kws is None else bg_kws
+        if 'c' not in bg_kws or 'color' not in bg_kws:
+            bg_kws = _dict_update(bg_kws, {'c':hst_lines[-1].get_color()})
+        if bg_label is not None:
+            bg_kws.setdefault('label', bg_label)
+        bg_lines.append(ax.plot(ttemp, bgc, **bg_kws)[0])
     xttl = None if xlabel is False else ax.set_xlabel(xlabel, **xlabel_kwargs)
     yttl = None if ylabel is False else ax.set_ylabel(ylabel, ylabel_kwargs)
     leg = ax.legend() if set_legend else None
-    return lines, xttl, yttl, leg
+    return hst_lines, bg_lines, xttl, yttl, leg
+
+
+@fjit('Tuple((i8[:],i8[:]))(i8[:],i8)')
+def _ratetrace(photons:np.ndarray[np.int64], m:int)->tuple[np.ndarray[np.int64], np.ndarray[np.int64]]:
+    diff = np.empty(photons.size-m, dtype='i8')
+    mean = np.empty(photons.size-m, dtype='i8')
+    for i in range(photons.size-m):
+        diff[i] = photons[i+m] - photons[i]
+        mean[i] = np.sum(photons[i:m+i]) // m
+    return diff, mean
+
+
+def ratetrace(data:PhotonData, ax:plt.Axes=None, streams:Sequence[PhSel]=None,
+              bg:Param=None, m:Integral=10, tmin:float=0.0, tmax:float=1.0,
+              stream_kwargs:Sequence[dict]=None, bg_kwargs:Sequence[dict]=None,
+              direction:Sequence[bool|int]=None, 
+              labels:Sequence[str]|bool=True, bg_labels:Sequence[str]|bool=True, 
+              xlabel:str=None, xlabel_kwargs:dict=None, ylabel:str=None, ylabel_kwargs:dict=None, 
+              **kwargs)->tuple[list[plt.Line2D],list[plt.Line2D],plt.Text,plt.Text,mpl.legend.Legend]:
+    ax = _check_ax(ax)
+    # sort streams
+    set_legend, stream_zip = _trtrace_proc(data, streams, bg, stream_kwargs, bg_kwargs, labels, bg_labels, direction)
+    xlabel = 'time (s)' if xlabel is None or xlabel is True else xlabel
+    ylabel = r'$cnts\:s^{-1}$' if ylabel is None or ylabel is True else ylabel
+    xlabel_kwargs = dict() if xlabel_kwargs is None else xlabel_kwargs
+    ylabel_kwargs = dict() if ylabel_kwargs is None else ylabel_kwargs
+    idx = fbc.index_range(data.times, int(tmin/data.clk_p), int(tmax/data.clk_p), 0)
+    times, dets = data.times[idx[0]:idx[1]], data.dets[idx[0]:idx[1]]
+    rt_lines = list()
+    bg_lines = list()
+    # loop over all specified streams, adding to plot
+    for sbg, stream, stream_kws, bg_kws, label, bg_label, direct in stream_zip:
+        direct = -1 if direct < 1 else 1
+        mask = np.isin(dets, data.detdef.get_stream_ids(stream))
+        ttemp = times[mask]
+        delays, means = _ratetrace(ttemp, m)
+        rates, means = 1/delays/data.clk_p, data.clk_p * means
+        if label is not None:
+            stream_kws.setdefault('label', label)
+        rt_lines.append(ax.plot(means, direct*rates, **_dict_update(stream_kws, kwargs))[0])
+        if sbg is None:
+            bg_lines.append(None)
+            continue
+        if bg_label is not None:
+            bg_kws.setdefault('label', bg_label)
+        sbg, factor = _timetrace_bg_sort(sbg, stream)
+        bg = data.get_table(sbg)
+        sbg = data.get_table(sbg)
+        prd = sbg.parents['base']['periods']
+        bgc = sbg['bg', stream]*factor*direct
+        idx = _idx_sorted(prd, [tmin/data.clk_p, tmax/data.clk_p])
+        brate = bgc[idx]
+        btimes = np.array([tmin, tmax])
+        if idx[0] != idx[1]:
+            # index of transitions between background periods in the ttemp array
+            nidx = _idx_sorted(ttemp, prd[list(range(idx[0]+1, idx[1]+1))])
+            # process bg rate transistions
+            nbrate = np.empty(nidx.size*2+2, dtype=np.float64)
+            nbrate[0] = brate[0]
+            nbrate[-1] = brate[1]
+            nbrate[1:-1:2] = bgc[idx[0]:idx[1]]
+            nbrate[2:-1:2] = bgc[idx[0]+1:idx[1]+1]
+            brate = nbrate
+            # process location of time transitions
+            nbtimes = np.empty(nidx.size*2, dtype=np.int64)
+            # location of transitions shifted by +/- m
+            nbtimes[::2] = ttemp[_idx_bounds(nidx-m, ttemp.size)]
+            nbtimes[1::2] = ttemp[_idx_bounds(nidx+m, ttemp.size)]
+            print()
+            # fill new times array
+            nbbtimes = np.empty(nbtimes.size+2, dtype=np.float64)
+            nbbtimes[0] = btimes[0]
+            nbbtimes[-1] = btimes[1]
+            nbbtimes[1:-1] = nbtimes * data.clk_p
+            btimes = nbbtimes
+            if btimes[-2] > btimes[-1]:
+                btimes = btimes[:-1]
+                brate = brate[:-1]
+        if 'c' not in bg_kws or 'color' not in bg_kws:
+            bg_kws = _dict_update(bg_kws, {'c':rt_lines[-1].get_color()})
+        if bg_label is not None:
+            bg_kws.setdefault('label', bg_label)
+        bg_lines.append(ax.plot(btimes, brate, **bg_kws)[0])
+    xttl = None if xlabel is False else ax.set_xlabel(xlabel, **xlabel_kwargs)
+    yttl = None if ylabel is False else ax.set_ylabel(ylabel, ylabel_kwargs)
+    leg = ax.legend() if set_legend else None
+    return rt_lines, bg_lines, xttl, yttl, leg
 
 
 def _get_nth(data:PhotonData, n:int, *args:Column)->tuple[np.ndarray[np.int64,...]]:
@@ -635,8 +852,8 @@ def hist_interphoton(data:PhotonData, bg:Param=None, n:int=0, ax:plt.Axes=None,
                      xlabel:str=None, xlabel_kwargs:dict=None, ylabel:str=None, ylabel_kwargs:dict=None,
                      **kwargs)->tuple[list[mpl.collections.PathCollection],list[plt.Line2D],plt.Text,plt.Text,mpl.legend.Legend]:
     """
-    Plot interphoton time histogram. If specify bg as a :class:`BG` based 
-    :class:`Param` will also overlay histogram with background-rate fit line.
+    Plot interphoton time histogram. If bg is specified, it must be a :class:`BG` 
+    based :class:`Param`, specifying bg will overlay histogram with background-rate fit line.
 
     Parameters
     ----------

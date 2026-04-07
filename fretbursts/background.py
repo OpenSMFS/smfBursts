@@ -25,7 +25,7 @@ from .datamodel.utils import tupledict, arr_slc
 from .datamodel.immutabledata import (TypeValidator, TV_float, TV_str, TV_bool, 
                                       TV_PyCode, TV_ndarray, register_PyCode, get_pycode_subval)
 from .datamodel.tables import ParamDef, ParentDef, ColumnDef, Param, Column, DataSet, as_paramdict
-from .datamodel.citations import cite
+from .cite import cite
 from .ph_sel import PhSel, DetDef, TV_DetDef
 from .photondata import (
     BasePhotonTable, ChildPhotonTable, PhotonData, 

@@ -23,6 +23,30 @@ UR  - https://doi.org/10.1073/pnas.95.4.1556
 Y2  - 2025/10/22
 ER  - 
 TY  - JOUR
+TI  - Filtered FCS: Species Auto‐ and Cross‐Correlation Functions Highlight Binding and Dynamics in Biomolecules
+AU  - Felekyan, Suren
+AU  - Kalinin, Stanislav
+AU  - Sanabria, Hugo
+AU  - Valeri, Alessandro
+AU  - Seidel, Claus A. M.
+T2  - ChemPhysChem
+DA  - 2012/03//
+PY  - 2012
+DO  - 10.1002/cphc.201100897
+DP  - DOI.org (Crossref)
+VL  - 13
+IS  - 4
+SP  - 1036
+EP  - 1053
+J2  - ChemPhysChem
+LA  - en
+SN  - 1439-4235, 1439-7641
+ST  - Filtered FCS
+UR  - https://chemistry-europe.onlinelibrary.wiley.com/doi/10.1002/cphc.201100897
+Y2  - 2026/03/28/09:27:54
+L1  - https://onlinelibrary.wiley.com/doi/pdfdirect/10.1002/cphc.201100897
+ER  - 
+TY  - JOUR
 T1  - Quantitative Identification of Different Single Molecules by Selective Time-Resolved Confocal Fluorescence Spectroscopy
 AU  - Fries, Joachim R.
 AU  - Brand, Leif
@@ -45,6 +69,66 @@ PB  - American Chemical Society
 SN  - 1089-5639
 M3  - doi: 10.1021/jp980965t
 UR  - https://doi.org/10.1021/jp980965t
+ER  - 
+TY  - JOUR
+TI  - Fluorescence lifetime correlation spectroscopy: Basics and applications
+AU  - Ghosh, Arindam
+AU  - Karedla, Narain
+AU  - Thiele, Jan Christoph
+AU  - Gregor, Ingo
+AU  - Enderlein, Jörg
+T2  - Methods
+DA  - 2018/05//
+PY  - 2018
+DO  - 10.1016/j.ymeth.2018.02.009
+DP  - DOI.org (Crossref)
+VL  - 140-141
+SP  - 32
+EP  - 39
+J2  - Methods
+LA  - en
+SN  - 10462023
+ST  - Fluorescence lifetime correlation spectroscopy
+UR  - https://linkinghub.elsevier.com/retrieve/pii/S104620231730230X
+Y2  - 2026/03/28/09:40:41
+ER  - 
+TY  - JOUR
+TI  - Fast, flexible algorithm for calculating photon correlations
+AU  - Laurence, Ted A.
+AU  - Fore, Samantha
+AU  - Huser, Thomas
+T2  - Optics Letters
+DA  - 2006/03/15/
+PY  - 2006
+DO  - 10.1364/OL.31.000829
+DP  - DOI.org (Crossref)
+VL  - 31
+IS  - 6
+SP  - 829
+J2  - Opt. Lett.
+LA  - en
+SN  - 0146-9592, 1539-4794
+UR  - https://opg.optica.org/abstract.cfm?URI=ol-31-6-829
+ER  - 
+TY  - JOUR
+TI  - Correlation spectroscopy of minor fluorescent species: signal purification and distribution analysis.
+AU  - Laurence, Ted a
+AU  - Kwon, Youngeun
+AU  - Yin, Eric
+AU  - Hollars, Christopher W
+AU  - Camarero, Julio a
+AU  - Barsky, Daniel
+T2  - Biophysical journal
+DA  - 2007///
+PY  - 2007
+DO  - 10.1529/biophysj.106.093591
+VL  - 92
+IS  - 6
+SP  - 2184
+EP  - 2198
+PB  - Elsevier
+SN  - 00063495
+UR  - http://dx.doi.org/10.1529/biophysj.106.093591
 ER  - 
 TY  - JOUR
 TI  - Shot-noise limited single-molecule FRET histograms: Comparison between theory and experiments

@@ -267,9 +267,13 @@ static inline int in_set(uint8_t det, int64_t dsize, uint8_t *dset){
 
 static inline int init_mpos(PhStream *photons, Mpos *pos, int64_t dsize, uint8_t *dset){
 	pos->pos = 0;
-	while ((pos->pos < (pos->m - 1)) && (photons->pos < photons->size)){
+	const int64_t m_minus_two = pos->m - 2;
+	while ( photons->pos < photons->size ){
 		if (in_set(photons->dets[photons->pos], dsize, dset)){
 			pos->times[pos->pos] = photons->times[photons->pos];
+			if ( pos->pos == m_minus_two ){
+				break;
+			}
 			pos->pos++;
 		}
 		photons->pos++;
@@ -294,6 +298,7 @@ static inline int advance_photon_delta(PhStream *photons, Mpos *pos, int64_t dsi
 	return FALSE;
 }
 
+// sliding window burst search
 int sliding_window_burst_search(int64_t m, double F, double clk_p, double c, PhStream *photons, 
 							 int64_t dsize, uint8_t *dset, int64_t cper, int64_t nper,
 							 double cbg, double nbg, 
@@ -762,6 +767,8 @@ double max_rate(PhStream *photons, int64_t dsize, uint8_t *dset,
 			mindT = cdelta;
 		}
 	}
+	if (mindT == INT64_MAX)
+		return 0.0;
 	return ((double)pos->m /(double)mindT)/clk_p;
 }
 
