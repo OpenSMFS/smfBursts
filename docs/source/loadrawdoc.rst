@@ -1,5 +1,5 @@
 Loading raw files
 -----------------
 
-.. automodule:: fretbursts.loadraw
+.. automodule:: smfbursts.loadraw
     :members:

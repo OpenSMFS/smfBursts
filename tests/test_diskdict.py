@@ -9,7 +9,7 @@ Created on Tue Apr 22 06:48:35 2025
 import numpy as np
 import tables as tb
 
-from fretbursts.datamodel.diskdict import (
+from smfbursts.datamodel.diskdict import (
     DiskDict, VattrDD, AttrDD, MappedAttrDD, 
     TypedValueDD, NestedDD, SubDiskDict, MaskedDD
     )

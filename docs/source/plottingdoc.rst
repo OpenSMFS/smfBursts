@@ -4,12 +4,12 @@ Plotting functions
 ``datamodel.plotting`` functions
 ********************************
 
-.. automodule:: fretbursts.datamodel.plot
+.. automodule:: smfbursts.datamodel.plot
     :members:
 
 
 PhotonData specific functions
 *****************************
 
-.. automodule:: fretbursts.plot
+.. automodule:: smfbursts.plot
     :members:

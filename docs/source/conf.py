@@ -3,15 +3,15 @@
 # For the full list of built-in configuration values, see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
-import fretbursts
+import smfbursts
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 from importlib.metadata import version as get_version
-project = 'FRETBursts'
+project = 'smfBursts'
 copyright = '2026, Paul David Harris'
 author = 'Paul David Harris'
-release:str = get_version('fretbursts')
+release:str = get_version('smfbursts')
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -24,6 +24,7 @@ extensions = [
         'sphinx.ext.intersphinx',
         'sphinx.ext.napoleon',
         'sphinx_copybutton',
+        'rst2pdf.pdfbuilder',
         'IPython.sphinxext.ipython_console_highlighting',
         'IPython.sphinxext.ipython_directive',
         'nbsphinx',

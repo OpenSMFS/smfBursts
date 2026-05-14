@@ -9,8 +9,8 @@ Testing immutabledata submodule of datamodel of FRETBursts
 import numpy as np
 import tables as tb
 
-from fretbursts.datamodel.utils import ImDict, FixedDict, arr_slc, tupledict, _eq
-from fretbursts.datamodel.immutabledata import (
+from smfbursts.datamodel.utils import ImDict, FixedDict, arr_slc, tupledict, _eq
+from smfbursts.datamodel.immutabledata import (
     _ImData, TypeValidator, register_PyCode, 
     TV_int, TV_float, TV_ndarray, TV_str, TV_bool, TV_type, TV_PyCode, 
     TV_typewithnodename, TV_tuple, TV_tupledict, TV_ImData

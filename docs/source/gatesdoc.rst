@@ -1,5 +1,5 @@
 Gates module
 ------------
 
-.. automodule:: fretbursts.datamodel.gates
+.. automodule:: smfbursts.datamodel.gates
     :members:

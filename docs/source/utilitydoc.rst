@@ -1,7 +1,7 @@
 Utility Fuctions
 ----------------
 
-.. automodule:: fretbursts.datamodel.utils
+.. automodule:: smfbursts.datamodel.utils
     :members:
 
 

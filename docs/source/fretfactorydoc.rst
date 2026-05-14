@@ -1,5 +1,5 @@
 Factory Functions
 =================
 
-.. automodule:: fretbursts.fretfactory
+.. automodule:: smfbursts.fretfactory
    :members:

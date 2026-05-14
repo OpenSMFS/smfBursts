@@ -1,5 +1,5 @@
 Burst Analysis Classes
 ----------------------
 
-.. automodule:: fretbursts.bursttables
+.. automodule:: smfbursts.bursttables
     :members:

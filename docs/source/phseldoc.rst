@@ -1,5 +1,5 @@
 Photon Selection Classes
 ------------------------
 
-.. automodule:: fretbursts.ph_sel
+.. automodule:: smfbursts.ph_sel
     :members:

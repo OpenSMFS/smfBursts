@@ -4,31 +4,31 @@ import numpy as np
 
 import pytest
 
-import fretbursts as frb
+import smfbursts as smf
 
 
 @pytest.fixture
 def prd_p():
-    return frb.Param(frb.Periods, {'detdef':frb.DetDef(2,2), 'period':60.0, 'start_at':'time_min', 'stop_at':'over'})
+    return smf.Param(smf.Periods, {'detdef':smf.DetDef(2,2), 'period':60.0, 'start_at':'time_min', 'stop_at':'over'})
 
 
 @pytest.fixture
 def mr_pr_c(prd_p):
-    return frb.Column(prd_p, 'max_rate', (frb.PhSel('0ex'), 10))
+    return smf.Column(prd_p, 'max_rate', (smf.PhSel('0ex'), 10))
 
 @pytest.fixture
 def nph_raw(prd_p):
-    return frb.Column(prd_p, 'nph_raw', (frb.PhSel('0ex')))
+    return smf.Column(prd_p, 'nph_raw', (smf.PhSel('0ex')))
 
 @pytest.fixture
 def bva_c(prd_p):
-    return frb.Column(prd_p, 'bva', (frb.PhSel('0ex0em'), frb.PhSel('0ex')))
+    return smf.Column(prd_p, 'bva', (smf.PhSel('0ex0em'), smf.PhSel('0ex')))
 
 
 @pytest.fixture
 def g_nph10(nph_raw):
     try:
-        return frb.make_geq_gate(nph_raw, 10.0)
+        return smf.make_geq_gate(nph_raw, 10.0)
     except:
         return None
 
@@ -36,7 +36,7 @@ def g_nph10(nph_raw):
 @pytest.fixture
 def g_nph20(nph_raw):
     try:
-        return frb.make_geq_gate(nph_raw, 20.0)
+        return smf.make_geq_gate(nph_raw, 20.0)
     except:
         return None
 
@@ -44,7 +44,7 @@ def g_nph20(nph_raw):
 @pytest.fixture
 def g_mr50(mr_pr_c):
     try:
-        return frb.make_geq_gate(mr_pr_c, 50.0)
+        return smf.make_geq_gate(mr_pr_c, 50.0)
     except:
         return None
 
@@ -52,7 +52,7 @@ def g_mr50(mr_pr_c):
 @pytest.fixture
 def g_mr100(mr_pr_c):
     try:
-        return frb.make_geq_gate(mr_pr_c, 100.0)
+        return smf.make_geq_gate(mr_pr_c, 100.0)
     except:
         return None
 
@@ -60,7 +60,7 @@ def g_mr100(mr_pr_c):
 @pytest.fixture
 def g_bva1(bva_c):
     try:
-        return frb.make_geq_gate(bva_c, 0.1)
+        return smf.make_geq_gate(bva_c, 0.1)
     except:
         return None
 
@@ -68,35 +68,35 @@ def g_bva1(bva_c):
 @pytest.fixture
 def g_bva2(bva_c):
     try:
-        return frb.make_geq_gate(bva_c, 0.2)
+        return smf.make_geq_gate(bva_c, 0.2)
     except:
         return None
 
 
 @pytest.fixture
 def bg_p(prd_p):
-    return frb.Param(frb.BG, {'func':frb.bg.exp_mlehist, 'tail_min':4e-4, 'compute_stream':'single_all'}, {'base':prd_p})
+    return smf.Param(smf.BG, {'func':smf.bg.exp_mlehist, 'tail_min':4e-4, 'compute_stream':'single_all'}, {'base':prd_p})
 
 
 @pytest.fixture
 def brst_p(bg_p):
-    return frb.Param(frb.Bursts, {'streams':(frb.PhSel('0ex'),), 'm':np.array([10]), 'F':np.array([6.0])}, {'bg':bg_p})
+    return smf.Param(smf.Bursts, {'streams':(smf.PhSel('0ex'),), 'm':np.array([10]), 'F':np.array([6.0])}, {'bg':bg_p})
 
 
 @pytest.mark.dependency(name='make_geq_gate')
 def test_make_geq_gate(nph_raw):
-    g0 = frb.make_geq_gate(nph_raw, 10.0)
-    gate = frb.Gate(frb.gates.LIN_GEQ_gate, (nph_raw, ), {'m':10.0, 'vec':np.array([1.0])})
-    gg = frb.GateGroup(np.array([False, True]), gate)
+    g0 = smf.make_geq_gate(nph_raw, 10.0)
+    gate = smf.Gate(smf.gates.LIN_GEQ_gate, (nph_raw, ), {'m':10.0, 'vec':np.array([1.0])})
+    gg = smf.GateGroup(np.array([False, True]), gate)
     assert g0 == gg
     assert g0 in gg
     assert gg in g0
 
 
 def test_make_lt_gate(nph_raw):
-    g0 = frb.make_lt_gate(nph_raw, 10.0, exclude_nan=False)
-    gate = frb.Gate(frb.gates.LIN_GEQ_gate, (nph_raw, ), {'m':10.0, 'vec':np.array([1.0])})
-    gg = frb.GateGroup(np.array([True, False]), gate)
+    g0 = smf.make_lt_gate(nph_raw, 10.0, exclude_nan=False)
+    gate = smf.Gate(smf.gates.LIN_GEQ_gate, (nph_raw, ), {'m':10.0, 'vec':np.array([1.0])})
+    gg = smf.GateGroup(np.array([True, False]), gate)
     assert g0 == gg
     assert g0 in gg
     assert gg in g0
@@ -104,65 +104,65 @@ def test_make_lt_gate(nph_raw):
 
 @pytest.mark.dependency(name='singlegate')
 def test_single_gate_overlap_g_ng(g_nph10):
-    assert frb.GateGroup.overlap(g_nph10, ~g_nph10) == 0b0110, "Incorrect overlap g0 ~g0"
-    assert frb.GateGroup.overlap(~g_nph10, g_nph10) == 0b0110, "Incorrect overlap g0 ~g0"
+    assert smf.GateGroup.overlap(g_nph10, ~g_nph10) == 0b0110, "Incorrect overlap g0 ~g0"
+    assert smf.GateGroup.overlap(~g_nph10, g_nph10) == 0b0110, "Incorrect overlap g0 ~g0"
 
 
 @pytest.mark.dependency(name='singlegate')
 def test_single_gate_overlap_gb_in_ga(g_nph10, g_nph20):
-    assert frb.GateGroup.overlap(g_nph10, g_nph20) == 0b1011, "Incorect overlap g0 g1"
-    assert frb.GateGroup.overlap(g_nph20, g_nph10) == 0b1101, "Incorect overlap g1 g0 (reverse)"
+    assert smf.GateGroup.overlap(g_nph10, g_nph20) == 0b1011, "Incorect overlap g0 g1"
+    assert smf.GateGroup.overlap(g_nph20, g_nph10) == 0b1101, "Incorect overlap g1 g0 (reverse)"
 
 
 @pytest.mark.dependency(name='singlegate')
 def test_single_gate_overlap_gb_in_ga_use_nbg(g_nph10, g_nph20):
-    assert frb.GateGroup.overlap(~g_nph20, g_nph10) == 0b1110, "Incorrect geq-le overlap ~g1 g0"
-    assert frb.GateGroup.overlap(g_nph10, ~g_nph20) == 0b1110, "Incorrect geq-le overlap g0 ~g1, (reverse)"
+    assert smf.GateGroup.overlap(~g_nph20, g_nph10) == 0b1110, "Incorrect geq-le overlap ~g1 g0"
+    assert smf.GateGroup.overlap(g_nph10, ~g_nph20) == 0b1110, "Incorrect geq-le overlap g0 ~g1, (reverse)"
 
 
 @pytest.mark.dependency(name='singlegate')
 def test_single_gate_overlap_gb_in_ga_use_nba(g_nph10, g_nph20):
-    assert frb.GateGroup.overlap(~g_nph10, g_nph20) == 0b0111, "Incorrect geq-le overlap ~g0 g1"
-    assert frb.GateGroup.overlap(g_nph20, ~g_nph10) == 0b0111, "Incorrect geq-le overlap ~g0 g1"
+    assert smf.GateGroup.overlap(~g_nph10, g_nph20) == 0b0111, "Incorrect geq-le overlap ~g0 g1"
+    assert smf.GateGroup.overlap(g_nph20, ~g_nph10) == 0b0111, "Incorrect geq-le overlap ~g0 g1"
 
 
-def gate_and(*args:frb.GateGroup)->frb.GateGroup:
+def gate_and(*args:smf.GateGroup)->smf.GateGroup:
     out = args[0]
     for arg in args[1:]:
         out &= arg
     return out
 
 
-def gate_or(*args:frb.GateGroup)->frb.GateGroup:
+def gate_or(*args:smf.GateGroup)->smf.GateGroup:
     out = args[0]
     for arg in args[1:]:
         out |= arg
     return out
 
 
-def gate_eq(*args:frb.GateGroup)->frb.GateGroup:
+def gate_eq(*args:smf.GateGroup)->smf.GateGroup:
     out = args[0]
     for arg in args[1:]:
         out @= arg
     return out
 
 
-def gate_xor(*args:frb.GateGroup)->frb.GateGroup:
+def gate_xor(*args:smf.GateGroup)->smf.GateGroup:
     out = args[0]
     for arg in args[1:]:
         out ^= arg
     return out
 
 
-def gate_sub(a:frb.GateGroup, b:frb.GateGroup())->frb.GateGroup:
+def gate_sub(a:smf.GateGroup, b:smf.GateGroup())->smf.GateGroup:
     return a - b
 
 
-def gate_implies(a:frb.GateGroup, b:frb.GateGroup())->frb.GateGroup:
+def gate_implies(a:smf.GateGroup, b:smf.GateGroup())->smf.GateGroup:
     return a >> b
 
 
-def gate_rimplies(a:frb.GateGroup, b:frb.GateGroup())->frb.GateGroup:
+def gate_rimplies(a:smf.GateGroup, b:smf.GateGroup())->smf.GateGroup:
     return a << b
 
 
@@ -242,17 +242,17 @@ def test_3way_commutative(g_nph10, g_mr100, g_bva1, gate_commutative):
     for a, b, c in permutations((g_nph10, g_mr100, g_bva1), 3):
         assert gate_commutative(a, b, c) == g_com, "3 way AND non-commutative"
         if gate_commutative == gate_and:
-            assert frb.GateGroup.overlap(g_com, a) == 0b1101
-            assert frb.GateGroup.overlap(g_com, b) == 0b1101
-            assert frb.GateGroup.overlap(g_com, c) == 0b1101
-            assert frb.GateGroup.overlap(a, g_com) == 0b1011
-            assert frb.GateGroup.overlap(b, g_com) == 0b1011
-            assert frb.GateGroup.overlap(c, g_com) == 0b1011
+            assert smf.GateGroup.overlap(g_com, a) == 0b1101
+            assert smf.GateGroup.overlap(g_com, b) == 0b1101
+            assert smf.GateGroup.overlap(g_com, c) == 0b1101
+            assert smf.GateGroup.overlap(a, g_com) == 0b1011
+            assert smf.GateGroup.overlap(b, g_com) == 0b1011
+            assert smf.GateGroup.overlap(c, g_com) == 0b1011
         elif gate_commutative == gate_or:
-            assert frb.GateGroup.overlap(g_com, a) == 0b1011
-            assert frb.GateGroup.overlap(g_com, b) == 0b1011
-            assert frb.GateGroup.overlap(g_com, c) == 0b1011
-            assert frb.GateGroup.overlap(a, g_com) == 0b1101
-            assert frb.GateGroup.overlap(b, g_com) == 0b1101
-            assert frb.GateGroup.overlap(c, g_com) == 0b1101
+            assert smf.GateGroup.overlap(g_com, a) == 0b1011
+            assert smf.GateGroup.overlap(g_com, b) == 0b1011
+            assert smf.GateGroup.overlap(g_com, c) == 0b1011
+            assert smf.GateGroup.overlap(a, g_com) == 0b1101
+            assert smf.GateGroup.overlap(b, g_com) == 0b1101
+            assert smf.GateGroup.overlap(c, g_com) == 0b1101
 

@@ -1,5 +1,5 @@
 Background Analysis Classes
 ---------------------------
 
-.. automodule:: fretbursts.background
+.. automodule:: smfbursts.background
     :members:

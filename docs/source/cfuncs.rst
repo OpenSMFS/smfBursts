@@ -1,8 +1,5 @@
 C implemented functions
 -----------------------
 
-.. module:: fretbursts.cfuncs
-
-
-.. automodule:: fretbursts.cfuncs
+.. automodule:: smfbursts.cfuncs
     :members:

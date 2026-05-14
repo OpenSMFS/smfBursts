@@ -1,30 +1,30 @@
-# FRETBursts
+# smfBursts
 
 ## Project Description
 
-FRETBursts is an open source package for burst analysis of freely-diffusing single molecule experiments.
+smfBursts is an open source package for burst analysis of freely-diffusing single molecule experiments.
 It seeks to be highly reproducible, general and easy to use.
 While initially designed for FRET based experiments,
 it supports any number of spectral, as well as polarization based detection channels,
 as well as any number of excitation channels.
 
-### FRETBursts and Reproducibility
+### smfBursts and Reproducibility
 
-FRETBursts is an effort to bring 
+smfBursts is an effort to bring 
 [reproducible computing](http://dx.doi.org/10.1371/journal.pcbi.1003285)
 to the field of single-molecule confocal microscopy.
-FRETBursts records all instructions with their thresholds and other parameters
+smfBursts records all instructions with their thresholds and other parameters
 in special `Param` objects, which have a standard text representation,
 so that exact computations can be unambiguously reproduced.
 
-FRETBursts provides tutorials for use with
+smfBursts provides tutorials for use with
 [Jupyter Notebooks](https://jupyter.org),
 and plotting relies on the ubiquitous python plotting library
 [matplotlib](https://matplotlib.org/)
 
 ## Supported Features
 
-FRETBursts provides algorithms for the following analysis methods
+smfBursts provides algorithms for the following analysis methods
 - Backgrounds estimation as a function of time
 - Sliding-window bursts earch with adaptive (background-dependent) rate-threshold
 - Multi-channel burst search with logical combinations of bursts, extending DCBS

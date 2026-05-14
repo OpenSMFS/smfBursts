@@ -6,8 +6,8 @@ Created on Wed Apr 23 13:31:29 2025
 @author: paul
 """
 import numpy as np
-from fretbursts.datamodel import TypeValidator
-from fretbursts import datamodel as dmd
+from smfbursts.datamodel import TypeValidator
+from smfbursts import datamodel as dmd
 
 import pytest
 

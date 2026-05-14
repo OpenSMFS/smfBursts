@@ -1,37 +1,29 @@
 User Guides
 ===========
 
-
-.. toctree::
-    :caption: Detailed How-To's
-    :maxdepth: 1
-
-    BurstsTutorial
-    DataModelTutorial
-
-
 .. toctree::
     :caption: Core Concepts
     :maxdepth: 1
 
-    ParamColumnTutorial
     GatesTutorial
     PhSelTutorial
+    BurstSearchTutorial
+    photonHDF5Tutorial
     PlottingTutorial
     MultiFitTutorial
-    BurstSearchTutorial
 
 
-Migrating from FRETBursts
--------------------------
 
-The following are guides for migrating from FRETBursts.
-They show equivalent code between the two.
+Extending smfBursts
+-------------------
+
+smfBursts is designed to be easily extendable.
+New paramters can be defined.
 
 .. toctree::
-    :caption: Migration guides
+    :caption: Defining New Tables
     :maxdepth: 1
 
-    SelectingFRETPopulations_translation
-    ns-ALEX_translation
-    us-ALEX_translation
+    DefineExtensions
+
+

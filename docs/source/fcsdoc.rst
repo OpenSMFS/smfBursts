@@ -1,5 +1,5 @@
 Fluorescence Correlation Spectroscopy
 =====================================
 
-.. automodule:: fretbursts.fcs
+.. automodule:: smfbursts.fcs
    :members:

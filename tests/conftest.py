@@ -73,7 +73,7 @@ def pytest_runtest_setup(item):
                 pytest.skip(f"previous test failed (one of {depends})")
 
 
-import fretbursts as frb
+import smfbursts as smf
 
 
 @pytest.fixture(params=['start', 'istarttime'])
@@ -86,7 +86,7 @@ def colstop(request):
     return request.param
 
 @pytest.fixture
-def data()->frb.PhotonData:
-    raw = frb.photonHDF5.load('HP3_TE300_SPC630.hdf5')
-    data = frb.photonHDF5.regularize_dets(raw)
+def data()->smf.PhotonData:
+    raw = smf.photonHDF5.load('HP3_TE300_SPC630.hdf5')
+    data = smf.photonHDF5.regularize_dets(raw)
     return data

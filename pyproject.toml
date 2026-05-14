@@ -7,7 +7,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "fretbursts"
+name = "smfbursts"
 dynamic = ["version", ]
 authors = [
     {name="Antonio Ingargiola", email="tritemio@gmail.com"}, 
@@ -37,17 +37,16 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "http://opensmfs.github.io/FRETBursts/"
-Documentation = "https://fretbursts.readthedocs.io/en/latest/"
-Issues = "https://github.com/OpenSMFS/FRETBursts/"
-Repository = "https://github.com/OpenSMFS/FRETBursts/issues"
+Homepage = "http://opensmfs.github.io/smfBursts/"
+Documentation = "https://smfbursts.readthedocs.io/en/latest/"
+Issues = "https://github.com/OpenSMFS/smfBursts/"
+Repository = "https://github.com/OpenSMFS/smfBursts/issues"
 
 [project.optional-dependencies]
 scientific = ["jupyter", "matplotlib>=3.0.1"]
-gui = ["matplotlib>=3.0.1", "PyQt5"]
 
 [tool.setuptools.packages.find]
-include = ['fretbursts*']
+include = ['smfbursts*']
 
 [tool.setuptools.package-data]
-fretbursts = ["fretbursts/cfuncs"]
+smfbursts = ["smfbursts/cfuncs"]

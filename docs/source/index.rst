@@ -1,7 +1,7 @@
-FRETBursts
+smfBursts
 ==========
 
-FRETBursts is an open source library for analyzing freely diffusing confocal single molecule fluorescence spectroscopy data.
+smfBursts is an open source library for analyzing freely diffusing confocal single molecule fluorescence spectroscopy data.
 It seeks to implement the state of the art algorithms in a transparent, simiple and reproducible manner.
 
 Core Benefits
@@ -10,7 +10,7 @@ Core Benefits
 Broad Support
 *************
 
-FRETBursts is able to handle most excitaiton and detection schemes,
+smfBursts is able to handle most excitaiton and detection schemes,
 from single excitation, ALEX_, PIE_ (aka nsALEX_), MFD_ and `3-color`_ schemes.
 
 Further more, various methods, from stanard E/S ratio based analysis, mean lifetime, and BVA_ are
@@ -19,10 +19,10 @@ fully supported without need of writing custom functions.
 Citations
 *********
 
-Importantly FRETBursts provides simple ways of obtaining a full description of all parameters and steps used in data analysis.
+Importantly smfBursts provides simple ways of obtaining a full description of all parameters and steps used in data analysis.
 This allows for supplementary material to describe without code the exact data analysis parameters used.
 
-Additionally the :func:`fretbursts.cite.citations.get_citations` function provides an easy way to obtain
+Additionally the :func:`smfbursts.cite.citations.get_citations` function provides an easy way to obtain
 citations for each method used in the current environment.
 
 
@@ -41,6 +41,7 @@ Contents
     :caption: Contents:
 
     Introduction
+    Tutorials
     UserGuides
     Documentation
     release

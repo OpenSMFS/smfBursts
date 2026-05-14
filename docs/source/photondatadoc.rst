@@ -1,5 +1,5 @@
 Photon Data
 -----------
 
-.. automodule:: fretbursts.photondata
+.. automodule:: smfbursts.photondata
     :members:

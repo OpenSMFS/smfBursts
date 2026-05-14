@@ -1,5 +1,5 @@
 Tables module
 -------------
 
-.. automodule:: fretbursts.datamodel.tables
+.. automodule:: smfbursts.datamodel.tables
     :members:

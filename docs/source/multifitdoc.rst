@@ -1,5 +1,5 @@
 MultFit Module
 ==============
 
-.. automodule:: fretbursts.datamodel.multifit
+.. automodule:: smfbursts.datamodel.multifit
     :members:

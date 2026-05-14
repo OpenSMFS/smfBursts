@@ -1,5 +1,5 @@
 Citations module
 ----------------
 
-.. automodule:: fretbursts.cite.citations
+.. automodule:: smfbursts.cite.citations
     :members:

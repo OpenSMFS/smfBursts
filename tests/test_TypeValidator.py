@@ -10,8 +10,8 @@ import re
 import numpy as np
 import tables as tb
 
-from fretbursts.datamodel.utils import tupledict, arr_slc
-from fretbursts.datamodel.immutabledata import (
+from smfbursts.datamodel.utils import tupledict, arr_slc
+from smfbursts.datamodel.immutabledata import (
     TypeValidator, TV_int, TV_float, TV_bool, TV_bytes, TV_str, TV_attrstr, TV_attrstr_allow_empty, 
     TV_type, TV_typewithnodename, TV_dtype, TV_ndarray, TV_tuple, TV_frozenset, 
     TV_tupledict, TV_PyCode, attr_regex, _echo

@@ -16,4 +16,5 @@ The ``datamodel`` sub-module
     :maxdepth: 1
 
     utilitydoc
+    diskdictdoc
     immutabledatadoc

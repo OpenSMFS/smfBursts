@@ -1,5 +1,5 @@
 Photon HDF5 files
 -----------------
 
-.. automodule:: fretbursts.photonHDF5
+.. automodule:: smfbursts.photonHDF5
     :members:

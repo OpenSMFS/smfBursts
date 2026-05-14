@@ -1,5 +1,5 @@
 Immutable Data
 --------------
 
-.. automodule:: fretbursts.datamodel.immutabledata
+.. automodule:: smfbursts.datamodel.immutabledata
     :members:
