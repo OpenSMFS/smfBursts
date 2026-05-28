@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <math.h>
 
-#include "fretbursts_burstwise.h"
+#include "smfbursts_burstwise.h"
 
 int make_bursts(Bursts *bursts, int64_t n, int64_t starts[], int64_t stops[]){
 	if (bursts->size < n){

@@ -913,7 +913,7 @@ def union_multi(*args:Number|np.ndarray)->np.ndarray:
 
     Parameters
     ----------
-    *args : Union[number, np.ndarray]
+    *args : number | np.ndarray
         Number or array to create union of.
 
     Returns
@@ -1368,6 +1368,9 @@ class _GroupFuture:
             self._callback = list() if callback is None else [callback,]
         elif isinstance(group, tb.Group) and callback is not None:
             callback(self, group)
+            self._callback = list()
+        else:
+            self._callback = list()
 
     @classmethod
     def create_dependant(cls, group:None|Callable[[],tb.Group]|tb.Group, parent:"_GroupFuture", 
@@ -1377,7 +1380,7 @@ class _GroupFuture:
 
         Parameters
         ----------
-        group : None|Callable[[],tb.Group]|tb.Group
+        group : None | Callable[[],tb.Group] | tb.Group
             Group or Callable creating group.
         parent : _GroupFuture
             GroupFuture on which new future will be dependant.
@@ -1399,9 +1402,12 @@ class _GroupFuture:
         else:
             obj._groupfuture = cls._check_groupfuture(group)
         if callable(obj._groupfuture):
-            obj._callback = callback = list() if callback is None else [callback, ]
+            obj._callback = list() if callback is None else [callback, ]
         elif isinstance(obj._groupfuture, tb.Group) and callback is not None:
             callback(obj)
+            obj._callback = list()
+        else:
+            obj._callback = list()
         return obj
 
     @classmethod
@@ -1413,7 +1419,7 @@ class _GroupFuture:
         if groupfuture is None or callable(groupfuture) or isinstance(groupfuture, tb.Group):
             return groupfuture
         raise TypeError(f"invalid type ({type(groupfuture).__name__} for group future)")
-    
+
     @classmethod
     def _check_filefuture(cls, filefuture:None|tb.File)->None|tb.File:
         """Internal function to ensure filefuture argument is valid filefuture"""
@@ -1430,7 +1436,7 @@ class _GroupFuture:
             self._groupfuture = None
         if self._filefuture is not None and not self._filefuture.isopen:
             self._groupfuture = None
-        
+
     def _create(self)->tb.Group:
         """
         If hdf5 group has not already been created, create it, then return HDF5 Group.
@@ -1449,7 +1455,7 @@ class _GroupFuture:
             if not isinstance(group, tb.Group):
                 self._groupfuture = None
                 self._parent = None
-                raise TypeError("callable returned wrong type, must create a table Group")
+                raise TypeError(f"callable returned wrong type, must create a table Group, got {type(group).__name__}")
             if self._filefuture is not None and self._filefuture != group._v_file:
                 warnings.warn("File created different from expected")
             self._filefuture = group._v_file
@@ -1502,7 +1508,7 @@ class _GroupFuture:
         self._verify_exists()
         if isinstance(self._groupfuture, tb.Group):
             return getattr(self._groupfuture, attr)
-        raise AttributeError(f"non-created group has not attribute {attr}")
+        raise AttributeError(f"non-created group has no attribute {attr}")
 
     def __getitem__(self, key):
         self._verify_exists()
@@ -1566,7 +1572,7 @@ class _GroupFuture:
             return self._group._v_file.create_carray(self._group, name, obj=val, **kwargs)
         if arrtp == 'e':
             return self._group._v_file.create_earray(self._group, name, obj=val, **kwargs)
-    
+
     def _create_groupfuture(self, name:str, postinit:Callable[[tb.Group],None]=None, **kwargs)->"_GroupFuture":
         """
         Create a _GroupFuture under current group.
@@ -1592,7 +1598,7 @@ class _GroupFuture:
         if name in self:
             return _GroupFuture.create_dependant(self[name], self)
         # function for creating group
-        def create_group():
+        def create_group()->tb.Group:
             group = self[name] if name in self else self._create_group(name, **kwargs)
             if postinit is not None:
                 postinit(group)
@@ -1632,7 +1638,7 @@ class _GroupFuture:
         if self._created:
             return self._create_array(name, val, **kwargs)
         return lambda : self._create_array(name, val, **kwargs)
-    
+
     def _assign_parent(self, parent:Any)->None:
         """
         Set parent of _GroupFuture.
@@ -1644,7 +1650,7 @@ class _GroupFuture:
 
         """
         self._parent = weakref.ref(parent)
-    
+
     def _add_callback(self, callback:Callable[["_GroupFuture"],None])->None:
         """
         Add function that is called when group is created. 

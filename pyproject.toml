@@ -48,5 +48,7 @@ scientific = ["jupyter", "matplotlib>=3.0.1"]
 [tool.setuptools.packages.find]
 include = ['smfbursts*']
 
+
 [tool.setuptools.package-data]
-smfbursts = ["smfbursts/cfuncs"]
+smfbursts = ["smfbursts/cfuncs",]
+"smfbursts.citations" = ["citations.*", ]

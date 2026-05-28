@@ -1,7 +1,7 @@
 Data Model
 ----------
 
-The ``datamodel`` sub-module 
+The ``datamodel`` sub-module
 
 .. toctree::
     :caption: Main Modules

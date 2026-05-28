@@ -1441,11 +1441,27 @@ def nb_gaus_2dkde(datax:np.ndarray[np.float64], datay:np.ndarray[np.float64],
         Kernel density at each out location.
 
     """
+    if outx.shape[0] != outy.shape[0]:
+        raise ValueError(f"outx and outy must have same shape, got {outx.shape} and {outy.shape}")
+    if datax.shape[0] != datay.shape[0]:
+        raise ValueError(f"datax and datay must have same shape, got {datax.shape} and {datay.shape}")
+    if datax.shape[0] != weights.shape[0]:
+        raise ValueError(f"datax and weights must have same shape, got {datax.shape} and {weights.shape}")
+    if datax.shape[0] != sigmax.shape[0]:
+        raise ValueError(f"datax and datay must have same shape, got {datax.shape} and {sigmax.shape}")
+    if datax.shape[0] != sigmay.shape[0]:
+        raise ValueError(f"datax and datay must have same shape, got {datax.shape} and {sigmay.shape}")
+    if datax.shape[0] != rho.shape[0]:
+        raise ValueError(f"datax and datay must have same shape, got {datax.shape} and {rho.shape}")
     val = np.zeros(outx.shape, dtype=np.float64)
     for i in range(outx.shape[0]):
         for j in range(datax.shape[0]):
+            
             dx, dy = (outx[i]-datax[j])/sigmax[j], (outy[i]-datay[j])/sigmay[j]
-            val[i] += weights[j]*np.exp(-(dx**2-2*rho[j]*dx*dy+dy**2))/(2*np.pi*sigmax[j]*sigmay[j]*np.sqrt(1-rho[j]**2))
+            temp = weights[j]*np.exp(-(dx**2-2*rho[j]*dx*dy+dy**2))/(2*np.pi*sigmax[j]*sigmay[j]*np.sqrt(1-rho[j]**2))
+            if np.isnan(temp):
+                continue
+            val[i] += temp
     return val
 
 

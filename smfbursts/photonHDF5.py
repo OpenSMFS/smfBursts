@@ -23,7 +23,10 @@ from .datamodel.utils import (_DataLike, MutDict, tupledict, make_objectarray,
                          enumerate_intersects, _FileFinalizer, ImDict, _eq, 
                          _GroupFuture, GroupFuture)
 from .datamodel.diskdict import MappedAttrDD, TypedValueDD
-from .photondata import PhSpec, PhotonData, PhotonDataList, TV_pharray_mtch, PhArray, regularize_photon_data
+from .photondata import (
+    PhSpec, PhotonData, PhotonDataList, TV_pharray_mtch, PhArray, 
+    regularize_photon_data
+    )
 from .ph_sel import DetDef, PhSel
 
 
@@ -374,10 +377,6 @@ class PhotonHDF5Data(_DataLike):
         if 'ondisk' not in self:
             self.ondisk = self._file is not None and self._file.isopen
 
-    def _finalize(self):
-        """Release file from tracking (will close if file is not tracked by other objects)"""
-        self._finalizer.finalize_owner(weakref.ref(self))
-
     @classmethod
     def _load_hdf5(cls, file:tb.File, ondisk:bool=False, track:bool=True, strict:bool=True)->"PhotonHDF5Data":
         """Internal loader of HDF5 file, once settings have been determined"""
@@ -495,6 +494,7 @@ class PhotonHDF5Data(_DataLike):
             raise TypeError("file must be  tables.File object")
         if self._track:
             self._finalizer = _FileFinalizer(file, self)
+        self._file = file
 
     @property
     def n_ch(self)->int:
@@ -575,6 +575,7 @@ class PhotonHDF5Data(_DataLike):
         if np.all(offsets == 0):
             return self.photon_data[channel].nanos
         dets, nanos = self.photon_data[channel].dets, self.photon_data[channel].nanos[:].copy()
+        offsets = offsets.astype(nanos.dtype) # ensure -= will work properly, no incompatible type errors
         for i, offset in zip(ids, offsets):
             nanos[dets == i] -= offset
         return nanos
@@ -652,7 +653,7 @@ class PhotonHDF5Data(_DataLike):
         if self.file is None:
             self.file = out
         return out
-    
+
     def close(self, strict=False)->None:
         """
         Close the file to which the object is attached.
@@ -668,7 +669,8 @@ class PhotonHDF5Data(_DataLike):
             The default is False.
 
         """
-        self._finalizer.finalize_owner(weakref.ref(self), strict=strict)
+        if self._finalizer is not None:
+            self._finalizer.finalize_owner(weakref.ref(self), strict=strict)
 
 
 def _sort_tcspc_param(i:int, pd:PhGroupRaw, setup:SetupSpec, name:str,
@@ -833,7 +835,10 @@ def regularize_dets(raw:PhotonHDF5Data, alex_type:str=None, autosave:bool=False,
         setup = PhSpec(detdef=detdef, **sdict)
         skwargs = dict(em_dets=em_dets, pol_dets=pol_dets, split_dets=split_dets)
         if hasattr(pd, 'nanos'):
-            skwargs['nanos'] = pd.nanos
+            if 'tcspc_offset' in raw_setup.get('detectors', {}):
+                skwargs['nanos'] = raw.get_offset_nanos(i)
+            else:
+                skwargs['nanos'] = pd.nanos
         if hasattr(pd, 'particles'):
             skwargs['particles'] = pd.nanos
         pharrays.append(regularize_photon_data(setup, pd.times, pd.dets, **skwargs))

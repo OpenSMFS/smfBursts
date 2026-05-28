@@ -13,14 +13,15 @@ its subclasses can either store data in memory or in a HDF5 file.
 
 This is useful for optimizing memory usage, as well as saving data and reopening.
 """
-from typing import ClassVar, Union, Any
+from typing import ClassVar, Any, Literal
 from collections.abc import Callable, Hashable, Iterator
 from abc import ABC, abstractmethod
+import warnings
 
 import numpy as np
 import tables as tb
 
-from .utils import FixedDict, ImDict, _GroupFuture, GroupFuture, GroupArg, _masked_iter
+from .utils import FixedDict, ImDict, _GroupFuture, GroupFuture, GroupArg, _masked_iter, _eq
 from .immutabledata import TypeValidator
 
 
@@ -30,7 +31,7 @@ def _iterrows(node:tb.Array)->np.ndarray:
         yield node[i]
 
 class DiskDict:
-    """
+    r"""
     Base class for group of objects that mimic behavior of dictionaries,
     though with fixed types of keys and controled types of values, that can be stored
     in HDF5 files.
@@ -46,6 +47,20 @@ class DiskDict:
         to HDF5 file. May also be callable that when called with no arguments
         returns a boolean indicating if autosave is active or not.
         The default is False.
+    save_conflict_policy : {'error', 'check', 'warn', 'pass'}
+        How to deal with keys that are in both the input dictionary and already
+        created in the HDF5 group.
+        Options are\:
+        
+        - "pass" (default) if key is present in HDF5 group and input dictionary,
+          use the value of the HDF5 group, regardless of differences
+        - "warn" if key is present in HDF5 group and input dictionary,
+          use the value of the HDF5 group, and raise warning if the values are
+          different
+        - "check" if key is present in HDF5 group and input dictionary,
+          values are checked, if they are not identical, raise an error
+        - 'error' raise an error automatically if key is present in both HDF5
+          group an input dictionary
     """
     _dict_types:ClassVar[FixedDict[str,type]] = FixedDict()
     _freeze:ClassVar[bool] = False
@@ -58,8 +73,9 @@ class DiskDict:
     def __init_subclass__(cls):
         TypeValidator.register_groupclass('DiskDict', cls.__name__, cls)
         
-    def __init__(self, dct:Union[dict,None]=None, group:GroupFuture=None, 
-                 autosave:bool|Callable[[],bool]=False):
+    def __init__(self, dct:dict|None=None, group:GroupFuture=None, 
+                 autosave:bool|Callable[[],bool]=False, 
+                 save_conflict_policy:Literal['error','check','warn','pass']='check'):
         if group is not None and not isinstance(group, (tb.Group, Callable, _GroupFuture)):
             raise TypeError("group must be GroupFuture subtype (None, tables.Group, Callable[[],tables.Group], _GroupFuture)")
         if dct is not None and not isinstance(dct, dict):
@@ -71,6 +87,16 @@ class DiskDict:
         self._autosave = autosave
         self._frozen = False
         for key, val in dct.items():
+            if key in self:
+                if save_conflict_policy in ('check', 'warn'):
+                    if not _eq(self[key], val):
+                        if save_conflict_policy == 'check':
+                            raise ValueError(f"Saved value and given value of {key} are not-identical")
+                        else:
+                            warnings.warn(f"Saved value and given value of {key} are not-identical")
+                elif save_conflict_policy == 'error':
+                    raise ValueError(f"Key {key} already saved in HDF5 group")
+                continue
             self[key] = val
         self._frozen = self._freeze
     
@@ -142,7 +168,7 @@ class DiskDict:
         """Internal method to write value to nodename (already converted) to group"""
         return TypeValidator.write_any(group, nodename, value)
 
-    def _write_item(self, key:Hashable, value:Any, group:Union[tb.Group,None]=None)->None:
+    def _write_item(self, key:Hashable, value:Any, group:tb.Group|None=None)->None:
         """Internal command to write a particular item, based on (non-converted) key"""
         group = self._group._group if group is None else group
         if group is None:
@@ -251,7 +277,7 @@ class DiskDict:
             return getattr(self.group[key], prop)
 
     @property
-    def file(self)->Union[tb.File,None]:
+    def file(self)->None|tb.File:
         """
         tables File object representing the file the DiskDict is attached to,
         None if no file is set
@@ -259,12 +285,14 @@ class DiskDict:
         return self._group._filefuture
 
     @property
-    def group(self)->Union[tb.Group,None]:
+    def group(self)->None|tb.Group:
         """
         table Group in which all values of DiskDict are saved, None if no group
         is set
         """
-        return self._group._group
+        if self._group._creatable:
+            return self._group._group
+        return None
 
     @group.setter
     def group(self, group:tb.Group):

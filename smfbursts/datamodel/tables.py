@@ -63,13 +63,15 @@ Finally, values can be filtered/gated with :class:`GateGroup` objects, which
 rely on :class:`Gate` objects to define gate functions, that :class:`GateGroup`
 objects combine with logical operations.
 
+
+.. |DiskDict| replace:: :class:`smfbursts.datamodel.disckdict.DiskDict`
 """
 from itertools import chain, product, permutations
 from collections import Counter
 from collections.abc import Callable, Sequence, Hashable, Iterator
 import weakref
 from weakref import WeakValueDictionary as WVD
-from typing import ClassVar, Any, Union
+from typing import ClassVar, Any, Union, Literal
 import warnings
 import inspect
 import re
@@ -127,7 +129,7 @@ class ParamDef(_ImDataLike):
         Whether the parameter must be present, default is True.
     default : Hashable, optional
         Default value given to parameter, default is None.
-    append_params : Callable, optional
+    append_params : Callable[[dict], tuple[ParamDef,...]], optional
         Fuction that returns tuple of ParamDefs to be added to param_defs based 
         on value of given param. 
     unit : str, optional
@@ -1245,7 +1247,8 @@ class Column(_ImData):
                 kwargs['fill'] = fill
         if 'remap' in coldef:
             if coldef.reg_func:
-                kwargs['keytup'] = getattr(kwargs['source_param'].tp, coldef.reg_func)(*kwargs['keytup'])
+                reg_func = getattr(kwargs['source_param'].tp, coldef.reg_func)
+                kwargs['keytup'] = reg_func(kwargs['source_param'], *kwargs['keytup'])
             args = tuple(kwargs[k] for k in ('col', 'keytup', 'offset', 'fill') if k in kwargs)
             remapped = getattr(kwargs['source_param'].tp, coldef.remap)(*args)
             ukwargs = kwarg_like(cls.__slots__[1:], remapped)
@@ -1253,7 +1256,8 @@ class Column(_ImData):
                              if key not in cls._hashskip or key not in kwargs}) # skip user set names
             coldef = kwargs['source_param'].tp._get_columndef(kwargs['col'])
         if coldef.reg_func:
-            kwargs['keytup'] = getattr(kwargs['source_param'].tp, coldef.reg_func)(*kwargs['keytup'])
+            reg_func = getattr(kwargs['source_param'].tp, coldef.reg_func)
+            kwargs['keytup'] = reg_func(kwargs['source_param'], *kwargs['keytup'])
         kwargs.update(kwargs['source_param'].tp._regularize_column_kwargs(**{k:v for k, v 
                                                                             in kwargs.items() 
                                                                             if k not in cls._hashskip}))
@@ -2871,7 +2875,7 @@ class CacheID:
 
 
 class DataSet:
-    """
+    r"""
     Semi-abstract base class designed to hold the underlying data from which 
     :class:`Table` classes compute their columns and values.
     
@@ -2894,6 +2898,23 @@ class DataSet:
         If True, then group is created within group with name "groupname", 
         if number, then data saved in subgroup with name "groupname[group_no]"
         if False, data saved directly in group. The default is 1.
+    meta_conflict_policy : {'check', 'warn', 'pass', 'error'}
+        How to handle saved meta-diskdict keys already present in the saved
+        HDF5 group. This is passed to the init of |DiskDict| ``save_conflict_policy``
+        keyword argument of the meta dictionary.
+        Options are\:
+        
+        - "pass" (default) if key is present in HDF5 group and input dictionary,
+          use the value of the HDF5 group, regardless of differences
+        - "warn" if key is present in HDF5 group and input dictionary,
+          use the value of the HDF5 group, and raise warning if the values are
+          different
+        - "check" if key is present in HDF5 group and input dictionary,
+          values are checked, if they are not identical, raise an error
+        - 'error' raise an error automatically if key is present in both HDF5
+          group an input dictionary
+        
+        The default is 'pass'.
     **kwargs : Any
         Additinal arguments passed to __init_data__ (subclass dependant)
     """
@@ -2911,7 +2932,8 @@ class DataSet:
     _finalizers: WVD #: WeakValueDictionary of all files tracking files
 
     def __init__(self, group:GroupFuture=None, autosave:bool=False, meta:dict=None, 
-                 track:bool=True, file:tb.File=None, group_no:int|bool=1, **kwargs):
+                 track:bool=True, file:tb.File=None, group_no:int|bool=1, 
+                 meta_conflict_policy:Literal['error','check','warn','pass']='pass', **kwargs):
         self._autosave = bool(autosave)
         self._track = bool(track)
         if file is not None and not isinstance(file, tb.File):
@@ -2929,7 +2951,7 @@ class DataSet:
         self._tables = dict()
         self._gates = dict()
         self._gategroups = dict()
-        self._meta = DiskDict(meta, self._get_meta_group, self.autosave)
+        self._meta = DiskDict(meta, self._get_meta_group(), self.autosave, meta_conflict_policy)
         self._array_cache = weakref.WeakValueDictionary()
         self.__init_data__(**kwargs)
 
@@ -3091,7 +3113,7 @@ class DataSet:
         self._autosave = bool(val)
 
     def _get_autosave(self)->bool:
-        """Callable version for use with DiskDict autosave"""
+        """Callable version for use with |DiskDict| autosave"""
         return self._autosave
 
     def _track_callback(self, group:_GroupFuture)->None:
@@ -3236,8 +3258,7 @@ class DataSet:
         if not isinstance(group, tb.Group):
             raise TypeError("Can only load tables.Group objects")
         return [self.load_table(g, overwrite=overwrite).param for g in 
-                group._file.iter_nodes(group) if g._v_name.startswith('TABLE')]
-                
+                group._f_iter_nodes() if g._v_name.startswith('TABLE')]
 
     def get_table(self, param:Param, gate:GateGroup=None)->"Table":
         """
@@ -4499,12 +4520,6 @@ class TableConstructionError(ValueError):
     pass
 
 
-###############################################################################
-##### String handling functions to help with creating table descriptions  #####
-###############################################################################
-
-
-###############################################################################
 class TableLike(type):
     """Metaclass to ideintify a table that can be created (not partial)"""
     def __subclasscheck__(self, subclass):
@@ -4832,7 +4847,7 @@ class Table:
     def _regularize_column_kwargs(cls, **kwargs)->dict[str,Any]:
         """
         Called before column is instantiated, primarily used to convert types
-        in keytupto cannonical form and preventing disallowed keys.
+        in keytup to cannonical form and preventing disallowed keys.
         
         Takes source_param, col, ketup, offset, and fill as kwargs, returns
         dictionary with components adjusted accordingly.
@@ -4933,7 +4948,7 @@ class Table:
             keys = (keys, )
         coldef, keys = self._get_columndef(keys[0]), keys[1:]
         if coldef.reg_func:
-            keys = getattr(self, coldef.reg_func)(*keys)
+            keys = getattr(self, coldef.reg_func)(self.param, *keys)
         offset_fill = len(keys) - coldef.keylen
         keytup = keys,
         # case of column with same size as table
@@ -4970,7 +4985,7 @@ class Table:
             new_keys = getattr(self.param.tp, coldef.remap)(coldef.name, *keytup)
             return self._get_keys((new_keys[0],)+new_keys[1]+new_keys[2:])
         if coldef.reg_func:
-            keytup = (getattr(self, coldef.reg_func)(*keytup[0]),) + keytup[1:]
+            keytup = (getattr(self, coldef.reg_func)(self.param, *keytup[0]),) + keytup[1:]
         keytup = (coldef, ) + keytup + (None,)*(3-len(keytup))
         return keytup
 

@@ -260,7 +260,7 @@ class TypeValidator(_ImDataLike):
         val : Any
             Value to check/convert into hashable writable type.
         predata : TYPE, optional
-            Additional argumetns to pass to :meth:`TypeValidator.check_val`. The default is None.
+            Additional arguments to pass to :meth:`TypeValidator.check_val`. The default is None.
         type_ : TYPE, optional
             DESCRIPTION. The default is None.
             

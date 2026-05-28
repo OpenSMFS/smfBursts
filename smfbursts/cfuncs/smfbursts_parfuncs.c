@@ -9,7 +9,7 @@
 #include <windows.h>
 #endif
 
-#include "fretbursts_burstwise.h"
+#include "smfbursts_burstwise.h"
 
 
 static inline int64_t get_next_comp(PoolMutex *pool){

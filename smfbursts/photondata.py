@@ -9,6 +9,10 @@ for smfBursts.
 This incldudes the primary class definitions for the handling of 
 stream sorted photon data, 
 and the various attributes and tables that can be defined thereof.
+
+.. |TypeValidator| replace:: :class:`TypeValidator <smfbursts.datamodel.immutabledata.TypeValidator>`
+.. |DiskDict| replace:: :class:`smfbursts.datamodel.diskdict.DiskDict`
+.. |DataSet| replace:: :class:`smfbursts.datamodel.tables.DataSet`
 """
 from typing import Union, Any, ClassVar, Literal
 from collections.abc import Sequence, Iterator, Hashable, Callable
@@ -30,7 +34,7 @@ from .datamodel.immutabledata import (
 from .ph_sel import DetDef, PhSel, TV_DetDef, ChannelSet, _csall, phsel_all
 from .datamodel.diskdict import AttrDD, TypedValueDD, SubDiskDict
 from .datamodel.tables import (
-    TableLike, BaseTable, ChildTable, DataSet, DataSetList,
+    TableLike, BaseTable, ChildTable, DataSet, DataSetList, TableConstructionError,
     paramproperty, Param, ColumnDef, Column, Gate, GateGroup, GroupFuture
     )
 from .cite import cite
@@ -205,7 +209,7 @@ TV_pharray_mtch = TV_ndarray(dims=arr_slc[:], data_proc=_proc_size)
 
 class PhArray(AttrDD, TypedValueDD):
     """
-    DiskDict of data from single photon counting measurement.
+    |DiskDict| of data from single photon counting measurement.
     All keys can be accessed as attrs.
     
     Parameters
@@ -336,11 +340,13 @@ def _apply_mask(mask:np.ndarray[np.bool_], *args:np.ndarray)->tuple[np.ndarray,.
 def regularize_photon_data(setup:PhSpec,
                           times:np.ndarray[np.int64]|tb.Node,
                           dets:np.ndarray[np.uint8]|tb.Node,
-                          nanos:tuple[np.ndarray[np.uint16]]|tb.Node|None=None,
-                          particles:tuple[np.ndarray[np.uint8]]|tb.Node|None=None,
+                          nanos:np.ndarray[np.uint16]|tb.Node|None=None,
+                          particles:np.ndarray[np.uint8]|tb.Node|None=None,
                           em_dets:tuple[np.ndarray[np.uint8],...]=None,
                           pol_dets:tuple[np.ndarray[np.uint8],...]=None,
                           split_dets:tuple[np.ndarray[np.uint8]]=None,
+                          det_ids:np.ndarray[np.uint8]=None,
+                          tcspc_offsets:np.ndarray[np.uint16]=None,
                           sort:bool=True, group:GroupFuture=None)->PhArray:
     """
     Sort raw photon data into defined streams, and return pharray.
@@ -350,7 +356,7 @@ def regularize_photon_data(setup:PhSpec,
     
     This ensures that the streams are assigned consistent with the conventions
     used in smfBursts. The returned DetDef object should either be used in the
-    StreamSpec passed to the DataSet, or compared with other DetDefs from other
+    StreamSpec passed to the |DataSet|, or compared with other DetDefs from other
     excitation spots to ensure the are identical
 
     Parameters
@@ -363,7 +369,7 @@ def regularize_photon_data(setup:PhSpec,
         Array of detector indexes photons.
     nanos : tuple[np.ndarray[np.uint16]]|tb.Node|None, optional
         If present, array of nanotimes for photons. The default is None.
-    particles : tuple[np.ndarray[np.uint8]]|tb.Node|None, optional
+    particles : np.ndarray[np.uint8]|tb.Node|None, optional
         If present (only when using simulated data) particle index for photons. 
         The default is None.
     em_dets : tuple[np.ndarray[np.uint8]], optional
@@ -375,6 +381,10 @@ def regularize_photon_data(setup:PhSpec,
     split_dets : tuple[np.ndarray[np.uint8]], optional
         tuple of arrays, each array is the detectors that belong to a single
         split index. The default is None.
+    det_ids : np.ndarray[np.uint8], optional
+        Array of detector IDs, used to map id to offset.
+    tcspc_offsets : np.ndarray[np.uint16], optional
+        Map of raw detector-id to tcspc offset to apply to detector.
     sort : bool, optional
         Whether or not to ensure times are monotonic. Should only be set to False
         if it is already **guaranteed** that time is monotonically increasing.
@@ -407,6 +417,10 @@ def regularize_photon_data(setup:PhSpec,
         ex_ranges = setup.ex_ranges
         if nanos is not None:
             # uses nsALEX
+            if tcspc_offsets is not None:
+                if det_ids is None:
+                    raise ValueError("must supply det_ids to offset nanos")
+                nanos = _apply_offset(nanos[:], dets[:], det_ids, tcspc_offsets)
             odets, mask = _sort_ex(nanos[:], ex_ranges)
         else:
             # uses usALEX
@@ -511,6 +525,7 @@ def get_phsel_range_size(setup:PhSpec, phsel:PhSel)->int:
     res = get_phsel_ex_range(setup, phsel)
     return res[1] - res[0]
 
+
 def _pol_names(angle:float)->str:
     """
     Get long name of polarization angle, parallel if 0, perpendicular if 90.0
@@ -535,8 +550,8 @@ class MutTracked(metaclass=_MutTracked):
 
 
 class PhotonData(DataSet):
-    """
-    :class:`smfbursts.datamodel.tables.DataSet` for PhotonData
+    r"""
+    |DataSet| for PhotonData
     
     Parameters
     ----------
@@ -568,6 +583,23 @@ class PhotonData(DataSet):
     ref : PhotonHDF5Data, optional
         Original data, used to determine if data was modified after loading. 
         The default is None.
+    meta_conflict_policy : {'check', 'warn', 'pass', 'error'}
+        How to handle saved meta-diskdict keys already present in the saved
+        HDF5 group. This is passed to the init of |DiskDict| ``save_conflict_policy``
+        keyword argument of the meta dictionary.
+        Options are\:
+        
+        - "pass" (default) if key is present in HDF5 group and input dictionary,
+          use the value of the HDF5 group, regardless of differences
+        - "warn" if key is present in HDF5 group and input dictionary,
+          use the value of the HDF5 group, and raise warning if the values are
+          different
+        - "check" if key is present in HDF5 group and input dictionary,
+          values are checked, if they are not identical, raise an error
+        - 'error' raise an error automatically if key is present in both HDF5
+          group an input dictionary
+        
+        The default is 'pass'.
     """
     _group_name = 'photon_data'
     
@@ -589,9 +621,11 @@ class PhotonData(DataSet):
     def __init__(self, pharray:None|PhArray=None, group:GroupFuture=None, autosave:bool=False, 
                  irf:dict[PhSel:np.ndarray[np.int64]]=None, irf_thresh:dict[PhSel:int]=None, 
                  meta:dict=None, save_memory:bool=False, track:bool=True, file:tb.File=None,
-                 group_no:int|bool=1, ref:MutTracked=None):
+                 group_no:int|bool=1, ref:MutTracked=None, 
+                 meta_conflict_policy:Literal['check','warn','error','pass']='pass'):
         super().__init__(group, autosave, meta, pharray=pharray, irf=irf, irf_thresh=irf_thresh, 
-                         save_memory=save_memory, track=track, file=file, group_no=group_no, ref=ref)
+                         save_memory=save_memory, track=track, file=file, group_no=group_no, ref=ref,
+                         meta_conflict_policy=meta_conflict_policy)
 
     def __init_data__(self, pharray:None|PhArray=None, 
                     irf:dict[PhSel:np.ndarray[np.int64]]=None, irf_thresh:dict[PhSel:int]=None,
@@ -1171,6 +1205,7 @@ class PhotonDataList(DataSetList):
             File object where data was saved.
 
         """
+        # TODO: change this part of the checking to make sure saving rules are correct, currenlty fails when no previous HDF5 created
         ref = self._datas[0]._ref
         if any(data._ref is None or data._ref != ref for data in self._datas):
             raise ValueError("Inconsistent or deleted raw data, cannot save raw HDF5 data")
@@ -1238,7 +1273,11 @@ def _regularize_ph_sel(val:PhSel|Sequence[PhSel],
     return val
 
 
-def _regularize_column_startstop(*args:Hashable)->tuple[str,str]:
+TV_str_start = TV_str(isin=('start', 'istarttime'))
+TV_str_stop = TV_str(isin=('stop', 'istoptime'))
+
+
+def _regularize_column_startstop(source_param:Param, *args:Hashable)->tuple[str,str]:
     r"""
     Convenience function for column regularization of columns whose keytup
     ends in `starttime, stoptime`. \*args should be the args after other
@@ -1246,17 +1285,29 @@ def _regularize_column_startstop(*args:Hashable)->tuple[str,str]:
     If one or the other is not specified, defaults them to `istarttime` and
     `istoptime`.
     """
-    starttype, stoptype = args[0:1], args[1:2]
-    starttype = starttype[0] if starttype else 'istarttime'
-    stoptype = stoptype[0] if stoptype else 'istoptime'
+    startoptions = source_param._colstarttypes
+    stopoptions = source_param._colstoptypes
+    startdefault = source_param._colstartdefaultstr
+    stopdefault = source_param._colstopdefaultstr
+    ln = len(args)
+    if ln == 2:
+        starttype, stoptype = args if args[0] in startoptions else args[::-1]
+    elif ln == 1:
+        starttype, stoptype = (args[0], stopdefault) if args[0] in startoptions else (startdefault, args[0])
+    elif ln == 0:
+        starttype, stoptype = startdefault, stopdefault
+    else:
+        raise TableConstructionError('Too many args passed to _regularize_column_startstop, this is most likely an incorrectly written reg_func')
     if not isinstance(starttype, str):
-        starttype = 'istarttime' if starttype else 'start'
+        starttype = startoptions[starttype]
     if not isinstance(stoptype, str):
-        starttype = 'istoptime' if starttype else 'stop'
-    if starttype not in ('start', 'istarttime'):
-        raise ValueError("starttype must be 'start' or 'istarttime'")
-    if stoptype not in ('stop', 'istoptime'):
-        raise ValueError("stoptype must be 'stop' or 'istoptime'")
+        stoptype = stopoptions[stoptype]
+    if starttype not in startoptions:
+        err = ', '.join(f"'{opt}'" for opt in startoptions)
+        raise ValueError(f"starttype must be one of [{err}]")
+    if stoptype not in stopoptions:
+        err = ', '.join(f"'{opt}'" for opt in stopoptions)
+        raise ValueError(f"stoptype must be [{err}]")
     return starttype, stoptype
 
 
@@ -1279,7 +1330,6 @@ class PhotonTable:
     on detdef of most basal param.
     
     """
-
     @classmethod
     def _validate_param(cls, param:Param)->None:
         """Validate intercept to ensure all phsel are positive, convert all based on detdef"""
@@ -1382,12 +1432,12 @@ class BasePhotonTableLike(metaclass=TableLike):
 
 class BasePhotonTable(PhotonTable, BaseTable):
     r"""
-    Class for :class:`smfbursts.datamodel.BaseTable` which has a :class:`PhotonData`
+    Class for :class:`smfbursts.datamodel.tables.BaseTable` which has a :class:`PhotonData`
     origin, and defines a set of *monotonically increasing* ranges of times, such
     as bursts. This class provides methods for columns that can be considered
     "universal" for ranges of times within single photon data.
     
-    Ranges of times are defined by ```start`` and ``stop`` columns. Further,
+    Ranges of times are defined by ``start`` and ``stop`` columns. Further,
     the ranges of indexes corresponding to all photons in the :attr:`PhotonData.times`
     are defined by the ``istart`` and ``istop`` columns. *The definition and computation
     of ``start``, ``stop``, ``istart`` and ``istop`` columns is the primary role
@@ -1472,8 +1522,34 @@ class BasePhotonTable(PhotonTable, BaseTable):
     
     """
     _parent_ph_subrange:ClassVar[str] = False
-
+    
     _origin: PhotonData
+    
+    #: |TypeValidator| for start-type column value options for time range columns
+    _colstarttype:ClassVar[TypeValidator] = TV_str_start
+    #: |TypeValidator| for stop-type column value options for time range columns
+    _colstoptype:ClassVar[TypeValidator] = TV_str_stop
+    #: Default value for start-type of time range columns
+    _colstartdefault:ClassVar[str] = 'istarttime'
+    #: Default value for stop-type of time range columns
+    _colstopdefault:ClassVar[str] = 'istoptime'
+    
+    @paramproperty
+    def _colstarttypes(cls, param:Param)->tuple[str,...]:
+        return cls._colstarttype.ckwargs['isin']
+    
+    @paramproperty
+    def _colstoptypes(cls, param:Param)->tuple[str,...]:
+        return cls._colstoptype.ckwargs['isin']
+    
+    @paramproperty
+    def _colstartdefaultstr(cls, param:Param)->str:
+        return cls._colstartdefault
+
+    @paramproperty
+    def _colstopdefaultstr(cls, param:Param)->str:
+        return cls._colstopdefault
+
 
     def _init_new_(self):
         if self.param.detdef != self.origin.detdef:
@@ -1689,9 +1765,9 @@ class BasePhotonTable(PhotonTable, BaseTable):
         return f'${title}$'
 
     @classmethod
-    def _regularizecolumn_brightness(cls, *args):
+    def _regularizecolumn_brightness(cls, source_param:Param, *args):
         """Column regularizetion function for brightness column"""
-        return args[:1] + cls._regularize_column_startstop(*args[1:])
+        return args[:1] + cls._regularize_column_startstop(source_param, *args[1:])
 
     def _get_brightness(self, phsel:PhSel, starttype:ColKeyStart, stoptype:ColKeyStop)->np.ndarray[np.double]:
         """Getter function for brightness column"""
@@ -1705,14 +1781,14 @@ class BasePhotonTable(PhotonTable, BaseTable):
         return f'${title}$'
 
     @classmethod
-    def _regularize_column_startstop(cls, *args):
+    def _regularize_column_startstop(cls, source_param:Param, *args:str)->tuple[str,str]:
         """Sub function for regularizing start/stop times of columns using said keys"""
-        return _regularize_column_startstop()
+        return _regularize_column_startstop(source_param, *args)
 
     @classmethod
-    def _regularizecolumn_middur(cls, *args:str)->tuple[str, str]:
+    def _regularizecolumn_middur(cls, source_param:Param, *args:str)->tuple[str, str]:
         """regularization function for midtime and dur columns"""
-        return cls._regularize_column_startstop(*args)
+        return cls._regularize_column_startstop(source_param, *args)
 
     def _get_dur(self, starttype:ColKeyStart, stoptype:ColKeyStop)->np.ndarray[np.float64]:
         """Getter function for dur column"""
@@ -1731,7 +1807,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
         return f'${title}$'
 
     @classmethod
-    def _regularizecolumn_sep(cls, *args:str)->tuple[str, str]:
+    def _regularizecolumn_sep(cls, source_param:Param, *args:str)->tuple[str, str]:
         """Column regularization function for sep column"""
         if len(args) > 1 and not isinstance(args[-2], str):
             args, post = args[:-2], args[-2:]
@@ -1739,7 +1815,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
             args, post = args[:-1], args[-1:]
         else:
             post = tuple()
-        return cls._regularize_column_startstop(*args) + post
+        return cls._regularize_column_startstop(source_param, *args) + post
 
     def _get_sep(self, starttype:ColKeyStart, stoptype:ColKeyStop)->np.ndarray[np.float64]:
         """Getter function for sep column"""
@@ -1757,7 +1833,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
         return f'${title}$'
 
     @classmethod
-    def _regularizecolumn_max_rate(self, *args)->tuple[PhSel, int]:
+    def _regularizecolumn_max_rate(self, source_param:Param, *args)->tuple[PhSel, int]:
         """Column regularization function for max_rate column"""
         phsel, m = args[0:1], args[1:2]
         phsel = phsel_all if not phsel else phsel[0]
@@ -1781,12 +1857,12 @@ class BasePhotonTable(PhotonTable, BaseTable):
     @classmethod
     def _get_max_rate_title(cls, col:Column, include_unit:bool=True, origin:PhotonData=None)->str:
         """Title getter function for max_rate column"""
-        title = _title_sels(r'peak\: rate _{%d}r' % (col.keytup[1],), origin, col.keytup[0])
+        title = _title_sels(r'peak\: rate _{%d}r' % (col.keytup[1],), origin, col.keytup[0])[0]
         title = _title_unit_append(title, 'cnts s^{-1}', include_unit)
         return f'${title}$'
 
     @classmethod
-    def _regularizecolumn_bva(cls, *args)->tuple[PhSel, int]:
+    def _regularizecolumn_bva(cls, source_param:Param, *args)->tuple[PhSel, int]:
         """Column regularization function for bva column"""
         phsel_num, phsel_dem, n = args[0:1], args[1:2], args[2:3]
         phsel_num = PhSel('0ex0em') if not phsel_num else phsel_num[0]
@@ -1877,7 +1953,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
             yield np.bincount(nanos-mn, minlength=ln)
 
     @classmethod
-    def _regularizecolumn_nanohist(self, *args)->tuple[PhSel, bool]:
+    def _regularizecolumn_nanohist(self, source_param:Param, *args)->tuple[PhSel, bool]:
         """Column regularization function for nanohist column"""
         phsel, fill, err = args[:1], args[1:2], args[2:]
         if err:
@@ -1885,10 +1961,6 @@ class BasePhotonTable(PhotonTable, BaseTable):
         if not fill:
             fill = (False, )
         return phsel + fill
-
-
-TV_str_start = TV_str(isin=('start', 'istarttime'))
-TV_str_stop = TV_str(isin=('stop', 'istoptime'))
 
 
 _basetimecolumndefs = (
@@ -1988,6 +2060,26 @@ class ChildPhotonTable(PhotonTable, ChildTable):
     def detdef(cls, param:Param)->DetDef:
         """DetDef of param, shortcut to access fields about detdef in subclasses"""
         return param.base_param.detdef
+    
+    @paramproperty
+    def _colstarttypes(cls, param:Param)->tuple[str,...]:
+        return param.base_param._colstarttypes
+    
+    @paramproperty
+    def _colstoptypes(cls, param:Param)->tuple[str,...]:
+        return param.base_param._colstoptypes
+    
+    @paramproperty
+    def _colstartdefaultstr(cls, param:Param)->str:
+        return param.base_param._colstartdefaultstr
+    
+    @paramproperty
+    def _colstopdefaultstr(cls, param:Param)->str:
+        return param.base_param._colstopdefaultstr
+    
+    @classmethod
+    def _regularize_column_startstop(cls, source_param:Param, *args)->tuple[str,str]:
+        return _regularize_column_startstop(source_param.base_param, *args)
 
 
 def as_irf(data:PhotonData)->dict[PhSel:np.ndarray[np.int64]]:

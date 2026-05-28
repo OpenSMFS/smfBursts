@@ -13,10 +13,15 @@ which contains the keys "nphbg" and "NphDD_bg", the former is the |Param|
 of background corrected indensities, while the latter is the column for donor
 excitation-donor emission.
 
+
 .. |Param| replace:: :class:`Param <smfbursts.datamodel.tables.Param>`
 .. |Column| replace:: :class:`Column <smfbursts.datamodel.tables.Column>`
 .. |Coparam| replace:: :attr:`Column.origin_param <smfbursts.datamodel.tables.Column.origin_param>`
 .. |Cbparam| replace:: :attr:`Column.base_param <smfbursts.datamodel.tables.Column.base_param>`
+.. |Periods| replace:: :class:`Periods <smfbursts.background.Periods>`
+.. |BG| replace:: :class:`BG <smfbursts.background.BG>`
+.. |NphBG| replace:: `NphBG <smfbursts.bursttables.NphBG>`
+.. |Ratios| replace:: `Ratios <smfbursts.bursttables.Ratios>`
 .. _leastsquare: `scipy.optimize.least_squares <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html>`__
 .. _minimize: `scipy.optimize.minimize <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.minimize.html>`__
 .. _optimizeresult: `OptimizeResult <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.OptimizeResult.html>`__
@@ -57,6 +62,15 @@ def make_bg(data:PhotonDataS, period:float=60.0, tail_min:float=500e-6, func:BGF
             **kwargs)->dict[str:Param|Column]:
     """
     Create dictionary of stardard background analysis |Param| and |Column| s.
+    
+    Keys in output dictionary\:
+    
+    - 'periods' |Param| of type |Periods|
+    - 'bg' |Param| of type |BG|
+    - 'BgDD' |Column| of background rate in DexDem (0ex0em) channel
+    - 'BgDA' |Column| of background rate in DexAem (0ex1em) channel
+    - 'BgAA' |Column| of background rate in AexAem (1ex1em) channel
+    - 'BgAll' |Column| of background rate in Dex + AexAem (0ex_1ex1em) channels
 
     Parameters
     ----------
@@ -123,10 +137,86 @@ def _infer_bg(param:Param)->None|Param:
 
 def make_fret_from_base(base:Param, bg:Param=None, skip:Sequence[str]=None, 
                         nbva:int|Sequence[int]=10, update:dict=None, **kwargs)->dict[str:Param|Column]:
-    """
+    r"""
     Create default set of |Param| and |Column| objects from an initial BasePhotonTable
-    based |Param| .
+    based |Param|.
+    
+    .. _fretfackeys:
 
+    Standard names for keys in fret dictionary\:
+
+    - 'nphbg' |Param| of type |NphBG|, with parent "base" set by ``base`` param, 
+      and parent "bg" set by ``bg`` param (if not specified, this key is skipped)
+    - 'ratios' |Param| of type |Ratios| with 
+    - 'Dur' |Column| of duration of bursts 
+      (uses default start/stop types of input argument ``base``)
+    - 'NphDD_raw' |Column| of raw photon counts in DexDem (0ex0em) channel
+      based on input argument ``base``
+    - 'NphDD_bg' |Column| of background corrected photon counts in DexDem (0ex0em) 
+      channel, based on 'nphbg' key
+      (uses default start/stop types of input argument ``base``)
+    - 'NphDD_c' |Column| of bg and correction factor corrected photon counts in 
+      DexDem (0ex0em) channel, based on 'ratios' key
+      (uses default start/stop types of input argument ``base``)
+    - 'NphDA_raw' |Column| of raw photon counts in DexAem (0ex1em) channel
+      based on input argument ``base``
+    - 'NphDA_bg' |Column| of background corrected photon counts in DexAem (0ex1em) 
+      channel, based on 'nphbg' key
+      (uses default start/stop types of input argument ``base``)
+    - 'NphDA_c' |Column| of bg and correction factor corrected photon counts in 
+      DexAem (0ex1em) channel, based on 'ratios' key
+      (uses default start/stop types of input argument ``base``)
+    - 'NphAA_raw' |Column| of raw photon counts in AexAem (1ex1em) channel
+      based on input argument ``base``
+    - 'NphAA_bg' |Column| of background corrected photon counts in AexAem (1ex1em) 
+      channel, based on 'nphbg' key
+      (uses default start/stop types of input argument ``base``)
+    - 'NphAA_c' |Column| of bg and correction factor corrected photon counts in 
+      AexAem (1ex1em) channel, based on 'ratios' key
+      (uses default start/stop types of input argument ``base``)
+    - 'NphDex_raw' |Column| of raw photon counts in Dex (0ex) channels (donor excitation)
+      based on input argument ``base``
+    - 'NphDex_bg' |Column| of background corrected photon counts in Dex (0ex) 
+      channels (donor excitation), based on 'nphbg' key
+      (uses default start/stop types of input argument ``base``)
+    - 'NphDex_c' |Column| of bg and correction factor corrected photon counts in 
+      Dex (0ex) channels (donor excitation), based on 'nphbg' key
+      (uses default start/stop types of input argument ``base``)
+    - 'NphActive_raw' |Column| of raw photon counts in all active channels 
+      (Dex + AexAem, ie 0ex_1ex1em), not included in single excitation experiments
+      based on input argument ``base``
+    - 'NphActive_bg' |Column| of background corrected photon counts in all active channels
+      based on 'nphbg' key
+      (uses default start/stop types of input argument ``base``)
+    - 'NphActive_c' |Column| of bg and correction factor corrected  photon counts 
+      in all active channels, based on 'ratios' key
+      (uses default start/stop types of input argument ``base``)
+    - 'NphAll_raw' |Column| of raw photon counts in all channels (included non-active)
+      based on input argument ``base``
+    - 'NphAll_bg' |Column| of background corrected photon counts in all channels 
+      (included non-active) based on the 'nphbg' key
+      (uses default start/stop types of input argument ``base``)
+    - 'NphAll_c' |Column| of bg and correction factor corrected photon counts 
+      in all channels (included non-active), based on the 'ratios' key
+      (uses default start/stop types of input argument ``base``)
+    - 'E_raw' |Column| of ratio of raw photon counts between DexAem and Dex
+      (0ex1em and 0ex), based on input argument ``base``
+    - 'E_bg' |Column| of ratio of background corrected photon counts between 
+      DexAem and Dex (0ex1em and 0ex), based on the 'nphbg' key
+      (uses default start/stop types of input argument ``base``)
+    - 'E' |Column| of ratio of bg and correction factor corrected photon counts 
+      between DexAem and Dex (0ex1em and 0ex), based on the 'ratios' key
+      (uses default start/stop types of input argument ``base``)
+    - 'S_raw' |Column| of ratio of raw photon counts between Dex and Dex_AexAem
+      (0ex and 0ex_1ex1em), based on input argument ``base``
+    - 'S_bg' |Column| of ratio of background corrected photon counts between 
+      Dex and Dex_AexAem (0ex and 0ex_1ex1em), based on the 'nphbg' key
+      (uses default start/stop types of input argument ``base``)
+    - 'S' |Column| of ratio of bg and correction factor corrected photon counts 
+      between Dex and Dex_AexAem (0ex and 0ex_1ex1em), based on the 'ratios' key
+      (uses default start/stop types of input argument ``base``)
+    
+    
     Parameters
     ----------
     base : Param
@@ -202,9 +292,16 @@ def make_burst_search(bg:Param|Sequence[Param], m:int|np.ndarray[np.int64]=10,
                       alpha:float=None, delta:float=None, gamma:float=None, beta:float=None, 
                       dir_ex:float=None, lk:float=None, corr_mat:np.ndarray[np.float64]=None,
                       nbva:int|Sequence[int]=None, update:dict=None, **kwargs)->dict[str:Param|Column]:
-    """
+    r"""
     Create a dictionary with standard burst search and background correction
     |Param| s and |Column| s.
+    
+    Key of base param\:
+    
+    - 'bursts'
+    
+    The remaining keys in the dictionary are made by :func:`make_fret_from_base`
+    and therefore the keys are those of fretfackeys_.
 
 
     Parameters
@@ -864,9 +961,10 @@ _raw_ratio_bins = np.linspace(-0.0, 1.0, 51)
 #:
 #: - "scatter" - default kwargs for :func:`smfbursts.datamodel.plot.scatter` when plotting bursts
 #: - "hexbin" - default kwargs for :func:`smfbursts.datamodel.plot.hexbin` when plotting bursts
-#: - "histbar"- default kwargs for :func:`smfbursts.datamodel.plot.hist_bar` when plotting bursts
+#: - "hexbinraw" - default kwargs for :func:`smfbursts.datamodel.plot.hexbin` when plotting bursts with raw, uncorrected values
+#: - "histbar" - default kwargs for :func:`smfbursts.datamodel.plot.hist_bar` when plotting bursts
 #: - "ratio_bins"- default bins for histograms of bg/fully corrected ratiometric burst parameters like E and S
-#: - "ratio_raw_bins"- default bins for histograms of raw corrected ratiometric burst parameters like E_raw and S_raw
+#: - "raw_ratio_bins"- default bins for histograms of raw corrected ratiometric burst parameters like E_raw and S_raw
 #: - "kdeover"- default kwargs to use with :func:`smfbursts.datamodel.plot.hist_kdeoverlay` when plotting bursts
 #: - "streams"- default :class:`smfbursts.ph_sel.PhSel`\s for streams of ALEX parameters
 #: - "stream_labels"- default D/A ex/em names for streams, parallels "streams"
@@ -876,6 +974,8 @@ ALEXdefaults = SequenceDefaults(
     scatter={'s':2.0},
     hexbin={'gridsize':40, 'extent':(-0.2,1.2,-0.2,1.2), 'mincnt':1, 
             'edgecolor':'none', 'linewidth':0.2},
+    hexbinraw={'gridsize':40, 'extent':(0.0,1.0,0.0,1.0), 'mincnt':1, 
+               'edgecolor':'none', 'linewidth':0.2},
     histbar=_histbar_kwargs, 
     ratio_bins=_ratio_bins, 
     raw_ratio_bins=_raw_ratio_bins,
@@ -888,10 +988,21 @@ ALEXdefaults = SequenceDefaults(
 
 
 #: Default PhSel sequences for single excitation measurements
+#: 
+#: Contains the following keys\:
+#: 
+#: - "bursts" - default kwargs for scatter functions of bursts
+#: - "histbar" - default kwargs for :func:`smfbursts.datamodel.plot.hist_bar` when plotting bursts
+#: - "ratio_bins"- default bins for histograms of bg/fully corrected ratiometric burst parameters like E and S
+#: - "raw_ratio_bins"- default bins for histograms of raw corrected ratiometric burst parameters like E_raw and S_raw
+#: - "kdeover"- default kwargs to use with :func:`smfbursts.datamodel.plot.hist_kdeoverlay` when plotting bursts
+#: - "streams"- default :class:`smfbursts.ph_sel.PhSel`\s for streams of ALEX parameters
+#: - "stream_labels"- default D/A ex/em names for streams, parallels "streams"
 MonoExdefaults = SequenceDefaults(
     bursts={'s':2.0},
     histbar=_histbar_kwargs, ratio_bins=_ratio_bins, raw_ratio_bins=_raw_ratio_bins,
     kdeover=_kdehistbar_kwargs,
     streams=(PhSel('all'), PhSel('0em'), PhSel('1em')),
     stream_colors=_base_ALEX_kwargs[:-1], 
+    stream_labels=('All', 'Dem', 'Aem',),
     )

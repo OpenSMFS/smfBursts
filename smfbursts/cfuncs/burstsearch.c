@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <math.h>
 
-#include "fretbursts_burstwise.h"
+#include "smfbursts_burstwise.h"
 
 static inline int Xfree(void *ptr){
 	if (ptr != NULL){ free(ptr); return TRUE;}

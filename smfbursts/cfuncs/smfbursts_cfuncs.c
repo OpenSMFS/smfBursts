@@ -9,10 +9,10 @@
 #include <Python.h>
 #include <numpy/arrayobject.h>
 
-#include "fretbursts_burstwise.h"
+#include "smfbursts_burstwise.h"
 
 
-static PyObject* fretbursts_cfuncs_index_range(PyObject* self, PyObject* args, PyObject* kwargs)
+static PyObject* smfbursts_cfuncs_index_range(PyObject* self, PyObject* args, PyObject* kwargs)
 {
 	// set input argument names
 	char *kwlist[] = {"times", "start", "stop", "prev", NULL};
@@ -54,7 +54,7 @@ static PyObject* fretbursts_cfuncs_index_range(PyObject* self, PyObject* args, P
 	return (PyObject*) out;
 }
 
-static PyObject* fretbursts_cfuncs_index_ranges(PyObject* self, PyObject* args, PyObject* kwargs)
+static PyObject* smfbursts_cfuncs_index_ranges(PyObject* self, PyObject* args, PyObject* kwargs)
 {
 	char *kwlist[] = {"times", "start", "stop", "nonoverlap", NULL};
 	PyObject *pytimes = NULL, *pystarts = NULL, *pystops = NULL;
@@ -123,7 +123,7 @@ static PyObject* fretbursts_cfuncs_index_ranges(PyObject* self, PyObject* args, 
 }
 
 
-static PyObject* fretbursts_cfuncs_burstsearch(PyObject* self, PyObject* args, PyObject* kwargs){
+static PyObject* smfbursts_cfuncs_burstsearch(PyObject* self, PyObject* args, PyObject* kwargs){
 	char *kwlist[] = {"times", "dets", "periods", "bg", "clk_p", "det_ids", "m", "F", "c", "fuse", "bg_is_thresh", "alloc_size", "ncore", NULL};
 	PyObject *pytimes = NULL, *pydets = NULL, *pyperiods = NULL, *pybg = NULL, *pydetids = NULL;
 	int64_t m = 10;
@@ -333,7 +333,7 @@ int converter_listofarrays_int64(PyObject *obj, void *result){
 	return 1;
 }
 
-static PyObject* fretbursts_cfuncs_burstgate(PyObject* self, PyObject* args, PyObject* kwargs){
+static PyObject* smfbursts_cfuncs_burstgate(PyObject* self, PyObject* args, PyObject* kwargs){
 	char *kwlist[] = {"starts", "stops", "truthtable", "starttime", "stoptime", "alloc_size", NULL};
 	PyArrayList startslist, stopslist;
 	startslist.size = 0;
@@ -506,7 +506,7 @@ static PyObject* fretbursts_cfuncs_burstgate(PyObject* self, PyObject* args, PyO
 	return out;
 }
 
-static PyObject* fretbursts_cfuncs_fusebursts(PyObject* self, PyObject* args, PyObject* kwargs){
+static PyObject* smfbursts_cfuncs_fusebursts(PyObject* self, PyObject* args, PyObject* kwargs){
 	char *kwlist[] = {"starts", "stops", "max_sep", NULL};
 	PyObject *pystarts = NULL, *pystops = NULL, *out = NULL;
 	long long max_sep = 0;
@@ -566,7 +566,7 @@ static PyObject* fretbursts_cfuncs_fusebursts(PyObject* self, PyObject* args, Py
 	return out;
 }
 
-static PyObject* fretbursts_cfuncs_maximum_rate(PyObject* self, PyObject* args, PyObject* kwargs){
+static PyObject* smfbursts_cfuncs_maximum_rate(PyObject* self, PyObject* args, PyObject* kwargs){
 	char *kwlist[] = {"times", "dets", "istarts", "istops", "clk_p", "det_ids", "m", "ncore", NULL};
 	PyObject *pytimes = NULL, *pydets = NULL, *pyistarts = NULL, *pyistops = NULL, *pydetids = NULL;
 	int64_t m = 10;
@@ -681,7 +681,7 @@ static PyObject* fretbursts_cfuncs_maximum_rate(PyObject* self, PyObject* args, 
 	return out;
 }
 
-static PyObject* fretbursts_cfuncs_burst_variance_analysis(PyObject* self, PyObject* args, PyObject* kwargs){
+static PyObject* smfbursts_cfuncs_burst_variance_analysis(PyObject* self, PyObject* args, PyObject* kwargs){
 	char *kwlist[] = {"dets", "istarts", "istops", "dets_All", "dets_Sub", "n", "ncore", NULL};
 	PyObject *pydets = NULL, *pyistarts = NULL, *pyistops = NULL, *pydetidAll = NULL, *pydetidSub = NULL;
 	int64_t n = 10;
@@ -742,7 +742,7 @@ static PyObject* fretbursts_cfuncs_burst_variance_analysis(PyObject* self, PyObj
 		}
 	}
 	out = PyArray_ZEROS(1, dims, NPY_DOUBLE, FALSE);
-	double *bvas = (double*) PyArray_DATA(out);
+	double *bvas = (double*) PyArray_DATA((PyArrayObject*) out);
 	// compute BVA
 	if (burst_variance_analysis(n, dets, nbursts, istarts, istops, dsizeAll, dsetAll, dsizeSub, dsetSub, ncore, bvas) ){
 		PyErr_SetString(PyExc_MemoryError, "insufficient memory for threads");
@@ -757,77 +757,9 @@ static PyObject* fretbursts_cfuncs_burst_variance_analysis(PyObject* self, PyObj
 	return out;
 }
 
-static PyObject* fretbursts_cfuncs_kde_photons(PyObject* self, PyObject* args, PyObject* kwargs){
-	char *kwlist[] = {"times", "tau", "locs", "lim", "drop_self", "func", NULL};
-	PyObject *pytimes = NULL, *pylocs = NULL;
-	int drop_self = FALSE, func = 0;
-	double tau, flim = 0.0;
-	double (*kdefuncs[])(int64_t, int64_t, double) = {laplace_kdefunc, gaussian_kdefunc, rect_kdefunc, NULL};
-	if (!PyArg_ParseTupleAndKeywords(args, kwargs, "Od|Odpi:kde_photons", kwlist, &pytimes, &tau, &pylocs, &flim, &drop_self, &func)){
-		return NULL;
-	}
-	if ((func < 0) || (func > 2)){
-		PyErr_SetString(PyExc_ValueError, "func must be 0 (laplace), 1 (gaussian) or 2 (rect)");
-		return NULL;
-	}
-	int64_t lim;
-	switch (func){
-		case 0:
-			lim = (flim == 0.0) ? (int64_t) 5.0*tau : (int64_t) tau*flim;
-			break;
-		case 1:
-			lim = (flim == 0.0) ? (int64_t) 3.0*tau : (int64_t) tau*flim;
-			break;
-		case 2:
-			lim = (int64_t) tau;
-			break;
-	}
-	PyArrayObject* nptimes = (PyArrayObject*) PyArray_FROMANY(pytimes, NPY_INT64, 1, 1, NPY_ARRAY_ENSUREARRAY);
-	if (nptimes == NULL){
-		return NULL;
-	}
-	PyArrayObject* nplocs = (pylocs != NULL) ? (PyArrayObject*) PyArray_FROMANY((PyObject*) nptimes, NPY_INT64, 1, 1, NPY_ARRAY_ENSUREARRAY) : NULL;
-	if ((pylocs != NULL) && (nplocs == NULL)){
-		Py_DECREF(nplocs);
-		return NULL;
-	}
-	npy_intp dims[1] = {(nplocs == NULL) ? PyArray_DIM(nplocs, 0) : PyArray_DIM(nptimes, 0), };
-	PyArrayObject *out = (PyArrayObject*) PyArray_ZEROS(1, dims, NPY_DOUBLE, FALSE);
-	if (out == NULL){
-		goto decrefs;
-	}
-	int64_t tstride = (int64_t) PyArray_STRIDE(nptimes, 0);
-	char *times = (char*) PyArray_DATA(nptimes);
-	int64_t lstride = (nplocs == NULL) ? 0 : (int64_t) PyArray_STRIDE(nplocs, 0);
-	char *locs = (nplocs == NULL) ? NULL :(char*) PyArray_DATA(nplocs);
-	double *dout = (double*) PyArray_DATA(out);
-	int64_t nphot = (int64_t) PyArray_DIM(nptimes, 0);
-	int64_t nloc = (nplocs == NULL) ? 0 : (int64_t) PyArray_DIM(nplocs, 0);
-	// computation of kde
-	if (nplocs == NULL){
-		if (drop_self){
-			kde_self_exclude_zero_np(nphot, tstride, times, tau, lim, kdefuncs[func], dout);
-		}
-		else{
-			kde_self_np(nphot, tstride, times, tau, lim, kdefuncs[func], dout);
-		}
-	}
-	else{
-		if (drop_self){
-			kde_other_exclude_zero_np(nphot, tstride, times, nloc, lstride, locs, tau, lim, kdefuncs[func], dout);
-		}
-		else{
-			kde_other_np(nphot, tstride, times, nloc, lstride, locs, tau, lim, kdefuncs[func], dout);
-		}
-	}
-	decrefs:
-	Py_XDECREF(nptimes);
-	Py_XDECREF(nplocs);
-	return (PyObject*) out;
-}
 
-static inline int pyeval_kde_single(PyObject* func, int64_t tl, int64_t tt, double tau, double* res){
-	PyObject* funcres = PyObject_CallFunction(func, "LLd", tl, tt, tau);
+static inline int pyeval_kde_single(PyObject* pyfunc, int64_t tl, int64_t tt, double tau, double* res){
+	PyObject* funcres = PyObject_CallFunction(pyfunc, "LLd", tl, tt, tau);
 	if (funcres == NULL){
 		return TRUE;
 	}
@@ -836,148 +768,186 @@ static inline int pyeval_kde_single(PyObject* func, int64_t tl, int64_t tt, doub
 	return ((*res == -1.0) && PyErr_Occurred());
 }
 
-static inline int kde_self_npf(npy_intp nphot, npy_intp stride, char* times, double tau, int64_t lim, PyObject* func, double* out){
-	npy_intp ic, ir, itrail=0, ilead = 0;
-	int64_t trail, lead;
+static inline int kde_self_npf(npy_intp nphot, npy_intp stride, char* times, double tau, int64_t lim, PyObject* pyfunc, double* out){
+	npy_intp iloc, iphot, imin = 0, imax = 0;
+	int64_t cloc, tmin, tmax;
 	double kde_val = 0.0;
-	for (ic = 0; ic < nphot; ic++){
-		trail = *(int64_t*)&times[ic*stride] - lim;
-		lead = *(int64_t*)&times[ic*stride] + lim;
-		while ((itrail < nphot) && (*(int64_t*)&times[itrail*stride] < trail)){ itrail++;}
-		while ((ilead < nphot) && (*(int64_t*)&times[ilead*stride] < lead)){ ilead++;}
-		for (ir = itrail; ir < ilead; ir++){
-			if (pyeval_kde_single(func, *(int64_t*)&times[ic*stride], *(int64_t*)&times[ir*stride], tau, &kde_val)){
-				return TRUE;
-			}
-			out[ic] += kde_val;
+	for (iloc = 0; iloc < nphot; iloc++){
+		cloc = *(int64_t*)&times[iloc*stride];
+		tmin = cloc - lim; // get minimum and maximum times of range to compute in KDE
+		tmax = cloc + lim;
+		while ((imin < nphot) && (*(int64_t*)&times[imin*stride] < tmin)){ imin++; } // advance until imin is index in range
+		while ((imax < nphot) && (*(int64_t*)&times[imax*stride] < tmax)){ imax++; } // advance until imax is just out of range
+		for (iphot = imin; iphot < imax; iphot++){
+			if (pyeval_kde_single(pyfunc, *(int64_t*)&times[iloc*stride], *(int64_t*)&times[iphot*stride], tau, &kde_val)){ return TRUE; }
+			out[iloc] += kde_val;
 		}
 	}
 	return FALSE;
 }
 
-static inline int kde_self_exclude_zero_npf(int64_t nphot, int64_t stride, char* times, double tau, int64_t lim, PyObject* func, double* out){
-	int64_t ic, ir, itrail=0, ilead = 0;
-	int64_t trail, lead;
-	double kde_val;
-	for (ic = 0; ic < nphot; ic++){
-		trail = *(int64_t*)&times[ic*stride] - lim;
-		lead = *(int64_t*)&times[ic*stride] + lim;
-		while ((itrail < nphot) && (*(int64_t*)&times[itrail*stride] < trail)){ itrail++;}
-		while ((ilead < nphot) && (*(int64_t*)&times[ilead*stride] < lead)){ ilead++;}
-		for (ir = itrail; ir < ilead; ir++){
-			if (ir == ic){
+static inline int kde_self_exclude_zero_npf(npy_intp nphot, int64_t stride, char* times, double tau, int64_t lim, PyObject* pyfunc, double* out){
+	npy_intp iloc, iphot, imin = 0, imax = 0;
+	int64_t cloc, tmin, tmax;
+	double kde_val = 0.0;
+	for (iloc = 0; iloc < nphot; iloc++){
+		cloc = *(int64_t*)&times[iloc*stride];
+		tmin = cloc - lim; // get minimum and maximum times of range to compute in KDE
+		tmax = cloc + lim;
+		while ((imin < nphot) && (*(int64_t*)&times[imin*stride] < tmin)){ imin++; } // advance until imin is index in range
+		while ((imax < nphot) && (*(int64_t*)&times[imax*stride] < tmax)){ imax++; } // advance until imax is just out of range
+		for (iphot = imin; iphot < imax; iphot++){
+			if (cloc == *(int64_t*)&times[iphot*stride]){ 
 				continue;
 			}
-			if (pyeval_kde_single(func, *(int64_t*)&times[ic*stride], *(int64_t*)&times[ir*stride], tau, &kde_val)){
-				return TRUE;
-			}
-			out[ic] += kde_val;
+			if (pyeval_kde_single(pyfunc, *(int64_t*)&times[iloc*stride], *(int64_t*)&times[iphot*stride], tau, &kde_val)){ return TRUE; }
+			out[iloc] += kde_val;
 		}
 	}
 	return FALSE;
 }
 
-static inline int kde_other_npf(int64_t nphot, int64_t tstride, char* times, int64_t nloc, int64_t lstride, char* locs, double tau, double lim, PyObject* func, double* out){
-	int64_t ic, ir, itrail=0, ilead = 0;
-	int64_t trail, lead;
-	double kde_val;
-	for (ic = 0; ic < nloc; ic++){
-		trail = *(int64_t*)&locs[ic*lstride] - lim;
-		lead = *(int64_t*)&locs[ic*lstride] + lim;
-		while ((itrail < nphot) && (*(int64_t*)&times[itrail*tstride] < trail)){ itrail++;}
-		while ((ilead < nphot) && (*(int64_t*)&times[ilead*tstride] < lead)){ ilead++;}
-		for (ir = itrail; ir < ilead; ir++){
-			if (pyeval_kde_single(func, *(int64_t*)&locs[ic*lstride], *(int64_t*)&times[ir*tstride], tau, &kde_val)){
-				return TRUE;
-			}
-			out[ic] += kde_val;
+static inline int kde_other_npf(const npy_intp nphot, const int64_t tstride, char* times, const int64_t nloc, const int64_t lstride, char* locs, const double tau, int64_t lim, PyObject* pyfunc, double* out){
+	npy_intp iloc, iphot, imin = 0, imax = 0;
+	int64_t cloc, tmin, tmax;
+	double kde_val = 0.0;
+	for (iloc = 0; iloc < nloc; iloc++){
+		cloc = *(int64_t*)&locs[iloc*lstride];
+		tmin = cloc - lim; // get minimum and maximum times of range to compute in KDE
+		tmax = cloc + lim;
+		while ((imin < nphot) && (*(int64_t*)&times[imin*tstride] < tmin)){ imin++; } // advance until imin is index in range
+		while ((imax < nphot) && (*(int64_t*)&times[imax*tstride] < tmax)){ imax++; } // advance until imax is just out of range
+		for (iphot = imin; iphot < imax; iphot++){
+			if (pyeval_kde_single(pyfunc, *(int64_t*)&locs[iloc*lstride], *(int64_t*)&times[iphot*tstride], tau, &kde_val)){ return TRUE; }
+			out[iloc] += kde_val;
 		}
 	}
 	return FALSE;
 }
 
-static inline int kde_other_exclude_zero_npf(int64_t nphot, int64_t tstride, char* times, int64_t nloc, int64_t lstride, char* locs, double tau, double lim, PyObject* func, double* out){
-	int64_t ic, ir, itrail=0, ilead = 0;
-	int64_t trail, lead;
-	double kde_val;
-	for (ic = 0; ic < nloc; ic++){
-		trail = *(int64_t*)&locs[ic*lstride] - lim;
-		lead = *(int64_t*)&locs[ic*lstride] + lim;
-		while ((itrail < nphot) && (*(int64_t*)&times[itrail*tstride] < trail)){ itrail++;}
-		while ((ilead < nphot) && (*(int64_t*)&times[ilead*tstride] < lead)){ ilead++;}
-		for (ir = itrail; ir < ilead; ir++){
-			if (*(int64_t*)&times[ir*tstride] == *(int64_t*)&locs[ic*lstride]){
+static inline int kde_other_exclude_zero_npf(const npy_intp nphot, const int64_t tstride, char* times, const npy_intp nloc, const int64_t lstride, char* locs, const double tau, int64_t lim, PyObject* pyfunc, double* out){
+	npy_intp iloc, iphot, imin = 0, imax = 0;
+	int64_t cloc, tmin, tmax;
+	double kde_val = 0.0;
+	for (iloc = 0; iloc < nloc; iloc++){
+		cloc = *(int64_t*)&locs[iloc*lstride];
+		tmin = cloc - lim; // get minimum and maximum times of range to compute in KDE
+		tmax = cloc + lim;
+		while ((imin < nphot) && (*(int64_t*)&times[imin*tstride] < tmin)){ imin++; } // advance until imin is index in range
+		while ((imax < nphot) && (*(int64_t*)&times[imax*tstride] < tmax)){ imax++; } // advance until imax is just out of range
+		for (iphot = imin; iphot < imax; iphot++){
+			if (cloc == *(int64_t*)&times[iphot*tstride]){ 
 				continue;
 			}
-			if (pyeval_kde_single(func, *(int64_t*)&locs[ic*lstride], *(int64_t*)&times[ir*tstride], tau, &kde_val)){
-				return TRUE;
-			}
-			out[ic] += kde_val;
+			if (pyeval_kde_single(pyfunc, *(int64_t*)&locs[iloc*lstride], *(int64_t*)&times[iphot*tstride], tau, &kde_val)){ return TRUE; }
+			out[iloc] += kde_val;
 		}
 	}
 	return FALSE;
 }
 
-static PyObject* fretbursts_cfuncs_kde_photons_user(PyObject* self, PyObject* args, PyObject* kwargs){
-	char *kwlist[] = {"times", "tau", "func", "locs", "lim", "drop_self", NULL};
-	PyObject *pytimes = NULL, *func=NULL, *pylocs = NULL;
-	int drop_self = FALSE;
-	double tau, flim = 0.0;
-	if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OdO|Odp:kde_photons_user", kwlist, &pytimes, &tau, &func, &pylocs, &flim, &drop_self)){
+
+
+static PyObject* smfbursts_cfuncs_kde_photons(PyObject* self, PyObject* args, PyObject* kwargs){
+	char *kwlist[] = {"times", "tau", "locs", "lim", "func", "drop_self", NULL};
+	PyObject *pytimes=NULL, *pylocs=NULL, *pyfunc=NULL;
+	double tau, flim = -1.0;
+	int drop_self = FALSE, func = 0, err = FALSE;
+	if (!PyArg_ParseTupleAndKeywords(args, kwargs, "Od|OdOp:kde_photons", kwlist, &pytimes, &tau, &pylocs, &flim, &pyfunc, &drop_self)){
 		return NULL;
 	}
-	int64_t lim = (flim == 0.0) ? (int64_t) 5.0*tau : (int64_t) tau*flim;
-	PyArrayObject* nptimes = (PyArrayObject*) PyArray_FROMANY(pytimes, NPY_INT64, 1, 1, NPY_ARRAY_ENSUREARRAY);
-	if (nptimes == NULL){
-		return NULL;
-	}
-	PyArrayObject* nplocs = (pylocs != NULL) ? (PyArrayObject*) PyArray_FROMANY((PyObject*) nptimes, NPY_INT64, 1, 1, NPY_ARRAY_ENSUREARRAY) : NULL;
-	if ((pylocs != NULL) && (nplocs == NULL)){
-		Py_DECREF(nplocs);
-		return NULL;
-	}
-	npy_intp dims[1] = {(nplocs == NULL) ? PyArray_DIM(nplocs, 0) : PyArray_DIM(nptimes, 0), };
-	PyArrayObject *out = (PyArrayObject*) PyArray_ZEROS(1, dims, NPY_DOUBLE, FALSE);
-	if (out == NULL){
-		goto decrefs;
-	}
-	int64_t tstride = (int64_t) PyArray_STRIDE(nptimes, 0);
-	char *times = (char*) PyArray_DATA(nptimes);
-	int64_t lstride = (nplocs == NULL) ? 0 : (int64_t) PyArray_STRIDE(nplocs, 0);
-	char *locs = (nplocs == NULL) ? NULL :(char*) PyArray_DATA(nplocs);
-	double *dout = (double*) PyArray_DATA(out);
-	int64_t nphot = (int64_t) PyArray_DIM(nptimes, 0);
-	int64_t nloc = (nplocs == NULL) ? 0 : (int64_t) PyArray_DIM(nplocs, 0);
-	// computation of kde
-	int err = FALSE;
-	if (nplocs == NULL){
-		if (drop_self){
-			err = kde_self_exclude_zero_npf(nphot, tstride, times, tau, lim, func, dout);
-		}
+	if ((pyfunc != NULL)){
+		if (PyCallable_Check(pyfunc)) { func = 3;}
 		else{
-			err = kde_self_npf(nphot, tstride, times, tau, lim, func, dout);
+			func = (int) PyLong_AsLong(pyfunc);
+			if (PyErr_Occurred()){
+				return NULL;
+			}
+			if ((func < 0) || (func > 2))
+			{
+				PyErr_SetString(PyExc_ValueError, "func must be 0 (laplace), 1 (gaussian), 2 (rect), or callable (custom)");
+				return NULL;
+			}
+		}
+	}
+	int64_t lim;
+	if (flim == -1.0){
+		switch (func){
+			case 1:
+				lim = (int64_t) (3.0*tau);
+				break;
+			case 2:
+				lim = (int64_t) tau;
+				break;
+			default:
+				lim = (int64_t) (5.0 * tau);
+				break;
 		}
 	}
 	else{
-		if (drop_self){
-			err = kde_other_exclude_zero_npf(nphot, tstride, times, nloc, lstride, locs, tau, lim, func, dout);
-		}
-		else{
-			err = kde_other_npf(nphot, tstride, times, nloc, lstride, locs, tau, lim, func, dout);
-		}
+		lim = (int64_t) flim;
 	}
-	if (err){
-		Py_DECREF(out);
-		out = NULL;
+	PyArrayObject* nptimes = (PyArrayObject*) PyArray_FROMANY(pytimes, NPY_INT64, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
+	if (nptimes == NULL){
+		return NULL;
+	}
+	PyArrayObject* nplocs = (pylocs != NULL) ? (PyArrayObject*) PyArray_FROMANY((PyObject*) pylocs, NPY_INT64, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY) : NULL;
+	if ((pylocs !=NULL ) && (nplocs == NULL)){
+		Py_DECREF(nptimes);
+		return NULL;
+	}
+	npy_intp nphot = PyArray_DIM(nptimes, 0);
+	npy_intp tstride = PyArray_STRIDE(nptimes, 0);
+	char *times = PyArray_DATA(nptimes);
+	npy_intp nloc = (pylocs != NULL) ? PyArray_DIM(nplocs, 0) : 0;
+	npy_intp lstride = (pylocs != NULL) ? PyArray_STRIDE(nplocs, 0) : 0;
+	char *locs = (pylocs != NULL) ? PyArray_DATA(nplocs) : NULL;
+	npy_intp dims[] = {(pylocs==NULL)? nphot : nloc, };
+	PyArrayObject* out = (PyArrayObject*) PyArray_ZEROS(1, dims, NPY_DOUBLE, FALSE);
+	if (out == NULL){
+		goto decrefs;
+	}
+	double *dout = (double*) PyArray_DATA(out);
+	int fswitch = drop_self + 2*(pylocs != NULL) + 4*(func == 3);
+	double (*kdefuncs[3])(int64_t, int64_t, double) = {laplace_kdefunc, gaussian_kdefunc, rect_kdefunc};
+	switch(fswitch){
+		case 0:
+		err = kde_self_np((int64_t)nphot, (int64_t)tstride, times, tau, lim, kdefuncs[func], dout);
+		break;
+		case 1:
+		err = kde_self_exclude_zero_np((int64_t)nphot, (int64_t)tstride, times, tau, lim, kdefuncs[func], dout);
+		break;
+		case 2:
+		err = kde_other_np((int64_t)nphot, (int64_t)tstride, times, (int64_t)nloc, (int64_t)lstride, locs, tau, lim, kdefuncs[func], dout);
+		break;
+		case 3:
+		err = kde_other_exclude_zero_np((int64_t)nphot, (int64_t)tstride, times, (int64_t)nloc, (int64_t)lstride, locs, tau, lim, kdefuncs[func], dout);
+		break;
+		case 4:
+		err = kde_self_npf(nphot, tstride, times, tau, lim, pyfunc, dout);
+		break;
+		case 5:
+		err = kde_self_exclude_zero_npf(nphot, tstride, times, tau, lim, pyfunc, dout);
+		break;
+		case 6:
+		err = kde_other_npf(nphot, tstride, times, nloc, lstride, locs, tau, lim, pyfunc, dout);
+		break;
+		case 7:
+		err = kde_other_exclude_zero_npf(nphot, tstride, times, nloc, lstride, locs, tau, lim, pyfunc, dout);
+		break;
 	}
 	decrefs:
 	Py_XDECREF(nptimes);
 	Py_XDECREF(nplocs);
+	if (err){
+		Py_XDECREF(out);
+		out = NULL;
+	}
 	return (PyObject*) out;
 }
 
-static PyMethodDef fretbursts_cfuncs_funcs[] = {
-	{"index_range", (PyCFunction)fretbursts_cfuncs_index_range, METH_VARARGS|METH_KEYWORDS, 
+static PyMethodDef smfbursts_cfuncs_funcs[] = {
+	{"index_range", (PyCFunction)smfbursts_cfuncs_index_range, METH_VARARGS|METH_KEYWORDS, 
 		"index_range(times, start, stop, prev)\n"
 		"--\n\n"
 		"Determine first index of first time in times after start and\n"
@@ -997,7 +967,7 @@ static PyMethodDef fretbursts_cfuncs_funcs[] = {
 		"-------\n"
 		"out: np.ndarray[np.int64]\n"
 		"    (2,) shaped array of start and stop indexes\n\n"},
-	{"index_ranges", (PyCFunction)fretbursts_cfuncs_index_ranges, METH_VARARGS|METH_KEYWORDS,
+	{"index_ranges", (PyCFunction)smfbursts_cfuncs_index_ranges, METH_VARARGS|METH_KEYWORDS,
 		"index_ranges(times, start, stop)\n"
 		"--\n\n"
 		"Determine first index of first time in times after start and\n"
@@ -1020,7 +990,7 @@ static PyMethodDef fretbursts_cfuncs_funcs[] = {
 		"    array of start indexes of bursts (closed)\n"
 		"istops: np.ndarray[np.int64]]n"
 		"    array of stop indexes (open) of bursts\n\n"},
-	{"burstsearch", (PyCFunction)fretbursts_cfuncs_burstsearch, METH_VARARGS|METH_KEYWORDS, 
+	{"burstsearch", (PyCFunction)smfbursts_cfuncs_burstsearch, METH_VARARGS|METH_KEYWORDS, 
 		"burstsearch(times, dets, periods, bg, clk_p, det_ids=None, m=10, F=6.0, c=-1, fuse=True, alloc_size=512, ncore=8)\n"
 		"--\n\n"
 		"Determine first index of first time in times after start and\n"
@@ -1074,7 +1044,7 @@ static PyMethodDef fretbursts_cfuncs_funcs[] = {
 		"stops: np.ndarray[np.int64]\n"
 		"    (n,) shaped array of stop indices\n"
 		"\n"},
-	{"burstgate", (PyCFunction)fretbursts_cfuncs_burstgate, METH_VARARGS|METH_KEYWORDS, 
+	{"burstgate", (PyCFunction)smfbursts_cfuncs_burstgate, METH_VARARGS|METH_KEYWORDS, 
 		"burstgate(starts, stops, truthtable, starttime=None, stoptime=None, alloc_size=512)\n"
 		"--\n\n"
 		"Perform logical operation on burst ranges. Compile ranges into 2\n"
@@ -1108,7 +1078,7 @@ static PyMethodDef fretbursts_cfuncs_funcs[] = {
 		"stops: np.ndarray[np.int64]\n"
 		"    gated stop times\n"
 		"\n"},
-	{"fusebursts", (PyCFunction)fretbursts_cfuncs_fusebursts, METH_VARARGS|METH_KEYWORDS, 
+	{"fusebursts", (PyCFunction)smfbursts_cfuncs_fusebursts, METH_VARARGS|METH_KEYWORDS, 
 		"fusebursts(starts, stops, max_sep)\n"
 		"--\n\n"
 		"Fuse bursts with difference in stop of previous and start of next\n"
@@ -1130,7 +1100,7 @@ static PyMethodDef fretbursts_cfuncs_funcs[] = {
 		"stops: np.ndarray[np.int64]\n"
 		"    fused stop times\n"
 		"\n"},
-	{"maximum_rate", (PyCFunction)fretbursts_cfuncs_maximum_rate, METH_VARARGS|METH_KEYWORDS, 
+	{"maximum_rate", (PyCFunction)smfbursts_cfuncs_maximum_rate, METH_VARARGS|METH_KEYWORDS, 
 		"maximum_rate(times, dets, istarts, istops, clk_p, det_ids=None, m=10, ncore=8)\n"
 		"--\n\n"
 		"Compute the maximum m-photon rate of per burst.\n\n"
@@ -1163,7 +1133,7 @@ static PyMethodDef fretbursts_cfuncs_funcs[] = {
 		"    Maximum photon rate for the given detectors (in photons/s)\n"
 		"    for each burst, computed over the sliding window of size m.\n"
 		"\n"},
-	{"burst_variance_analysis", (PyCFunction)fretbursts_cfuncs_burst_variance_analysis, METH_VARARGS|METH_KEYWORDS, 
+	{"burst_variance_analysis", (PyCFunction)smfbursts_cfuncs_burst_variance_analysis, METH_VARARGS|METH_KEYWORDS, 
 		"burst_variance_analysis(dets, istarts, istops, dets_All, dets_Sub, n=10, ncore=8)\n"
 		"--\n\n"
 		"Compute burst variance analysis (BVA) of each burst defined by.\n"
@@ -1194,7 +1164,7 @@ static PyMethodDef fretbursts_cfuncs_funcs[] = {
 		"np.ndarray[np.float64]\n"
 		"    Variance of the ratio of Sub:All of all chuncks of size n\n"
 		"    in each bursts.\n\n"},
-	{"kde_photons", (PyCFunction)fretbursts_cfuncs_kde_photons, METH_VARARGS|METH_KEYWORDS, 
+	{"kde_photons", (PyCFunction)smfbursts_cfuncs_kde_photons, METH_VARARGS|METH_KEYWORDS, 
 		"kde_photons(times, tau, locs=None, lim=0.0, drop_self=False, func=0)\n"
 		"--\n\n"
 		"Compute kernel density estimator of photons.\n\n"
@@ -1212,62 +1182,33 @@ static PyMethodDef fretbursts_cfuncs_funcs[] = {
 		"    Factor by which to multiply tau at which to include photons\n"
 		"    in evaluating KDE. If 0.0, set based on selected func. The default is 0.0.\n"
 		"drop_self: np.ndarray[np.uint8]\n"
-		"    Indices in dets considered in the numerator of the ratio.\n"
-		"func: int, optional\n"
+		"    Photons with same time not dropped from KDE computation.\n"
+		"func: int | Callable[[int,int,float],float], optional\n"
 		"    Integer index specifying which KDE function to use.\n\n"
 		"    - ``0`` laplace KDE :math:`exp( -|t_{j} - t_{i}| / \\tau)`, lim defaults to 5.0"
 		"    - ``1`` gaussian KDE :math:`exp(-(t_{j}-t_{i})^2/(2*\tau^{2}))`, lim defaults to 3.0\n"
-		"    - ``2`` rectanular kde 1.0 if :math:`|t_{j}-t_{i}| < \\tau / 2` 0.0 otherwise\n"
+		"    - ``2`` rectanular kde 1.0 if :math:`|t_{j}-t_{i}| < \\tau / 2` 0.0 otherwise\n\n\n"
+		"    Or a callable with the signature \n"
+		"    ``func(timeloc:int, timephot:int, tau:float)->float``\n"
+		"    Which evaluatues the kde contributeion of timephot at point\n"
+		"    timeloc, with time constant tau\n\n"
 		"Returns\n"
 		"-------\n"
 		"np.ndarray[np.float64]\n"
 		"    Kernel Density for each time in locs or timesn\n"
-		},
-	{"kde_photons_user", (PyCFunction)fretbursts_cfuncs_kde_photons_user, METH_VARARGS|METH_KEYWORDS, 
-		"kde_photons_user(times, tau, func, locs=None, lim=0.0, drop_self=False)\n"
-		"--\n\n"
-		"Compute kernel density estimator of photons with Python supplied\n"
-		"Kernel function.\n\n"
-		"Parameters\n"
-		"----------\n"
-		"times: np.ndarray[np.int16]\n"
-		"    Arrival times of photons, assuemd to be monotnically increasing\n"
-		"tau: float\n"
-		"    Decay constant of kde function.\n"
-		"func: Callable[int, int, float, [float]]\n"
-		"    Kernel function, signature is ``func(loc, time, tau)``\n"
-		"    where ``loc`` is the time where the kernel is being evaluated,\n"
-		"    ``time`` is the time of the photon contributing to the kernel\n"
-		"    and ``tau`` is the decay constant of the kernel function.\n"
-		"    ``loc`` and ``time`` are int, ``tau`` is a float\n"
-		"    the function must return a float object\n"
-		"locs: np.ndarray[np.int64], optional\n"
-		"    Times at which to evaluate the kde. If not specified, use\n"
-		"    times array as source of times.\n"
-		"    Size of output is same as size of locs. The default is None\n"
-		"lim: float, optional\n"
-		"    Factor by which to multiply tau at which to include photons\n"
-		"    in evaluating KDE. If 0.0, set based on selected func. The default is 0.0.\n"
-		"drop_self: np.ndarray[np.uint8]\n"
-		"    Indices in dets considered in the numerator of the ratio.\n"
-		"Returns\n"
-		"-------\n"
-		"np.ndarray[np.float64]\n"
-		"    Kernel Density for each time in locs or timesn\n"
-		},
-	{NULL,NULL,0,NULL}
+		}
 };
 
-static struct PyModuleDef fretbursts_cfuncs_module =
+static struct PyModuleDef smfbursts_cfuncs_module =
 {
-	PyModuleDef_HEAD_INIT, "fretbursts.cfuncs",
-	"C accelerated functions for FRETBursts.\n", -1,
-	fretbursts_cfuncs_funcs
+	PyModuleDef_HEAD_INIT, "smfbursts.cfuncs",
+	"C accelerated functions for smfBursts.\n", -1,
+	smfbursts_cfuncs_funcs
 };
 
 PyMODINIT_FUNC PyInit_cfuncs(void)
 {
-	PyObject *module = PyModule_Create(&fretbursts_cfuncs_module);
+	PyObject *module = PyModule_Create(&smfbursts_cfuncs_module);
 	import_array();
 	return module;
 };

@@ -1152,6 +1152,8 @@ def _parse_streams(streams:str, part_map:dict[str:set[np.uint8]])->PhSel:
         for cat_prt in stream_cat_regex.finditer(match_stream.group()):
             kind = not cat_prt.group(1)
             categ = cat_prt.group(7)
+            if categ in ph_stream:
+                raise ValueError(f'multiple definitions of {categ} channel in single selection: ({streams})')
             if cat_prt.group(3):
                 if (cat_prt.group(3) in part_map[categ]):
                     dets = ChannelSet(kind, part_map[categ][cat_prt.group(3)])
@@ -1562,17 +1564,28 @@ def dwrite_DetDef(val:DetDef)->np.ndarray[np.uint8]:
 TV_DetDef = register_byteslike(DetDef, check_DetDef, dread_DetDef, dwrite_DetDef)
 
 
-def sort_phsels(detdef:DetDef, phsels:Sequence[PhSel], return_index:bool=False)->tuple[PhSel,...]:
+def _sort_phsels_by_index(detdef, phsels:Sequence[PhSel])->tuple[tuple[PhSel,...],np.ndarray[np.int64]]:
+    stream_ids = tuple(detdef.get_stream_ids(sel) for sel in phsels)
+    max_stream = max(s.shape[0] for s in stream_ids)
+    stream_arr = -np.ones((max_stream, len(stream_ids)), dtype=np.int16)
+    for i, s in enumerate(stream_ids):
+        stream_arr[:s.size,i] = s
+    sort = np.lexsort(stream_arr)
+    out =  tuple(phsels[i] for i in sort)
+    return out, sort
+
+
+def sort_phsels(phsels:Sequence[PhSel], detdef:DetDef=None, return_index:bool=False)->tuple[PhSel,...]:
     """
     Sorting function for ordering sequence of :class:`PhSel` objects.
 
     Parameters
     ----------
-    detdef : DetDef
-        Definition of detectos being used in current space, used to regularize
-        for negatively defined PhSels.
     phsels : Sequence[PhSel]
         Sequence of :class:`PhSel` objects to be sorted.
+    detdef : DetDef, optional
+        Definition of detectos being used in current space, used to regularize
+        for negatively defined PhSels. The default is None.
     return_index : bool, optional
         If True, also return mapping of indexes in phsels to final array.
         The default is False.
@@ -1581,11 +1594,21 @@ def sort_phsels(detdef:DetDef, phsels:Sequence[PhSel], return_index:bool=False)-
     -------
     phsels : tuple[PhSel, ...]
         Tuple of ordered phsel objects.
-    sort : np.ndarray[np.int64]
+    sort : np.ndarray[np.int64], optional
         (Only in ``return_index=True``) indexes of original in sorted array.
         Ie ``[phsels[i] for i in sort]`` with return the same as first output.
 
     """
+    if detdef is None:
+        # get max stream to create detdef
+        detdef_dict = {name:1 for name in _StreamTypes}
+        for phsel in phsels:
+            for stream in phsel.streams:
+                for name in _StreamTypes:
+                    if not stream[name].elements:
+                        continue
+                    detdef_dict[name] = max((max(stream[name].elements)+1, detdef_dict[name]))
+        detdef = DetDef(**detdef_dict)
     stream_ids = tuple(detdef.get_stream_ids(sel) for sel in phsels)
     max_stream = max(s.shape[0] for s in stream_ids)
     stream_arr = -np.ones((max_stream, len(stream_ids)), dtype=np.int16)

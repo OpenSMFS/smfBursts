@@ -757,7 +757,7 @@ class BG(ChildPhotonTable):
                   title_func='_err_CM_title', index_func='_err_CM_index'),
         ColumnDef('tail_min', (PhSel, ), 0, 'never', get_func='_get_tail_min', 
                   dtype=np.float64, check_func='_check_tail_min', title='tail min', unit='(s)'),
-        ColumnDef('rangecounts', (PhSel, str, str), 0, iter_func='_iter_rangecounts',
+        ColumnDef('rangecounts', (PhSel, TV_str, TV_str), 0, iter_func='_iter_rangecounts',
                   dtype=np.float64, reg_func='_regularizecolumn_rangecounts', mapto=BasePhotonTable,
                   title='bg photons'),
                    )
@@ -924,12 +924,12 @@ class BG(ChildPhotonTable):
         return out
 
     @classmethod
-    def _regularizecolumn_rangecounts(cls, *args)->tuple[PhSel, str, str]:
+    def _regularizecolumn_rangecounts(cls, source_param:Param, *args)->tuple[PhSel, str, str]:
         """Column regularization function for mapped column range-counts"""
         if len(args) < 2:
             raise ValueError("no defaults for destination param or Ph_sel, must specify")
         param, ph_sel, startstoptype = args[0], args[1], args[2:]
-        starttype, stoptype = _regularize_column_startstop(*startstoptype)
+        starttype, stoptype = _regularize_column_startstop(param, *startstoptype)
         return param, ph_sel, starttype, stoptype
 
     def _iter_rangecounts(self, param:Param, ph_sel:PhSel, starttype:ColKeyStart, stoptype:ColKeyStop)->Iterator[float]:

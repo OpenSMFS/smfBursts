@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <math.h>
 
-#include "fretbursts_burstwise.h"
+#include "smfbursts_burstwise.h"
 
 //
 // Functions for testing

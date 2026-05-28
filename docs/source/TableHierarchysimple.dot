@@ -13,15 +13,19 @@ digraph {
   BG[group=3 shape=tab label="BG\n- per period per channel background\n- can map to any BasePhotonTable"];
   NphBG[group=3 shape=tab label="NphBG\n- background corrected channel intensities"];
   Ratios[group=3 shape=tab label="Ratios\n- Cross-talk matrix corrects channel intensities\n- Primarily for fully corrected E/S values"];
+  StatePath[group=3 shape=tab label="StatePath\n- Viterbi statepath through each burst\n- Identify number and which states in burst"]
+  Dwells[group=2 shape=tab label="Dwells\n- splits bursts by state"]
 
   subgraph cluster_1 {
     label = "BasePhotonTables"
     Periods -> Bursts [style=invis];
+    Bursts -> Dwells [style=invis];
   }
   subgraph cluster_2 {
     label = "ChildPhotonTables"
     BG -> NphBG [style=dashed];
     {rank=same NphBG -> Ratios[style=dashed]}
+    NphBG -> StatePath [style=invis]
   }
   {rank=same DataSet -> BaseTable -> ChildTable [style=invis]}
   {rank=same PhotonData -> BasePhotonTable -> ChildPhotonTable [style=invis]}
@@ -39,5 +43,8 @@ digraph {
   BasePhotonTable -> NphBG [style=dashed];
   Bursts -> NphBG [style=dotted];
   PhotonData -> Periods [lhead=cluster_1];
+  BasePhotonTable -> StatePath [style=dashed];
+  Bursts -> StatePath [style=dotted];
+  StatePath -> Dwells [style=dashed];
 }
 
