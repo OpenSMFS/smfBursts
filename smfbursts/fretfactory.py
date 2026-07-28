@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
+r"""
 The fretfacory module provides a set of "helper" factory functions, which create
 dictionaries of associated |Param| and |Column| objects.
 These are designed to be the most commonly used params of a set.
@@ -18,20 +18,26 @@ excitation-donor emission.
 .. |Column| replace:: :class:`Column <smfbursts.datamodel.tables.Column>`
 .. |Coparam| replace:: :attr:`Column.origin_param <smfbursts.datamodel.tables.Column.origin_param>`
 .. |Cbparam| replace:: :attr:`Column.base_param <smfbursts.datamodel.tables.Column.base_param>`
+.. |BasePhotonTable| replace:: :class:`photondata.BasePhotonTable <smfbursts.photondata.BasePhotonTable>`
 .. |Periods| replace:: :class:`Periods <smfbursts.background.Periods>`
 .. |BG| replace:: :class:`BG <smfbursts.background.BG>`
+.. |Bursts| replace:: :class:`Bursts <smfbursts.bursttables.Bursts>`
+.. |BurstOvlp| replace:: :class:`BurstOvlp <smfbursts.bursttables.BurstOvlp>`
 .. |NphBG| replace:: `NphBG <smfbursts.bursttables.NphBG>`
-.. |Ratios| replace:: `Ratios <smfbursts.bursttables.Ratios>`
-.. _leastsquare: `scipy.optimize.least_squares <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html>`__
-.. _minimize: `scipy.optimize.minimize <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.minimize.html>`__
-.. _optimizeresult: `OptimizeResult <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.OptimizeResult.html>`__
-.. _linregress: `scipy.stats.linregress <https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.linregress.html>`__
-.. _hellenkamp: `*Hellenkamp et. al.* <https://doi.org/10.1038/s41592-018-0085-0>`__
+.. |Ratios| replace:: :class:`Ratios <smfbursts.bursttables.Ratios>`
+.. |DetDef| replace:: :class:`DetDef <smfbursts.ph_sel.DetDef>`
+.. |leastsquare| replace:: `scipy.optimize.least_squares <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html>`__
+.. |minimize| replace:: `scipy.optimize.minimize <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.minimize.html>`__
+.. |optimizeresult| replace:: `OptimizeResult <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.OptimizeResult.html>`__
+.. |linregress| replace:: `scipy.stats.linregress <https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.linregress.html>`__
+.. |hellenkamp| replace:: `*Hellenkamp et. al.* <https://doi.org/10.1038/s41592-018-0085-0>`__
+
 """
-from collections.abc import Sequence, Callable, Hashable
+from collections.abc import Sequence, Callable, Hashable, Iterator
 import warnings
 from typing import Any, Literal
 from numbers import Integral
+from itertools import repeat
 
 import numpy as np
 from scipy.optimize import OptimizeResult
@@ -43,19 +49,36 @@ from .datamodel.tables import Param, Column, GateGroup, _column_sort
 from .datamodel.multifit import lsq_anyfit, MinFunc
 from .cite import cite
 
-from .ph_sel import PhSel
+from .ph_sel import PhSel, PhStream, DetDef
 from .photondata import (
     PhotonDataS, PhotonData
     )
-from .background import (
+from .backgroundtables import (
     Periods, BG, exp_mlefit, BGFuncType
     )
-from .bursttables import (
-    Bursts, NphBG, Ratios
-    )
+from .bursttables import Bursts, BurstOvlp
+from .childphotontables import NphBG, Ratios
 
 
-def make_bg(data:PhotonDataS, period:float=60.0, tail_min:float=500e-6, func:BGFuncType=exp_mlefit, 
+def _as_phsel(val:str|PhStream|PhSel)->PhSel:
+    """Convert val to |PhSel| if possible"""
+    if isinstance(val, (PhStream, str)):
+        return PhSel(val)
+    return val
+
+
+def _match_size(val:Any, size:int|None, name:str)->tuple[Sequence|Iterator,int|None]:
+    """Make val match the size size, if size is None, assume size 1, and return expected size"""
+    if isinstance(val, (Sequence,np.ndarray)) and not isinstance(val,str):
+        if size is not None and size != len(val):
+            raise ValueError(f"Size of {name} does not match the expected size ({size})")
+        if len(val) == 1:
+            return repeat(val[0]), size
+        return val, len(val)
+    return repeat(val), size
+
+
+def make_bg(detdef:DetDef|PhotonDataS, period:float=60.0, tail_min:float=500e-6, func:BGFuncType=exp_mlefit, 
             auto_threshold:bool=False, F_bg:float=2.0, 
             start_at:Literal['time_min','zero','under','over']='time_min', 
             stop_at:Literal['under', 'over']='over', 
@@ -74,8 +97,10 @@ def make_bg(data:PhotonDataS, period:float=60.0, tail_min:float=500e-6, func:BGF
 
     Parameters
     ----------
-    data : PhotonDataS
-        Data on which to start building a dictionary.
+    detdef : DetDef | PhotonDataS
+        |DetDef| of, or Data on which to start building a dictionary. The function
+        tests if the detdef is a |DetDef|, if it is not, will access the 
+        ``detdef.detdef`` property to get the |DetDef| of the data.
     period : float, optional
         Size of single background period in seconds. The default is 60.0.
     tail_min : float, optional
@@ -97,8 +122,9 @@ def make_bg(data:PhotonDataS, period:float=60.0, tail_min:float=500e-6, func:BGF
         Dictionary of |Param| and |Column| objects defining background periods.
 
     """
+    detdef = detdef if isinstance(detdef, DetDef) else detdef.detdef
     prd = Param(Periods, params=dict(start_at='time_min', stop_at='over',
-                                        period=period, detdef=data.detdef))
+                                        period=period, detdef=detdef))
     bg_params = dict(compute_stream='single_all', func=func, tail_min=tail_min,
                      auto_threshold=auto_threshold, **kwargs)
     if auto_threshold:
@@ -107,7 +133,7 @@ def make_bg(data:PhotonDataS, period:float=60.0, tail_min:float=500e-6, func:BGF
     out = {'periods':prd, 'bg':bg}
     out['BgDD'] = Column(bg, 'bg', PhSel('0ex0em'))
     out['BgDA'] = Column(bg, 'bg', PhSel('0ex1em'))
-    if data.detdef.ex == 1:
+    if detdef.ex == 1:
         out['BgAll'] = Column(bg, 'bg', PhSel('all'))
     else:
         out['BgAll'] = Column(bg, 'bg', PhSel('0ex_1ex1em'))
@@ -129,14 +155,16 @@ def _infer_bg(param:Param)->None|Param:
     if bg is not None:
         return bg if isinstance(bg, Param) else bg[0]
     for parent in param.parents.values():
-        bg = _infer_bg(parent)
-        if bg is not None:
-            return bg
+        parents = (parent, ) if isinstance(parent, Param) else parent
+        for p in parents:
+            bg = _infer_bg(p)
+            if bg is not None:
+                return bg
     return None
 
 
 def make_fret_from_base(base:Param, bg:Param=None, skip:Sequence[str]=None, 
-                        nbva:int|Sequence[int]=10, update:dict=None, **kwargs)->dict[str:Param|Column]:
+                        nbva:int|Sequence[int]=5, update:dict=None, **kwargs)->dict[str:Param|Column]:
     r"""
     Create default set of |Param| and |Column| objects from an initial BasePhotonTable
     based |Param|.
@@ -221,12 +249,19 @@ def make_fret_from_base(base:Param, bg:Param=None, skip:Sequence[str]=None,
     ----------
     base : Param
         Initial param defining time ranges on which to generate columns.
+        Must be a |BasePhotonTable| based |Param|, it is typically either
+        a |Bursts| or |BurstOvlp| based |Param|.
     bg : Param, optional
-        DESCRIPTION. The default is None.
+        A |BG| based |Param|, the background definition for the output |Param|
+        and |Column| objects requiring background correction. If None, then the
+        function will search the parents of base for a |BG| based |Param|, and
+        the first one found will be used as the background correction parameter. 
+        The default is None.
     skip : Sequence[str], optional
-        Keys to skip. The default is None.
+        Keys to skip, use to avoid creating |Column|/|Param| that are invalid
+        for the given dataset. The default is None.
     nbva : int | Sequence[int], optional
-        Default size of bva chunck for bva columns. The default is 10.
+        Default size of bva chunck for bva columns. The default is 5.
     update : dict, optional
         Dictionary to update in place. The default is None.
     **kwargs : Any
@@ -286,12 +321,16 @@ def make_fret_from_base(base:Param, bg:Param=None, skip:Sequence[str]=None,
     return out
 
 
-def make_burst_search(bg:Param|Sequence[Param], m:int|np.ndarray[np.int64]=10, 
-                      F:float|np.ndarray[np.float64]=6.0, 
-                      streams:PhSel|Sequence[PhSel]='auto', skip:Sequence[str]=None,
+def make_burst_search(bg:Param|Sequence[Param], m:int|Sequence[int]=10, 
+                      F:float|Sequence[float]=6.0, fuse:float=0.0,
+                      streams:PhSel|Sequence[PhSel]='auto', 
+                      truthtable:np.ndarray[np.bool_]|Literal['auto','and','or','invand','invor','single','inv']='auto',
+                      c:float|Sequence[np.float64]=-1.0, 
+                      skip:Sequence[str]=None,
                       alpha:float=None, delta:float=None, gamma:float=None, beta:float=None, 
                       dir_ex:float=None, lk:float=None, corr_mat:np.ndarray[np.float64]=None,
-                      nbva:int|Sequence[int]=None, update:dict=None, **kwargs)->dict[str:Param|Column]:
+                      nbva:int|Sequence[int]=None, update:dict=None,
+                      **kwargs)->dict[str:Param|Column]:
     r"""
     Create a dictionary with standard burst search and background correction
     |Param| s and |Column| s.
@@ -315,10 +354,21 @@ def make_burst_search(bg:Param|Sequence[Param], m:int|np.ndarray[np.int64]=10,
         Number of times above background for a sliding window to be considered
         in a burst. Must be either single int or same length as streams. 
         The default is 6.0.
+    fuse: float
+        The maximum separation between windows (in seconds) to fuse bursts.
+        The default is 0.0.
     streams : PhSel|Sequence[PhSel], optional
         The photon streams used in individual burst searches that are then gated
         together for final burst definition. If 'auto', use 'all' for
         single excitatoin or '0ex_1ex1em' for 2 excitation data. The default is 'auto'.
+    truthtable : np.ndarray[np.bool\_] | {'auto', 'and', 'or', 'invand', 'invor', 'single', 'inv'}
+        Truthtable defining logical operation combining burst searches
+    c : float | np.ndarray[np.float64]
+        correction factor for photon rate of sliding window.
+        :math:`\tau^{m}_{i} = \frac{m - 1 - c}{\Delta^{m}t_{i}}`.
+        **Note that this factor is rarely changed** from -1.0, ie the rate is
+        simply :math:`\frac{m}{\Delta^{m}t_{i}}`.
+        The default is -1.0
     skip : Sequence[str], optional
         List of keys for columns to skip. The default is None.
     alpha : float, optional
@@ -338,7 +388,7 @@ def make_burst_search(bg:Param|Sequence[Param], m:int|np.ndarray[np.int64]=10,
         Should be used if There are channels beyond D/Aex D/Aem.
         The default is None.
     nbva : int | Sequence[int], optional
-        Default size of bva chunck for bva columns. The default is 10.
+        Default size of bva chunck for bva columns. The default is 5.
     update : dict
         Dictionary to update (inplace) with new values. The default is None.
     **kwargs : Any
@@ -352,10 +402,29 @@ def make_burst_search(bg:Param|Sequence[Param], m:int|np.ndarray[np.int64]=10,
     """
     detdef = bg.detdef
     if streams == 'auto':
-        streams = PhSel('all') if detdef.ex == 1 else PhSel('0ex_1ex1em')
-    burst_params = {'m':m, 'F':F, 'streams':streams}
-    burst_params.update(kwargs)
-    bursts = Param(Bursts, burst_params, {'bg':bg})
+        streams = PhSel('0ex_1ex1em') if detdef.ex == 2 else PhSel('all')
+    if isinstance(streams, (PhSel, PhStream, str)):
+        streams = (_as_phsel(streams), )
+    else:
+        streams = tuple(_as_phsel(stream) for stream in streams)
+    streams, size = _match_size(streams, None, 'streams')
+    m, size = _match_size(m, size, 'm')
+    F, size = _match_size(F, size, 'F')
+    c, size = _match_size(c, size, 'c')
+    if size is None:
+        streams = (next(streams), )
+        size = 1
+    sfuse = 0.0 if size != 1 else fuse
+    parents = {'bg':bg}
+    param_iter = ({'stream':stream, 'm':mm, 'F':FF, 'c':cc, 'fuse':sfuse} 
+                  for stream, mm, FF, cc in zip(streams, m, F, c))
+    bursts = tuple(Param(Bursts, param, parents) for param in param_iter)
+    if size == 1 and isinstance(truthtable, str) and truthtable == 'auto':
+        bursts = bursts[0]
+    else:
+        if truthtable == 'auto':
+            truthtable = 'and'
+        bursts = Param(BurstOvlp, {'fuse':fuse, 'truthtable':truthtable}, {'bases':bursts})
     rkwargs = dict(alpha=alpha, delta=delta, gamma=gamma, beta=beta, nbva=nbva,
                    dir_ex=dir_ex, lk=lk, corr_mat=corr_mat, update=update)
     rkwargs = {k:v for k, v in rkwargs.items() if v is not None}
@@ -622,7 +691,7 @@ def gamma_beta_twopop(data:PhotonDataS, colEapp:Column, colSapp:Column,
 def _ab_to_gamma_beta(a:float, b:float)->tuple[float,float]:
     r"""
     Conversion from slope-intercept of inverse :math:`S^{-1} = a*E+b` 
-    to gamma beta according to hellenkamp_ :math:`\beta = a + b + 1`
+    to gamma beta according to |hellenkamp| :math:`\beta = a + b + 1`
     :math:`\gamma = (b - 1) / (a + b -1)`
     """
     beta = a + b - 1
@@ -640,9 +709,9 @@ def gamma_beta_linregressvals(E:np.ndarray[np.float64], S:np.ndarray[np.float64]
     Compute :math:`\gamma` and :math:`\beta` values from slope (:math:`a`) and 
     intercept (:math:`b`) of cross-talk corrected proximity ratio and
     inverse of cross-talk corrected stoichometry, with slope and intercept 
-    computed using linear regression (uses linregress_).
+    computed using linear regression (uses |linregress|).
     
-    This function implements the linear fitting method from hellenkamp_.
+    This function implements the linear fitting method from |hellenkamp|.
     
     :math:`\gamma = (b - 1) / (a + b - 1)`
     
@@ -655,7 +724,7 @@ def gamma_beta_linregressvals(E:np.ndarray[np.float64], S:np.ndarray[np.float64]
     S : np.ndarray[np.float64]
         Array of values of cross-talk corrected stoichiometry :math:`^{iii}S_{app}`.
     **kwargs : Any
-        Keyword arguments passed to linregress_ .
+        Keyword arguments passed to |linregress|.
 
     Returns
     -------
@@ -664,7 +733,7 @@ def gamma_beta_linregressvals(E:np.ndarray[np.float64], S:np.ndarray[np.float64]
     beta : float
         Computed value of :math:`beta`
     res : LinregressResult
-        Output of linregress_ note that this provides slope (:math:`a`) and 
+        Output of |linregress| note that this provides slope (:math:`a`) and 
         intercept (:math:`b`) values, before conversion to :math:`\gamma` and
         :math:`\beta`.
 
@@ -690,7 +759,7 @@ def gamma_beta_fitlinearvals(E:np.ndarray[np.float64], S:np.ndarray[np.float64],
     stoichometry, with slope and intercept computed using fitting algorithm
     of ``min_func``.
     
-    This function implements the linear fitting method from hellenkamp_.
+    This function implements the linear fitting method from |hellenkamp|.
     
     :math:`\gamma = (a - 1) / (a + b - 1)`
     
@@ -744,7 +813,7 @@ def gamma_beta_fitdirectvals(E:np.ndarray[np.float64], S:np.ndarray[np.float64],
     r"""
     Compute :math:`\gamma` and :math:`\beta` values by direct fitting of values
     of ``E`` and ``S`` (should be :math:`^{iii}E_{app}` and :math:`^{iii}S_{app}`)
-    to equation 17 of hellenkamp_.
+    to equation 17 of |hellenkamp|.
     
     Fits :math:`^{iii}S_{app} = (1 +\gamma\beta+(1-\gamma)\beta ^{iii}E_{app})^{-1}`
 
@@ -800,7 +869,7 @@ def gamma_beta_pops(data:PhotonDataS, colEapp:Column, colSapp:Column,
     efficiency (:math:`^{iii}S_{app}`) 
     (``S`` |Column| with the same source param as ``colEapp``.
      
-     Returns gamma and beta values as tuple, can also optionally return optimizeresult_ 
+     Returns gamma and beta values as tuple, can also optionally return |optimizeresult|
      after gamma and beta, allowing characterization of error etc. 
     
 
@@ -826,10 +895,10 @@ def gamma_beta_pops(data:PhotonDataS, colEapp:Column, colSapp:Column,
         - :func:`gamma_beta_linregressvals`
         - :func:`gamma_beta_fitdirectvals`
         - :func:`gamma_beta_fitlinearvals`
-        The above functions all fit equation 17 of hellenkamp_ in some way.
+        The above functions all fit equation 17 of |hellenkamp| in some way.
         They all must return a 3 tuple of ``(gamma, beta, res)`` where ``res``
         is the full result object 
-        (optimizeresult_ or ``LinregressResult`` for the standard functions).
+        (|optimizeresult| or ``LinregressResult`` for the standard functions).
         ``fit_func`` is called as ``fit_func(E, S, **kwargs)`` where ``E`` and
         ``S`` are the mean values of the populations specified by the input
         gates (\*args) in ``colEapp`` and ``colSapp`` respectively.
@@ -847,7 +916,7 @@ def gamma_beta_pops(data:PhotonDataS, colEapp:Column, colSapp:Column,
     beta : float
         Best fit value for beta factor.
     res : OptimizerResult | LinregressResult, optional
-        Only returned if ``return_optimizerresult = True`` the optimizeresult_
+        Only returned if ``return_optimizerresult = True`` the |optimizeresult|
         returned by the optimization function ``fit_func``
 
     """
@@ -882,7 +951,7 @@ def gamma_beta_bursts(data:PhotonDataS, colEapp:Column, colSapp:Column,
     efficiency (:math:`^{iii}S_{app}`) 
     (``S`` |Column| with the same source param as ``colEapp``.
      
-     Returns gamma and beta values as tuple, can also optionally return optimizeresult_ 
+     Returns gamma and beta values as tuple, can also optionally return |optimizeresult|
      after gamma and beta, allowing characterization of error etc. 
     
 
@@ -908,10 +977,10 @@ def gamma_beta_bursts(data:PhotonDataS, colEapp:Column, colSapp:Column,
         - :func:`gamma_beta_linregressvals`
         - :func:`gamma_beta_fitdirectvals`
         - :func:`gamma_beta_fitlinearvals`
-        The above functions all fit equation 17 of hellenkamp_ in some way.
+        The above functions all fit equation 17 of |hellenkamp| in some way.
         They all must return a 3 tuple of ``(gamma, beta, res)`` where ``res``
         is the full result object 
-        (optimizeresult_ or ``LinregressResult`` for the standard functions).
+        (|optimizeresult| or ``LinregressResult`` for the standard functions).
         ``fit_func`` is called as ``fit_func(E, S, **kwargs)`` where ``E`` and
         ``S`` are the values of the columns ``colEapp`` and ``colSapp`` respectively.
         The default is gamma_beta_linregressvals.
@@ -928,7 +997,7 @@ def gamma_beta_bursts(data:PhotonDataS, colEapp:Column, colSapp:Column,
     beta : float
         Best fit value for beta factor.
     res : OptimizerResult | LinregressResult, optional
-        Only returned if ``return_optimizerresult = True`` the optimizeresult_
+        Only returned if ``return_optimizerresult = True`` the |optimizeresult|
         returned by the optimization function ``fit_func``
 
     """
@@ -970,6 +1039,7 @@ _raw_ratio_bins = np.linspace(-0.0, 1.0, 51)
 #: - "stream_labels"- default D/A ex/em names for streams, parallels "streams"
 #: - "stream_zorder"- default zorder for stacking streams over each other, parallels "streams"
 #: - "stream_colors"- default colors for each stream, parallels "streams"
+#: 
 ALEXdefaults = SequenceDefaults(
     scatter={'s':2.0},
     hexbin={'gridsize':40, 'extent':(-0.2,1.2,-0.2,1.2), 'mincnt':1, 
@@ -998,6 +1068,7 @@ ALEXdefaults = SequenceDefaults(
 #: - "kdeover"- default kwargs to use with :func:`smfbursts.datamodel.plot.hist_kdeoverlay` when plotting bursts
 #: - "streams"- default :class:`smfbursts.ph_sel.PhSel`\s for streams of ALEX parameters
 #: - "stream_labels"- default D/A ex/em names for streams, parallels "streams"
+#: 
 MonoExdefaults = SequenceDefaults(
     bursts={'s':2.0},
     histbar=_histbar_kwargs, ratio_bins=_ratio_bins, raw_ratio_bins=_raw_ratio_bins,

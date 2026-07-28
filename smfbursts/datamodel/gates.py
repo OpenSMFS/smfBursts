@@ -13,14 +13,15 @@ from typing import Any
 from collections.abc import Callable
 from itertools import product
 from numbers import Real
+from warnings import warn
 
 import numpy as np
 
 from .utils import tupledict
 from .immutabledata import register_PyCode
 from .tables import (
-    Column, GateDefinition, GateDef, MappedGateDef, Gate, MappedGate, GateGroup, 
-    _TT_ft, _TT_tf, TT_subtract,
+    Column, ColumnDef, GateDefinition, GateDef, MappedGateDef, Gate, MappedGate, GateGroup, 
+    _TT_ft, _TT_tf, TT_subtract, TT_rsubtract, TT_and,TT_ior,
     GD_intersect, GD_equal, GD_superset, GD_subset
                      )
 
@@ -523,6 +524,29 @@ _TT_andnn = np.array([[True, False,],[False,False]])
 _TT_andnn.setflags(write=False)
 
 
+def _col_type_conv(cdef:ColumnDef)->type:
+    if np.issubdtype(cdef.dtype, np.integer):
+        return int
+    return float
+
+
+def _make_real_gate(column:Column, gtype:GateDef, val:Real, 
+                    inv:bool, exclude_nan:bool, outside_expand:bool, title:str)->GateGroup:
+    cdef = column._get_coldef()
+    conv = _col_type_conv(cdef)
+    if column.atomic:
+        gate = Gate(gtype, (column, ), dict(vec=np.array([1.0]), m=conv(val)))
+    else:
+        gate = Gate(gtype, (column, ), dict(vec=np.array([1.0]), m=conv(val)), 
+                    expand=outside_expand)
+    if exclude_nan == inv:
+        nexcl = Gate(ISIN_gate, (column, ), {'inset':_nan_exclude})
+        gategroup = GateGroup(TT_ior if inv else TT_rsubtract, nexcl, gate, title=title)
+    else:
+        gategroup = GateGroup(_TT_tf if inv else _TT_ft, gate, title=title)
+    return gategroup
+    
+
 def make_gt_gate(column:Column, mn:float, exclude_nan:bool=True, outside_expand:bool=False)->GateGroup:
     """
     Create a gate for all values of column greater than mn.
@@ -548,18 +572,8 @@ def make_gt_gate(column:Column, mn:float, exclude_nan:bool=True, outside_expand:
         Gate representing all rows with column value greater than mn.
 
     """
-    if column.atomic:
-        gate = Gate(LIN_GT_gate, (column, ), dict(vec=np.array([1.0]), m=float(mn)))
-    else:
-        gate =Gate(LIN_GT_gate, (column, ), dict(vec=np.array([1.0]), m=float(mn)), 
-                   expand=outside_expand)
     title = fr'{column.name()} \gt {mn}'
-    if np.issubdtype(column._get_coldef().dtype, np.floating) and not exclude_nan:
-        nexcl = Gate(ISIN_gate, (column, ), {'inset':_nan_exclude})
-        out = GateGroup(TT_subtract, gate, nexcl, title=title)
-    else:
-        out = GateGroup(_TT_ft, gate, title=title)
-    return out
+    return _make_real_gate(column, LIN_GT_gate, mn, False, exclude_nan, outside_expand, title)
 
     
 def make_geq_gate(column:Column, mn:float, exclude_nan:bool=True, outside_expand:bool=False)->GateGroup:
@@ -586,18 +600,8 @@ def make_geq_gate(column:Column, mn:float, exclude_nan:bool=True, outside_expand
         Gate representing all rows with column value greater than or equal to mn.
 
     """
-    if column.atomic:
-        gate = Gate(LIN_GEQ_gate, (column, ), dict(vec=np.array([1.0]), m=float(mn)))
-    else:
-        gate =Gate(LIN_GEQ_gate, (column, ), dict(vec=np.array([1.0]), m=float(mn)), 
-                   expand=outside_expand)
     title = fr'{column.name()} \geq {mn}'
-    if np.issubdtype(column._get_coldef().dtype, np.floating) and not exclude_nan:
-        nexcl = Gate(ISIN_gate, column, {'inset':_nan_exclude})
-        out = GateGroup(TT_subtract, gate, nexcl, title=title)
-    else:
-        out = GateGroup(_TT_ft, gate, title=title)
-    return out
+    return _make_real_gate(column, LIN_GEQ_gate, mn, False, exclude_nan, outside_expand, title)
 
 
 def make_lt_gate(column:Column, mx:float, exclude_nan:bool=True, outside_expand:bool=False)->GateGroup:
@@ -624,18 +628,8 @@ def make_lt_gate(column:Column, mx:float, exclude_nan:bool=True, outside_expand:
         Gate representing all rows with column value less than mx.
 
     """
-    if column.atomic:
-        gate = Gate(LIN_GEQ_gate, column, dict(vec=np.array([1.0]), m=float(mx)))
-    else:
-        gate = Gate(LIN_GEQ_gate, column, dict(vec=np.array([1.0]), m=float(mx)), 
-                    expand= not outside_expand)
     title = fr'{column.name()} \lt {mx}'
-    if np.issubdtype(column._get_coldef().dtype, np.floating) and exclude_nan:
-        nexcl = Gate(ISIN_gate, (column, ), {'inset':_nan_exclude})
-        out = GateGroup(_TT_andnn, gate, nexcl, title=title)
-    else:
-        out = GateGroup(_TT_tf, gate, title=title)
-    return out
+    return _make_real_gate(column, LIN_GEQ_gate, mx, True, exclude_nan, outside_expand, title)
 
 
 def make_leq_gate(column:Column, mx:float, exclude_nan:bool=True, outside_expand:bool=False)->GateGroup:
@@ -663,19 +657,59 @@ def make_leq_gate(column:Column, mx:float, exclude_nan:bool=True, outside_expand
         Gate representing all rows with column value less than or equal to mx.
 
     """
-    if column.atomic:
-        gate = Gate(LIN_GT_gate, column, dict(vec=np.array([1.0]), m=float(mx)))
-    else:
-        gate = Gate(LIN_GT_gate, column, dict(vec=np.array([1.0]), m=float(mx)), 
-                    expand= not outside_expand)
     title = fr'{column.name()} \leq {mx}'
+    return _make_real_gate(column, LIN_GT_gate, mx, True, exclude_nan, outside_expand, title)
 
-    if np.issubdtype(column._get_coldef().dtype, np.floating) and exclude_nan:
-        nexcl = Gate(ISIN_gate, (column, ), {'inset':_nan_exclude})
-        out = GateGroup(_TT_andnn, gate, nexcl, title=title)
+
+_TT_rng_nan = np.array([[[False, False],[True, False]],
+                        [[True, False],[False, False]]], dtype=np.bool_)
+_TT_rng_nan.setflags(write=False)
+
+def make_range_gate(column:Column, mn:Real, mx:Real, 
+                    exclude_nan:bool=True, outside_expand:bool=False)->GateGroup:
+    """
+    Create a gate for values in column in half open interval :math:`[mn, mx)`
+
+    Parameters
+    ----------
+    column : Column
+        Column on which gate is based.
+    mn : Real
+        minimum value of column (inclusive, ie greater than or equal to).
+    mx : Real
+        maximum value of column (exclusive, ie less than).
+    exclude_nan : bool, optional
+        Whether to exclude NAN values from gate.
+        The default is True
+    outside_expand : bool, optional
+        Whether gate should incldue rows outsid of parent_gate. 
+        **Only for non-atomic columns**, ignored if column is atomic.
+        The default is False.
+
+    Returns
+    -------
+    GateGroup
+        Gate representing all rows with column value greater than or equal to 
+        mn and less than mx.
+
+    """
+    if mn >= mx:
+        warn(f"maximum value less than or equal to minimum, gate will be empty ({mx}, {mn})")
+    cdef = column._get_coldef()
+    conv = _col_type_conv(cdef)
+    if column.atomic:
+        gatel = Gate(LIN_GEQ_gate, (column, ), dict(vec=np.array([1.0]), m=conv(mn)))
+        gateh = Gate(LIN_GEQ_gate, (column, ), dict(vec=np.array([1.0]), m=conv(mx)))
     else:
-        out = GateGroup(_TT_tf, gate, title=title)
-    return out
+        gatel = Gate(LIN_GEQ_gate, (column, ), dict(vec=np.array([1.0]), m=conv(mn)),
+                     expand=outside_expand)
+        gateh = Gate(LIN_GEQ_gate, (column, ), dict(vec=np.array([1.0]), m=conv(mx)),
+                     expand=not outside_expand)
+    title = fr'\leq {mn} {column.name()} \le {mx}'
+    if not exclude_nan:
+        nexcl = Gate(ISIN_gate, (column, ), {'inset':_nan_exclude})
+        return GateGroup(_TT_rng_nan, nexcl, gatel, gateh, title=title)
+    return GateGroup(TT_subtract, gatel, gateh, title=title)
 
 
 def _rotation_matrix(theta:float)->np.ndarray[np.double]:

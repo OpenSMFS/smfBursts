@@ -74,3 +74,4 @@ smfbursts_citations = tuple(f.citation for f in _fbccite)
 
 create_citation_group('slidingwindowsearch', 'EggelingPNAS1988','FriesJPC1988', 'IngargiolaPLOSOne2016')
 create_citation_group('flcs', 'GhoshMethods2018', 'FelekyanChemPhysChem2012')
+create_citation_group('PIE', 'MullerBiophysJ2005', 'LaurencePNAS2005')

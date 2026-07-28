@@ -78,7 +78,9 @@ from textwrap import wrap
 
 class Citation:
     """
-    
+    Object representing single reference/citation. Contains a short name tag str
+    for referencing with :func:`cite` and :func:`add_citation`, the full citation
+    string, and dictionary of additional styles (default bibtex and ris)
     
     Parameters
     ----------
@@ -721,23 +723,17 @@ def add_citation(*args, tags:list[str]=None, cite_groups:list[str]=None, citatio
     
     #. \* args: specify cite-groups and tags together::
     
-        @cite('tag1', 'tag2', 'group3', 'group4', purpose='method')
-        def mymethod(*args, **kwargs):
-            ...
+        add_citation('tag1', 'tag2', 'group3', 'group4', purpose='method')
     
     #. tag/cite-group keyword arguments, useful if tag and cite-group share a name::
     
-        @cite(tags=['tag1', 'tag2'], cite_groups=['group3', 'group4'], purpose='method')
-        def mymethod(*args, **kwargs):
-            ...
+        add_citation(tags=['tag1', 'tag2'], cite_groups=['group3', 'group4'], purpose='method')
     
     #. tags, citations, styles keyword arguments: specify new citations, completing each field::
     
-        @cite(tags=['tag1', 'tag2'], citations=['citation1', 'citation2'],
-                    styles=[{'bibtex':'bibtex1', 'ris':'ris1'},
-                            {'bibtex':'bibtex2', 'ris':'ris2}], purpose='method')
-        def mymethod(*args, **kwargs):
-            ...
+        add_citation(tags=['tag1', 'tag2'], citations=['citation1', 'citation2'],
+                     styles=[{'bibtex':'bibtex1', 'ris':'ris1'},
+                             {'bibtex':'bibtex2', 'ris':'ris2}], purpose='method')
     
     Of these three, the the first is strongly prefered, where citations are registered beforehand with
     the :func:`register_citation` functions, and citation groups created beforehand with the

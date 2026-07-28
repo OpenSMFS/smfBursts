@@ -169,6 +169,47 @@ UR  - https://doi.org/10.1038/s41592-018-0085-0
 DO  - 10.1038/s41592-018-0085-0
 ER  - 
 TY  - JOUR
+TI  - Alternating-Laser Excitation of Single Molecules
+AU  - Kapanidis, Achillefs N
+AU  - Laurence, Ted A
+AU  - Lee, Nam Ki
+AU  - Margeat, Emmanuel
+AU  - Kong, Xiangxu
+AU  - Weiss, Shimon
+T2  - Accounts of Chemical Research
+DA  - 2005/07//
+PY  - 2005
+DO  - 10.1021/ar0401348
+VL  - 38
+IS  - 7
+SP  - 523
+EP  - 533
+PB  - American Chemical Society
+SN  - 0001-4842
+ER  - 
+TY  - JOUR
+TI  - Probing structural heterogeneities and fluctuations of nucleic acids and denatured proteins
+AU  - Laurence, Ted A.
+AU  - Kong, Xiangxu
+AU  - Jager, M.
+AU  - Weiss, Shimon
+T2  - Proceedings of the National Academy of Sciences
+DA  - 2005/11/29/
+PY  - 2005
+DO  - 10.1073/pnas.0508584102
+VL  - 102
+IS  - 48
+SP  - 17348
+EP  - 17353
+SN  - 0027-8424
+UR  - http://www.pnas.org/cgi/doi/10.1073/pnas.0508584102
+KW  - Protein folding
+KW  - Single-molecule fluorescence spectroscopy
+KW  - Conformational dynamics
+KW  - Fluorescence resonance energy transfer
+KW  - Nucleic acid structure
+ER  - 
+TY  - JOUR
 TI  - Fast, flexible algorithm for calculating photon correlations
 AU  - Laurence, Ted A.
 AU  - Fore, Samantha
@@ -205,6 +246,22 @@ EP  - 2198
 PB  - Elsevier
 SN  - 00063495
 UR  - http://dx.doi.org/10.1529/biophysj.106.093591
+ER  - 
+TY  - JOUR
+TI  - Pulsed interleaved excitation
+AU  - Müller, Barbara K.
+AU  - Zaychikov, Evgeny
+AU  - Bräuchle, Christoph
+AU  - Lamb, Don C.
+T2  - Biophysical Journal
+DA  - 2005///
+PY  - 2005
+DO  - 10.1529/biophysj.105.064766
+VL  - 89
+IS  - 5
+SP  - 3508
+EP  - 3522
+SN  - 00063495
 ER  - 
 TY  - JOUR
 TI  - Shot-noise limited single-molecule FRET histograms: Comparison between theory and experiments
@@ -293,4 +350,22 @@ U1  - 27532626 [PMID]
 U1  - PMC4988647 [PMCID]
 Y2  - 2025/10/21
 ER  - 
-
+TY  - JOUR
+TI  - Photon-by-Photon Determination of Emission Bursts from Diffusing Single Chromophores
+AU  - Zhang, Kai
+AU  - Yang, Haw
+T2  - The Journal of Physical Chemistry B
+DA  - 2005/11/01/
+PY  - 2005
+DO  - 10.1021/jp0546047
+DP  - DOI.org (Crossref)
+VL  - 109
+IS  - 46
+SP  - 21930
+EP  - 21937
+J2  - J. Phys. Chem. B
+LA  - en
+SN  - 1520-6106, 1520-5207
+UR  - https://pubs.acs.org/doi/10.1021/jp0546047
+Y2  - 2026/07/17/05:27:37
+ER  - 

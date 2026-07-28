@@ -13,6 +13,10 @@ and the various attributes and tables that can be defined thereof.
 .. |TypeValidator| replace:: :class:`TypeValidator <smfbursts.datamodel.immutabledata.TypeValidator>`
 .. |DiskDict| replace:: :class:`smfbursts.datamodel.diskdict.DiskDict`
 .. |DataSet| replace:: :class:`smfbursts.datamodel.tables.DataSet`
+.. |paramproperty| replace:: :class:`smfbursts.datamodel.tables.paramproperty`
+.. |Param| replace:: :class:`Param <smfbursts.datamodel.tables.Param>`
+.. |DetDef| replace:: :class:`DetDef <smfburts.ph_sel.DetDef>`
+.. |classmethod| replace:: `classmethod() <https://docs.python.org/3/library/functions.html#classmethod>`__
 """
 from typing import Union, Any, ClassVar, Literal
 from collections.abc import Sequence, Iterator, Hashable, Callable
@@ -24,6 +28,8 @@ import hashlib
 
 import numpy as np
 import tables as tb
+
+from phconvert.hdf5 import save_photon_hdf5
 
 from .datamodel.utils import (
     tupledict, ImDict, arr_slc, union_multi, enumerate_intersects, get_unit_prefix
@@ -37,7 +43,7 @@ from .datamodel.tables import (
     TableLike, BaseTable, ChildTable, DataSet, DataSetList, TableConstructionError,
     paramproperty, Param, ColumnDef, Column, Gate, GateGroup, GroupFuture
     )
-from .cite import cite
+from .cite import cite, add_citation
 
 import smfbursts.cfuncs as smc
 
@@ -206,7 +212,7 @@ def _proc_size(imdata:"PhArray", kwarg_append:dict)->dict:
 
 TV_pharray_mtch = TV_ndarray(dims=arr_slc[:], data_proc=_proc_size)
 
-
+    
 class PhArray(AttrDD, TypedValueDD):
     """
     |DiskDict| of data from single photon counting measurement.
@@ -551,7 +557,8 @@ class MutTracked(metaclass=_MutTracked):
 
 class PhotonData(DataSet):
     r"""
-    |DataSet| for PhotonData
+    |DataSet| for confocal single photon counting data. Typically single molecule
+    diffusion based data.
     
     Parameters
     ----------
@@ -664,6 +671,12 @@ class PhotonData(DataSet):
                 raise TypeError(f"irf_thresh must be specified as dict of keys as PhSel:int, not {type(irf_thresh)}") from e
         for ph_sel, thresh in irf_thresh.items():
             self._irf_thresh[ph_sel] = thresh
+        # add citations for ns/usALEX/PIE
+        if 'ex_ranges' in self.setup:
+            if 'alex_period' in self.setup:
+                add_citation('KapanidisACR2005', purpose='using usALEX')
+            else:
+                add_citation('PIE', purpose="using PIE/nsALEX")
 
     def _check_irf(self, phsel:PhSel, hst:np.ndarray)->tuple[PhSel,np.ndarray[np.int64]]:
         """Check irf key value pair- ie phsel in range and hst correct size/type"""
@@ -919,6 +932,29 @@ class PhotonData(DataSet):
         return outgroup
 
     def save(self, *args:Param, group:tb.Group=None, save_sorted:bool=None)->tb.Group:
+        """
+        Save the processed data (tables defined by |Param|, sorted photons if necessary) 
+        into an HDF5 file (**not** necessarily photonHDF5).
+
+        Parameters
+        ----------
+        *args : Param
+            |Param| objects defining the tables to save.
+        group : tb.Group, optional
+            Pytables group defining where to save the tables 
+            (each table saved in subgroup).
+            If None, assume saving to HDF5 file open by self. 
+            The default is None.
+        save_sorted : bool, optional
+            Whether to also save the "sorted" photon times/indexes/nanotimes. 
+            The default is None.
+
+        Returns
+        -------
+        tables.Group
+            Pytables group where the data was saved.
+
+        """
         return self._save(*args, group=group, save_sorted=save_sorted)
 
     def save_photonHDF5(self, file:str|PathLike|tb.File, save_sorted:bool=False, 
@@ -1181,8 +1217,8 @@ class PhotonDataList(DataSetList):
         """
         return super().save(*args, group=group, name=name, save_sorted=save_sorted)
 
-    def save_photonHDF5(self, file:str|PathLike|tb.File, 
-                               save_sorted:bool=False, close:bool=None)->tb.File:
+    def save_photonHDF5(self, file:str|PathLike|tb.File, save_processed:bool=False,
+                               save_sorted:bool=False, close:bool=None, **kwargs)->tb.File:
         """
         Save data in PhotonHDF5 format. Computed tables will be saved
         under ``/user/smfBursts/photon_data[x]`` groups.
@@ -1191,6 +1227,9 @@ class PhotonDataList(DataSetList):
         ----------
         file : str|PathLike|tb.File
             Path to file where data is to be saved.
+        save_processed : bool, optional
+            Whether or not to save analyzed tables in ``user/smfBursts/photon_data[x]``.
+            The default is False
         save_sorted : bool, optional
             Whether to also record the sorted photons in 
             ``user/smfBursts/photon_data[x]`` group. 
@@ -1205,20 +1244,42 @@ class PhotonDataList(DataSetList):
             File object where data was saved.
 
         """
-        # TODO: change this part of the checking to make sure saving rules are correct, currenlty fails when no previous HDF5 created
-        ref = self._datas[0]._ref
-        if any(data._ref is None or data._ref != ref for data in self._datas):
+        if any(data._ref is None for data in self._datas):
             raise ValueError("Inconsistent or deleted raw data, cannot save raw HDF5 data")
         close = isinstance(file, str) if close is None else bool(close)
         try:
             file = file if isinstance(file, tb.File) else tb.open_file(file, 'a')
-            self._ref.save_photonHDF5(file, close=False)
-            if 'user/smfBursts/photon_data0' not in file.root:
-                file.create_group('/user/smfBursts', 'photon_data0', createparents=True)
-            group = file.root.user.smfBursts.photon_data0
-            for i, phdata in enumerate(self._datas):
-                phdata._save(group=file.create_group(group, f'photon_data{i}'), 
-                             save_sorted=save_sorted, _strict=False)
+            # if self was made by combining data sets, build dictionary and save
+            if any(self.datas[0]._ref is not data._ref for data in self.datas[1:]):
+                hdf5_dict = self.datas[0]._ref.as_photonHDF5_dict # initialize HDF5 dict
+                detectors = dict() # arrays for setup/detectors groups
+                if len(self.datas) > 1:
+                    for i, data in enumerate(self.datas):
+                        temp_dict = data._ref.as_photonHDF5_dict
+                        if 'photon_data' in temp_dict:
+                            hdf5_dict[f'photon_data{i}'] = temp_dict['photon_data']
+                        else:
+                            raise ValueError("Cannot re-map photon_data numbers, combining multispot HDF5 files not yet supported")
+                        for key, val in temp_dict['setup']['detectors'].items():
+                            if key not in detectors:
+                                detectors[key] = val
+                            else:
+                                detectors[key] = np.concatenate([detectors[key], val])
+                setup = hdf5_dict['setup']
+                setup['detectors'] = detectors
+                setup['num_spots'] = len(self.datas)
+                setup['num_pixels'] = len(self.datas)*setup['num_spectral_ch']*setup['num_polarization_ch']*setup['num_split_ch']
+                kwargs['h5_file'] = file
+                # Save dict
+                save_photon_hdf5(hdf5_dict, close=close, **kwargs)
+            # if all datas from save HDF5 data set, can save directly
+            else:
+                self.datas[0]._ref.save_photonHDF5(file, close=close, **kwargs)
+            if save_processed:
+                for i, phdata in enumerate(self._datas):
+                    group = file.root.user.smfBursts.photon_data0
+                    phdata._save(group=file.create_group(group, f'photon_data{i}'), 
+                                 save_sorted=save_sorted, _strict=False)
         except Exception as e:
             raise e
         finally:
@@ -1463,9 +1524,9 @@ class BasePhotonTable(PhotonTable, BaseTable):
     Base Photon Columns
     -------------------
     
-        istarttime : int
+        istarttime : int ()
             time of first photon in range
-        istoptime : int
+        istoptime : int ()
             time of last photon in range
         ph_mask : np.ndarray[np.bool\_], (ph_sel:PhSel, )
             mask of photons in ``ph_sel`` vs all photons in range for each range
@@ -1512,6 +1573,8 @@ class BasePhotonTable(PhotonTable, BaseTable):
             ph_sel should have same irf_thresh in origin data, and be reasonable to
             be treated collectively (single stream, or at least same excitation and
             emission).
+        nmdiff : float : (phsel_a:PhSel, phsel_b:PhSel)
+            Difference in nanomean between phsel_a and phsel_b.
         
     Remapped Columns
     ----------------
@@ -1576,7 +1639,11 @@ class BasePhotonTable(PhotonTable, BaseTable):
 
     @paramproperty
     def detdef(cls, param:Param)->DetDef:
-        """Method should take param and extract the DetDef"""
+        """
+        Usually |paramproperty|, ``detdef`` must be accesible from 
+        ``param.detdef`` and ``table.detdef`` as attribute 
+        defining the |DetDef| of the |Param|.
+        """
         raise NotImplementedError("subclasses of BasePhotonTable must implement detdef method")
     
     def _get_istarttime(self)->np.ndarray[np.int64]:
@@ -1858,7 +1925,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
     def _get_max_rate_title(cls, col:Column, include_unit:bool=True, origin:PhotonData=None)->str:
         """Title getter function for max_rate column"""
         title = _title_sels(r'peak\: rate _{%d}r' % (col.keytup[1],), origin, col.keytup[0])[0]
-        title = _title_unit_append(title, 'cnts s^{-1}', include_unit)
+        title = _title_unit_append(title, r'cnts\:s^{-1}', include_unit)
         return f'${title}$'
 
     @classmethod
@@ -1907,7 +1974,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
         num, dem = _title_sels('n', origin, *col.keytup[:2])
         return r'$_{%d,\: excess}\sigma_{%s/%s}$' % (col.keytup[2], num, dem)
 
-    def _iter_nanomean(self, phsel:PhSel)->float:
+    def _iter_nanomean(self, phsel:PhSel)->Iterator[float]:
         """Iter function for nanomean column"""
         phsel = phsel.render_positive(self.origin.detdef, convert_all=True)
         stream_ids = self.origin.detdef.get_stream_ids(phsel)
@@ -1937,7 +2004,20 @@ class BasePhotonTable(PhotonTable, BaseTable):
         title = _title_sels(r'\bar \tau', origin, col.keytup[0])[0]
         title = _title_unit_append(title, 's', include_unit)
         return f'${title}$'
+    
+    def _iter_nmdiff(self, phsel_a:PhSel, phsel_b:PhSel)->Iterator[float]:
+        """Iterator for difference between nanomeans"""
+        for nma, nmb in zip(self.iter_column('nanomean', phsel_a),
+                            self.iter_column('nanomean', phsel_b)):
+            yield nma - nmb
 
+    @classmethod
+    def _get_nmdiff_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """Title getter function for nanomean"""
+        ta, tb = _title_sels(r'\bar \tau', origin, *col.keytup[:2])
+        title = _title_unit_append(f'{ta}-{tb}', 's', include_unit)
+        return f'${title}$'
+    
     def _iter_nanohist(self, phsel:PhSel, full:bool)->Iterator[np.uint16]:
         """Iter function for nanohist column"""
         if not phsel.positive:
@@ -2009,6 +2089,9 @@ _basetimecolumndefs = (
               get_derived=True, dtype=np.dtype('<i8'), ndim=2),
     ColumnDef('nanomean', (PhSel, ), 0, 'user', iter_func='_iter_nanomean', get_derived=True,
               dtype=np.dtype('<f8'), title_func='_get_nanomean_title', unit='s'),
+    ColumnDef('nmdiff', (PhSel, PhSel), 0, 'user', iter_func='_iter_nmdiff', get_derived=True,
+              dtype=np.dtype('<f8'), title_func='_get_nmdiff_title', unit='s'),
+    
     ColumnDef('E_raw', tuple(), 0, remap='_replace_E_raw'),
     ColumnDef('S_raw', tuple(), 0, remap='_replace_S_raw'),
                   )
@@ -2058,7 +2141,11 @@ class ChildPhotonTable(PhotonTable, ChildTable):
 
     @paramproperty
     def detdef(cls, param:Param)->DetDef:
-        """DetDef of param, shortcut to access fields about detdef in subclasses"""
+        """
+        Usually |paramproperty|, ``detdef`` must be accesible from 
+        ``param.detdef`` and ``table.detdef`` as attribute 
+        defining the |DetDef| of the |Param|.
+        """
         return param.base_param.detdef
     
     @paramproperty

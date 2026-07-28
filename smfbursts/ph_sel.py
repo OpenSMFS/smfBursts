@@ -39,8 +39,10 @@ Photon selectiosn are achieved through 2 classes, a base class the user usually 
 interact with, and a wrapper class that is the general way of specifying and selecting
 photon streams.
 
-#. :class:`PhStream` the foundational photon selection class, which defines a set of detectors with certain traits in common
-#. :class:`PhSel` the higher level class, which allows any arbitrary selection of streams, by concatenating multiple :class:`Ph_stream` objects
+#. :class:`PhStream` the foundational photon selection class, 
+   which defines a set of detectors with certain traits in common
+#. :class:`PhSel` the higher level class, which allows any arbitrary selection of streams, 
+   by concatenating multiple :class:`PhStream` objects
 
 With :class:`PhSel` , any stream can be specified, and any combination can be specified.
 
@@ -64,7 +66,7 @@ For instance::
 will take all photons during Donor excitation, regarless of whether they came in 
 the Donor or Acceptor emission channels, or polarization, or split.
 
-Finally, :class:`Ph_stream` and :class:`PhSel` are immutable and hashable, and 
+Finally, :class:`PhStream` and :class:`PhSel` are immutable and hashable, and 
 thus can be used as dictionary keys.
 """
 
@@ -367,8 +369,51 @@ def read_channelset(group:tb.Group, dct:dict)->ChannelSet:
     return ChannelSet(rep[0], rep[1:])
 
 
+def encode_channelset(val:ChannelSet)->tuple[bool,int,...]:
+    """
+    Encoder for :class:`ChannelSet` objects, converting to tuple storable in
+    msgpack bytes.
+
+    Parameters
+    ----------
+    val : ChannelSet
+        :class:`ChannelSet` to convert to tuple to store in msgpack bytes.
+
+    Returns
+    -------
+    tuple[bool,int,...]
+        Tuple specifying kind and values of :class:`ChannelSet` to be stored
+        in msgpack bytes.
+
+    """
+    return val.kind, *sorted((int(v) for v in val.elements))
+
+
+def decode_channelset(val:tuple[bool,int,...])->ChannelSet:
+    """
+    Decoder for tuple from msgpack bytes to conver to :class:`ChannelSet`.
+
+    Parameters
+    ----------
+    val : tuple[bool,int,...]
+        Value retrieved from msgpack bytes to convert to :class:`ChannelSet`.
+
+    Returns
+    -------
+    ChannelSet
+        :class:`ChannelSet` converted from tuple from msgpack bytes.
+
+    """
+    return ChannelSet(val[1], frozenset(val[2:]))
+
+
 TypeValidator.register_grouptype("ChannelSet", read_channelset)
-TV_channelset = TypeValidator(ChannelSet, check_channelset, write_channelset)
+
+#: :class:`TypeValidator` for :class:`ChannelSet` objects.
+#: Uses :func:`check_channelset` as check func.
+#: There are no default options.
+TV_channelset = TypeValidator(ChannelSet, check_channelset, 
+                              encode_channelset, decode_channelset, write_channelset)
 
 _StreamTypes = ('ex', 'em', 'pol', 'split')
 
@@ -873,7 +918,7 @@ class PhSel:
             return 'none'
         elif self == phsel_all:
             return 'all'
-        return '_'.join(str(stream) for stream in self.streams)
+        return '_'.join(str(stream) for stream in sorted(self.streams, key=hash))
 
     def __repr__(self):
         text = str(self.__class__) + '\n'
@@ -1093,7 +1138,7 @@ def _chain_streams(val:Union[PhStream,PhSel])->Iterator[PhStream]:
         yield from (val, )
 
 
-sep = re.compile(r'^((\s*[,;]?\s*)|_|())$')
+_sep = re.compile(r'^((\s*[,;]?\s*)|_|())$')
 
 
 def _stream_iter(streams:str, id_rgx:str, cat_rgx:str)->re.Match:
@@ -1102,11 +1147,11 @@ def _stream_iter(streams:str, id_rgx:str, cat_rgx:str)->re.Match:
     pos = 0 # where in the stream the last match came from
     for mtch in stream_frag_regex.finditer(streams):
         beg, pos_t = mtch.span()
-        if not sep.match(streams[pos:beg]):
+        if not _sep.match(streams[pos:beg]):
             raise ValueError(f"Invalid termination sequence: '{streams[pos:beg]}'")
         pos = pos_t
         yield mtch
-    if not sep.match(streams[pos:]):
+    if not _sep.match(streams[pos:]):
         raise ValueError(f"Invalid stream separator: '{streams[pos:]}'")
 
 
@@ -1126,7 +1171,7 @@ def gen_re_fs(cat_strs:Sequence[str])->str:
 
 
 _asep = re.compile(r'^,?\s*$')
-is_asep = lambda s: bool(_asep.match(s))
+_is_asep = lambda s: bool(_asep.match(s))
 
 #: Photon selection representing all possible streams
 phsel_all = PhSel(_psall)
@@ -1170,7 +1215,7 @@ def _parse_streams(streams:str, part_map:dict[str:set[np.uint8]])->PhSel:
                 pos = 0
                 for det in arr_regex.finditer(det_str):
                     span = det.span()
-                    if not is_asep(det_str[pos:span[0]]):
+                    if not _is_asep(det_str[pos:span[0]]):
                         raise KeyError(f"Invalid separator: {det_str[pos:span[0]]} between stream indices")
                     if det.group(2):
                         if det.group(2) in part_map[categ]:
@@ -1183,7 +1228,7 @@ def _parse_streams(streams:str, part_map:dict[str:set[np.uint8]])->PhSel:
                     elif det.group(3):
                         dets |= {np.uint8(det.group(3))}
                     pos = span[1]
-                if not is_asep(det_str[pos:]):
+                if not _is_asep(det_str[pos:]):
                     raise KeyError(f"Invalid termination of array: {det_str[pos:]}")
             ph_stream[categ] = ChannelSet(kind, dets)
         ph_streams.append(PhStream(**ph_stream))
@@ -1256,7 +1301,7 @@ class DetDef:
         repeats = [k for k in kwargs.keys() if k in self._params[:len(args)]]
         if repeats:
             raise TypeError("got multiple instances for the following arguments: {repeats}")
-        shape = np.ones(len(self._params), dtype=np.uint8)
+        shape = np.ones(len(self._params), dtype='<u1')
         for i, value in enumerate(args):
             shape[i] = value
         for key, value in kwargs.items():
@@ -1492,7 +1537,47 @@ def node_read_PhSel(val:str)->PhSel:
     """Read node-string of PhSel, for use in TypeValidator object"""
     return PhSel.from_attr_str(val)
 
-TV_PhSel = register_byteslike(PhSel, check_PhSel, dread_PhSel, dwrite_PhSel, 'phsel', node_repr_PhSel, node_read_PhSel)
+
+def encode_phsel(val:PhSel)->tuple[str,]:
+    """
+    Encoder for :class:`PhSel` to convert to tuple storable in msgpack bytes.
+    Converts to single tuple of string representation of :class:`PhSel`
+
+    Parameters
+    ----------
+    val : PhSel
+        :class:`PhSel` to convert to tuple for storage in msgpackbytes.
+
+    Returns
+    -------
+    tuple[str,]
+        String representation of :class:`PhSel`, storable in msgpack bytes.
+
+    """
+    return str(val), 
+
+
+def decode_phsel(val:tuple[str])->PhSel:
+    """
+    Decode tuple from msgpack bytes to convert to :class:`PhSel`.
+
+    Parameters
+    ----------
+    val : tuple[str]
+        tuple from msgpack to convert to :class:`PhSel`.
+
+    Returns
+    -------
+    PhSel
+        :class:`PhSel` from val.
+
+    """
+    return PhSel(val[1])
+
+#: :class:`TypeValidator` for :class:`PhSel` 
+TV_PhSel = register_byteslike(PhSel, check_PhSel, encode_phsel, decode_phsel, 
+                              dread_PhSel, dwrite_PhSel, 
+                              'phsel', node_repr_PhSel, node_read_PhSel)
 
 
 def _none_or_equal(detdef:DetDef, val:int, spec:str)->None:
@@ -1501,7 +1586,8 @@ def _none_or_equal(detdef:DetDef, val:int, spec:str)->None:
         raise ValueError(f"DetDef has {getattr(detdef, spec)}, but expected {val} for {spec}")
 
 
-def check_DetDef(val:DetDef, ex=None, em=None, pol=None, split=None, **kwargs)->DetDef:
+def check_DetDef(val:DetDef, ex:int|None=None, em:int|None=None, 
+                 pol:int|None=None, split:int|None=None, **kwargs)->DetDef:
     """
     Check function for :class:`DetDef` to be used in TypeValidator.
 
@@ -1509,15 +1595,15 @@ def check_DetDef(val:DetDef, ex=None, em=None, pol=None, split=None, **kwargs)->
     ----------
     val : DetDef
         :class:`DetDef` to convert/verify.
-    ex : int|None, optional
+    ex : int | None, optional
         Number of expected ex channels. The default is None.
-    em : TYPE, optional
+    em : int | None, optional
         Number of expected em channels. The default is None.
-    pol : TYPE, optional
+    pol : int | None, optional
         Number of expected pol channels. The default is None.
-    split : TYPE, optional
+    split : int | None, optional
         Number of expected split channels. The default is None.
-    **kwargs : TYPE
+    **kwargs : Any
         Ignored, necessary for use in TypeValidator.
 
     Raises
@@ -1561,18 +1647,52 @@ def dwrite_DetDef(val:DetDef)->np.ndarray[np.uint8]:
     return val.shape
 
 
-TV_DetDef = register_byteslike(DetDef, check_DetDef, dread_DetDef, dwrite_DetDef)
+def encode_detdef(val:DetDef)->tuple[bytes,]:
+    """
+    Encoder for :class:`DetDef` to create tuple to store in msgpack bytes.
+
+    Parameters
+    ----------
+    val : DetDef
+        :class:`DetDef` to convert to tuple to be stored in msgpack bytes.
+
+    Returns
+    -------
+    tuple[bytes,]
+        single-tuple of shape array bytes to store in msgpack bytes.
+
+    """
+    return val.shape.tobytes(), 
 
 
-def _sort_phsels_by_index(detdef, phsels:Sequence[PhSel])->tuple[tuple[PhSel,...],np.ndarray[np.int64]]:
-    stream_ids = tuple(detdef.get_stream_ids(sel) for sel in phsels)
-    max_stream = max(s.shape[0] for s in stream_ids)
-    stream_arr = -np.ones((max_stream, len(stream_ids)), dtype=np.int16)
-    for i, s in enumerate(stream_ids):
-        stream_arr[:s.size,i] = s
-    sort = np.lexsort(stream_arr)
-    out =  tuple(phsels[i] for i in sort)
-    return out, sort
+def decode_detdef(val:tuple[bytes,])->DetDef:
+    """
+    Decoder for :class:`DetDef` to convert msgpack tuple to :class:`DetDef`
+
+    Parameters
+    ----------
+    val : tuple[bytes,]
+        msgpack read tuple of :class:`DetDef` to be converted to :class:`DetDef`.
+
+    Returns
+    -------
+    DetDef
+        :class:`DetDef` converted from val.
+
+    """
+    return DetDef(*np.frombuffer(val[1], dtype='<u1'))
+
+
+#: :class:`TypeValidator` for ;class:`DetDef` objects.
+#: Uses :func:`check_DetDef` as check func.
+#: Has the following options:
+#: 
+#: - ex: (int) expected size of ex channel
+#: - em: (int) expected size of em channel
+#: - pol: (int) expected size of pol channel
+#: - split: (int) expected size of split channel
+TV_DetDef = register_byteslike(DetDef, check_DetDef, encode_detdef, decode_detdef, 
+                               dread_DetDef, dwrite_DetDef)
 
 
 def sort_phsels(phsels:Sequence[PhSel], detdef:DetDef=None, return_index:bool=False)->tuple[PhSel,...]:

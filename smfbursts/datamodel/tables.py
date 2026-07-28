@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 # Created on Fri Feb 28 07:15:41 2025
 # @author: paul
-
 """
 The tables module defines the core of the data model of smfBursts.
 
@@ -65,6 +64,7 @@ objects combine with logical operations.
 
 
 .. |DiskDict| replace:: :class:`smfbursts.datamodel.disckdict.DiskDict`
+.. |classmethod| replace:: `classmethod() <https://docs.python.org/3/library/functions.html#classmethod>`__
 """
 from itertools import chain, product, permutations
 from collections import Counter
@@ -78,16 +78,16 @@ import re
 import os
 from numbers import Number, Real
 from dataclasses import dataclass
-from functools import partial
+from functools import partial, update_wrapper
 
 import numpy as np
 import pandas as pd
 import tables as tb
 
 from .utils import (
-    tupledict, FixedDict, ImDict, _echo, arr_slc, _make_sortable, 
-    _nested_set, _nested_pop, _ImDataLike, kwarg_like, _FileFinalizer, 
-    _GroupFuture, GroupFuture, _masked_iter, _delayed_iter, _indent
+    tupledict, FixedDict, ImDict, _echo, arr_slc, _make_sortable, _nested_dict_mergekey,
+    _nested_set, _nested_pop, _nested_get, _nested_in, _ImDataLike, kwarg_like, _FileFinalizer, 
+    _GroupFuture, GroupFuture, _masked_iter, _delayed_iter, _indent, broadcast_truthtable
     )
 from .immutabledata import (
     TypeValidator, _ImData,TV_int, TV_bool, TV_str, TV_attrstr, TV_attrstr_allow_empty, 
@@ -97,7 +97,7 @@ from .immutabledata import (
 from .diskdict import DiskDict, MaskedDD
 
 
-def _check_appendable_param(val:Any)->Callable[[dict],tuple["ParamDef",...]]:
+def _check_appendable_paramparent(val:Any)->Callable[[dict],tuple["ParamDef",...]]:
     """
     Function checks value of append_params in ParamDef, and ensures it is
     a function that can be used to append additional parameters
@@ -132,6 +132,9 @@ class ParamDef(_ImDataLike):
     append_params : Callable[[dict], tuple[ParamDef,...]], optional
         Fuction that returns tuple of ParamDefs to be added to param_defs based 
         on value of given param. 
+    append_parents : Callable[[dict],tuple[ParentDef,...]]
+        Function that retures a tuple fo ParentDefs to be added to the param_defs
+        based on teh value of the params tupledict.
     unit : str, optional
         String defining the unit (if any) to give to parameter in description.
         Default is empty string
@@ -148,16 +151,49 @@ class ParamDef(_ImDataLike):
     #: Function that takes params and returns tupel of :class:`ParamDef` s that
     #: are conditional on other params
     append_params: Callable[[dict],tuple["ParamDef",...]]
+    append_parents : Callable[[dict],tuple["ParentDef",...]]
     #: string name of unit
     unit: str
-    __slots__ = ('name', 'type_validator', 'required', 'default', 'append_params', 'unit')
+    __slots__ = ('name', 'type_validator', 'required', 'default', 
+                 'append_params', 'append_parents', 'unit')
     _setfuncs = ImDict(name=TV_attrstr.check_val, type_validator=TypeValidator.convert_type, 
-                       required=bool, append_params=_check_appendable_param, unit=str)
+                       required=bool, append_params=_check_appendable_paramparent,
+                       append_parents=_check_appendable_paramparent, unit=str)
     _required = frozenset({'name', 'type_validator', 'required'})
     _defaults = ImDict(required=True, type_validator=TypeValidator.check_any, unit='')
 
 
-class ParentDef(_ImData):
+def _check_size_func(val:Any)->Callable[[tupledict],int]:
+    """Check function to verify that a ParentDef size func is valid"""
+    if not callable(val):
+        raise TypeError("append_params must be a callable")
+    params = inspect.signature(val).parameters
+    req = sum(p.default == p.empty and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD) for p in params.values())
+    npos = sum(p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD) for p in params.values())
+    if any(p.kind == p.VAR_POSITIONAL for p in params.values()):
+        if req > 1:
+            raise ValueError("too many required arguments to size_func")
+    else:
+        if req > 1:
+            raise ValueError("too many required arguments for size_func")
+        elif npos == 0 :
+            raise ValueError("size_func must accept positional arguments")
+    return val
+
+###############################################################################
+def _type_tuple(val:Hashable|tuple, type_:type=type, depth:int=1):
+    if isinstance(val, type_):
+        return val
+    if not isinstance(val, Sequence):
+        raise ValueError("table types must be type, tuple of either type or tuple of types (ie max 1 level of nesting)")
+    if depth > 0:
+        return tuple(_type_tuple(v, type_, depth-1) for v in val)
+    elif all(isinstance(v, type_) for v in val):
+        return tuple(val)
+    raise ValueError("table_type containes ")
+
+
+class ParentDef(_ImDataLike):
     """
     Class for defining a parent in a :class:`Table`.
     
@@ -173,20 +209,18 @@ class ParentDef(_ImData):
         share_base : bool, optional
             If the parent must have the same ``base_param`` as table. If ``is_base``
             is ``True``, then  ``share_base`` must be ``False``. The default is False.
-        size_func : str, optional
-            string name of classmethod used to determine the correct number of
+        size_func : Callable[[tupledict],int], optional
+            Function that takes the params tupledict and returns
             params in parent (for array parents only) If set, parent will be tuple
-            of params, if not set, parent is single param. Default is empty string.
+            of params, if not set, parent is single param. Default is empty None.
     
     """
-    __slots__ = ('name', 'table_type', 'is_base', 'share_base', 'size_func')
-    _typeconversions = ImDict(name=TV_str, 
-                              table_type=TV_type,
-                              # table_type=TV_type(validator=_check_Table),
-                              is_base=TV_bool, share_base=TV_bool, 
-                              size_func=TV_attrstr(allow_empty=True))
+    __slots__ = ('name', 'table_type', 'is_base', 'share_base', 'array', 'size_func')
+    _setfuncs = ImDict(name=TV_str.check_val, table_type=_type_tuple,
+                       is_base=TV_bool.check_val, share_base=TV_bool.check_val, 
+                       array=TV_bool.check_val, size_func=_check_size_func)
     _required = frozenset({'name', 'table_type', 'is_base', 'share_base'})
-    _defaults = ImDict(is_base=False, share_base=False, size_func='')
+    _defaults = ImDict(is_base=False, share_base=False, array=False)
 
     #: name of parent ie the key in parents for this ParentDef
     name: str
@@ -196,12 +230,20 @@ class ParentDef(_ImData):
     is_base: bool
     #: whether or not the base_parent of the parent is the same as the resultant Table
     share_base: bool
-    #: empty string if parent not a tuple, takes params, and returns expected size of parent
-    size_func: str
+    #: function that takes params of new :class:`Param` object, and returns expected size of parent
+    size_func: Callable[[tupledict],int]
 
     def __post_init__(self):
+        if 'size_func' in self and self.array:
+            raise ValueError("ParentDefs can either be size_func tuples, or arrays, not both (if size_func present, array must be False)")
+        if ('size_func' in self or self.array) and self.is_base:
+            raise ValueError("Array-like ParentDefs (where parent will be an tuple) cannot be used as base (is_base=True)")
         if self.is_base and self.share_base:
             raise ValueError("is_base and share_base cannot both be True")
+        if not self.array:
+            _type_tuple(self.table_type, depth=0)
+        elif not isinstance(self.table_type, tuple):
+            raise ValueError("If ParamDef has array=True, must specify table_type as a tuple")
 
     @property
     def base_like(self)->bool:
@@ -209,9 +251,9 @@ class ParentDef(_ImData):
         return self.is_base or self.share_base
 
     @property
-    def is_array(self)->bool:
+    def var_size(self)->bool:
         """If parent is array/tuple of params or single param"""
-        return bool(self.size_func)
+        return 'size_func' in self
 
 
 def _get_baseparent(parent_defs:Sequence[ParentDef])->ParentDef|None:
@@ -301,15 +343,22 @@ def _check_TV_param_defs(val:tupledict, _kwargs:dict=None, **kwargs)->tupledict:
 
 def _proc_TV_parent_defs(imdata:"Param", *args)->dict:
     """Pre-process function for Param parents, set types"""
-    return dict(tp=imdata['tp'], parent_defs=imdata['tp'].parent_defs, params=imdata['params'])
+    parent_defs = imdata['tp'].parent_defs
+    for pmdef in imdata['tp'].param_defs:
+        if 'append_parents' not in pmdef:
+            continue
+        parent_def = pmdef.append_parents(imdata['params'])
+        parent_def = (parent_def, ) if isinstance(parent_def, ParentDef) else parent_def
+        parent_defs += parent_def
+    return dict(tp=imdata['tp'], parent_defs=parent_defs, params=imdata['params'])
 
 
-def _check_parent_defs(val:tupledict["Param"], tp:type=None, params:tupledict=None, **kwargs)->tupledict["Param"]:
+def _check_parent_defs(val:tupledict["Param"], tp:type=None, params:tupledict=None, parent_defs:tuple[ParentDef,...]=None, **kwargs)->tupledict["Param"]:
     """Check function for Param parents, ensure correct types and regularize to tupledict of correct order"""
-    if not tp.parent_defs:
+    if not parent_defs:
         if val:
             raise ValueError("parents must be empty for the given Table type")
-    base_parentdef = _get_baseparent(tp.parent_defs)
+    base_parentdef = _get_baseparent(parent_defs)
     if base_parentdef is not None:
         if base_parentdef.name not in val:
             raise ValueError(f"missing base param from parents {base_parentdef.name}")
@@ -317,7 +366,7 @@ def _check_parent_defs(val:tupledict["Param"], tp:type=None, params:tupledict=No
     else:
         base_parent = None
     val = tupledict(*((pdef.name, _verify_parent_param(val.get(pdef.name), tp, pdef, base_parent, params))
-                      for pdef in tp.parent_defs))
+                      for pdef in parent_defs))
     return val
 
 
@@ -329,26 +378,34 @@ def _verify_parent_param(val:Union["Param",tuple["Param",...]], tp:type, parent_
     """
     if val is None:
         raise ValueError(f"must specify {parent_def.name} in parents")
-    if parent_def.is_array:
-        size = getattr(tp, parent_def.size_func)(params)
+    name, table_type, share_base = parent_def.name, parent_def.table_type, parent_def.share_base
+    if parent_def.array:
         if isinstance(val, Param):
-            val = _verify_parent_param_sub(val, parent_def, base)
+            val = tuple(val for _ in table_type)
+        if len(val) != len(table_type):
+            raise ValueError(f"Incorrect number of parents in {name}, expected {len(table_type)}, got {len(val)}")
+        return tuple(_verify_parent_param_sub(v, name, tt, share_base, base)
+                     for v, tt in zip(val, table_type))
+    elif parent_def.var_size:
+        size = parent_def.size_func(params)
+        if isinstance(val, Param):
+            val = _verify_parent_param_sub(val, name, table_type, share_base, base)
             return tuple(val for _ in range(size))
         elif len(val) == size:
-            return tuple(_verify_parent_param_sub(v, parent_def, base) for v in val)
+            return tuple(_verify_parent_param_sub(v, name, table_type, share_base, base) for v in val)
         raise ValueError(f"Incorrect number of parents for {parent_def.name}, expected {size}, got {len(val)}")
     else:
-        return _verify_parent_param_sub(val, parent_def, base)
+        return _verify_parent_param_sub(val, name, table_type, share_base, base)
 
 
-def _verify_parent_param_sub(subval:"Param", parent_def:ParentDef, base:"Param")->"Param":
+def _verify_parent_param_sub(subval:"Param", name:str, table_type:type|Sequence[type], share_base:bool, base:"Param")->"Param":
     """Sub-parent verification, if parent is single, or single element of array"""
-    if parent_def.share_base and subval.base_param != base:
+    if share_base and subval.base_param != base:
         raise ValueError(
-            f"{parent_def.name} must share base param with parent defining the base")
-    if not issubclass(subval.tp, parent_def.table_type):
+            f"{name} must share base param with parent defining the base")
+    if not issubclass(subval.tp, table_type):
         raise ValueError(
-            f"{parent_def.name} must be a param with tp of {parent_def.table_type}, got {subval.tp}")
+            f"{name} must be a param with tp of {table_type}, got {subval.tp}")
     return subval
 
 
@@ -387,7 +444,7 @@ class ParamCaller:
     def __init__(self, prop:property, param:"Param"):
         self._prop = prop
         self._param = param
-    
+
     def __call__(self, origin:"DataS"):
         if isinstance(origin, DataSet):    
             return self._prop.fget(origin.get_table(self._param))
@@ -422,7 +479,7 @@ class Param(_ImData):
         This name does not contribute to the hash, or ``==`` operations, thus
         two Param objects may have different names, but will have the same hash
         and will evaluate to equal one another.
-    flags : list[str], optional
+    flags : dict[str:Any], optional
         **Unshahsed** List of string flags, used to indicate expected uses of this param
         
     """
@@ -448,9 +505,10 @@ class Param(_ImData):
     gategroup: "GateGroup"
     #: (mutable) "common" name for object
     name: str
-    #: (mutable) list of flags that can indicate function or intended use of object
-    flags: list[str]
-    
+    #: (mutable) dict of flags and values that can indicate function,
+    #: intended use of object, or computed parametrs
+    flags: dict[str:Any]
+
     def __new__(cls, tp:type, params:dict[str,Any]=None, parents:dict[str,Union["Param",Sequence["Param"]]]=None, 
                 gategroup:"GateGroup"=None, name:str=None, flags:list[str]=None, **kwargs):
         # first sort out "standard" params/parents inputs
@@ -547,7 +605,7 @@ class Param(_ImData):
             *((k, v.regate(gate) if _get_parentdef(self.tp.parent_defs, k).is_base else v) 
               for k, v in self.parents.items()))
         return self._replace_fields(fields={'parents': parents})
-    
+
     def and_gate(self, gate:"GateGroup")->"Param":
         """
         Change gategroup of param to the result of the current gate and input
@@ -666,12 +724,40 @@ class Param(_ImData):
 
     def __str__(self):
         return f'Param of {self.tp.__module__}.{self.tp.__name__} at 0x{id(self):x}'
-    
+
     @property
     def _sort_tuple(self)->tuple[Hashable,...]:
         return (f'{self.tp.__module__}.{self.tp.__name__}', 
                 _make_sortable(self.parents), _make_sortable(self.params))
-        
+
+    def has_flag(self, *args:str)->bool:
+        if not 'flags' in self:
+            return False
+        return _nested_in(self.flags, args)
+
+    def add_flag(self, flags:str|tuple[str,...], val:Any, strict:bool=True)->None:
+        flags = tuple(flags) if isinstance(flags, Sequence) and not isinstance(flags, str) else (flags, )
+        if strict and self.has_flag(*flags):
+            raise ValueError(f"flag {flags} already present")
+        if 'flags' not in self:
+            self.flags = dict()
+        _nested_set(self.flags, flags, val)
+
+    def get_flag(self, *args:str, default:Any=None)->Any:
+        if 'flags' not in self:
+            return default
+        return _nested_get(self.flags, args)
+
+    def pop_flag(self, *args:str, default:Any=None)->Any:
+        if 'flags' not in self:
+            return default
+        return _nested_pop(self.flags, args, default)
+
+    def update_flag(self, flags:str|tuple[str,...], val:dict, strict:bool=True)->None:
+        flags = tuple(flags) if isinstance(flags, Sequence) and not isinstance(flags, str) else (flags, )
+        if 'flags' not in self:
+            self.flags = dict()
+        _nested_dict_mergekey(self.flags, flags, val, strict)
 
 
 def _param_validator(val:Param, table_type:type|Sequence[type]=None, **kwargs)->Param:
@@ -836,11 +922,11 @@ class ColumnDef(_ImDataLike):
         Only for non-atomic or columns with offset. Default is nan for floating
         columns, -1 for integral columns, and None for object columns.
     reg_func : str, optional
-        name of method to call from Table (should be classmethod) that will 
+        name of method to call from Table (should be |classmethod|) that will 
         regularize and raise appropriate errors for out of range columns. 
         If not present, no regularization will take place. Default is empty string.
     check_func : str, optional
-        name of method to call from Table (should be classmethod) that verifies 
+        name of method to call from Table (should be |classmethod|) that verifies 
         all values of column are valid (similar to validate_param). 
         Default is empty string.
     mapto : type, optional
@@ -857,7 +943,7 @@ class ColumnDef(_ImDataLike):
     title : str, optional
         Default title for column. Default is None.
     title_func : str, optional
-        name of method in :class:`Table` (should be classmethod),
+        name of method in :class:`Table` (should be |classmethod|),
         to call when calling :class:`Column.name` to get default title.
         Default is empty string.
     unit : str, optional
@@ -866,7 +952,7 @@ class ColumnDef(_ImDataLike):
         Default index name for column (name used in csv export).
         Default is empty string.
     index_func : str, optional
-        Name of method in :class:`Table` (should be classmethod)
+        Name of method in :class:`Table` (should be |classmethod|)
         to call when calling :class:`Column.index_name` to get default csv index.
         Default is empty string.
     index_unit : str
@@ -1394,7 +1480,7 @@ class Column(_ImData):
         elif len(fill) > 2:
             raise ValueError("regate takes maximum of 2 arguments")
         return out
-    
+
     def and_gate(self, gate:"GateGroup")->"Column":
         """
         Create a :class:`Column` otherwise identical to self, but with gate of 
@@ -1493,14 +1579,14 @@ class Column(_ImData):
     def origin_param(self)->Param:
         """The Param defining all rows in the table, disregarding all gates"""
         return self.param.origin_param
-    
+
     @property
     def size_offset(self)->int:
         """Column type-offset"""
         if 'offset' in self:
             return 0
         return self._get_coldef().offset
-    
+
     def name(self, include_unit:bool=False, origin:"DataSet"=None)->str:
         """
         Get a string name of the column, starting with user set names, if present,
@@ -1521,7 +1607,7 @@ class Column(_ImData):
         origin = origin.datas[0] if isinstance(origin, DataSetList) else origin
         kwargs = dict() if origin is None else {'origin':origin}
         return self._get_coldef().get_name(self, include_unit=include_unit, **kwargs)
-        
+
     def index_name(self, include_unit:bool=False, origin:"DataSet"=None)->str:
         """
         Get a csv string anme of the column, starting with user set names, if present,
@@ -1541,12 +1627,12 @@ class Column(_ImData):
         """
         kwargs = dict() if origin is None else {'origin':origin}
         return self._get_coldef().get_index(self, include_unit=include_unit, **kwargs)
-    
+
     @property
     def description(self)->str:
         """A YAML-like description of the Column"""
         return self.source_param.tp.get_column_description(self)
-    
+
     @property
     def _sort_tuple(self)->tuple[Hashable]:
         out = [self.source_param._sort_tuple, self.col, _make_sortable(self.keytup)]
@@ -1841,6 +1927,7 @@ def _pass_all(*args, **kwargs):
 
 register_PyCode(_pass_all)
 
+
 class MappedGateDef(GateDefinition, _ImData):
     r"""
     Class used to specify MappedGate functions.
@@ -1866,9 +1953,15 @@ class MappedGateDef(GateDefinition, _ImData):
     _hashskip = ('defaults', )
     _registered_funcs = FixedDict()
 
+    #: Function defining the gate, should take ``func(*args:np.ndarray, **params)``
     func: Callable[[np.ndarray[np.bool_],tupledict],np.ndarray[np.bool_]]
+    #: Definiton of types for each param
     params: tupledict[str, type]
+    #: Function called to verify valid params of gate. 
+    #: Takes dictioary of params as single first argument,
+    #: Should return None, and raise an error if params dict is invalid
     verify: Callable[[dict],None]
+    #: Default values for each param
     defaults: dict[str, Any]
 
 
@@ -1888,6 +1981,8 @@ TT_and = np.array([[False, False],
 #: Truthtable for `|` gate
 TT_or = np.array([[False,  True],
                   [True,   True]], dtype=np.bool_)
+#: Truthtable for inverse or gate
+TT_ior = ~TT_or
 #: Truthtable for equality (`@` gate)
 TT_equal = np.array([[True,  False],
                      [False,  True]], dtype=np.bool_)
@@ -1896,8 +1991,12 @@ TT_nequal = ~TT_equal
 #: Truthtable for forward implication (`>>` gate)
 TT_implies = np.array([[True,   True],
                        [False,  True]], dtype=np.bool_)
+#: Truthtable for forward implication (`<<` gate)
+TT_rimplies = TT_implies.T
 #: Truthtable for subtraction (`-` gate)
 TT_subtract = ~TT_implies
+#: Truthtable for reverse subtraction (`b-a` gate)
+TT_rsubtract = TT_subtract.T
 
 _TT_all.setflags(write=False)
 _TT_none.setflags(write=False)
@@ -1905,10 +2004,13 @@ _TT_ft.setflags(write=False)
 _TT_tf.setflags(write=False)
 TT_and.setflags(write=False)
 TT_or.setflags(write=False)
+TT_ior.setflags(write=False)
 TT_equal.setflags(write=False)
 TT_nequal.setflags(write=False)
 TT_implies.setflags(write=False)
+TT_rimplies.setflags(write=False)
 TT_subtract.setflags(write=False)
+TT_rsubtract.setflags(write=False)
 
 TT_name_map = ImDict({"and":TT_and, "or":TT_or, "equal":TT_equal,
                      "nequal":TT_nequal, "implies":TT_implies})
@@ -2183,12 +2285,12 @@ class Gate(Gate_, _ImData):
         out = f'Gate: {self.gatedef.name}\nParams:\n{_indent(self.get_param_descr(),2)}\nColumns:\n'
         out += _indent(self.get_column_descrs(include_param, include_source), 2)
         return _indent(out, indent)
-    
+
     @property
     def description(self)->str:
         """Descripton of gate"""
         return self.get_gate_description(include_param=True, include_source=True)
-    
+
     @property
     def _sort_tuple(self)->tuple[Hashable,...]:
         """Tuple that can unambiguously be used to sort against other like objects"""
@@ -2214,9 +2316,15 @@ def _gate_locmask(gate:Gate, gategroup:Union[Gate,"GateGroup"])->bool:
     return gate == gategroup
 
 
-def _mask_loc(gate_loc:tuple[int|None,...], loc:tuple[int])->tuple[int,...]:
+def _mask_loc(gate_loc:tuple[bool,...], loc:tuple[int])->tuple[int,...]:
     """mask loc based on gate_loc"""
     return tuple(l for g, l in zip(gate_loc, loc) if g)
+
+
+def _gate_tt_expand(gate:Union[Gate_,"GateGroup"])->tuple[tuple[Gate_,...],np.ndarray[np.bool_]]:
+    if isinstance(gate, GateGroup):
+        return gate.gates, gate.truthtable
+    return (gate, ), _TT_ft
 
 
 def _proc_gategroup_columns(imdata:"GateGroup", kwarg_append:dict)->dict:
@@ -2249,13 +2357,34 @@ def _check_gategroup_truthtable(val:np.ndarray[np.bool_], **kwargs):
 
 
 def _tt_index_single(n:int, i:int, j:int, vi:int, vj:int)->slice|int:
+    """
+    Truthtable copmarison, which index to take when comparing to index nn
+    nn is dimension of truthable, i,j are the dimensions being compared, 
+    vi, vj are the truthvalues being comprared"""
     if n == i:
         return vi
     if n == j:
         return vj
     return slice(None)
 
+
 def _tt_tuple_index(n:int, i:int, j:int, vi:int, vj:int)->tuple[slice|int,...]:
+    """
+    Truthtable indexes conversion function.
+    Returns location(s) in truthtable that can be ignored 
+    **IF**
+    for a given i != j pair of dimensions gates in truthtable is impossible
+    given vi (value i, ie value of index i in truthtable, 0/1 for true/false of that gate)
+    and vj (value j, ie value of index j in truthtable, 0/1 for true/false of that gate)
+    
+    Parameters
+    ----------
+    n : ndim of table
+    i : first dimension compared
+    j : second dimension comparared
+    vi : 0/1 index in dimension i
+    vi : 0/1 index in dimension j
+    """
     return tuple(_tt_index_single(nn, i, j, vi, vj) for nn in range(n))
 
 
@@ -2373,7 +2502,9 @@ class GateGroup(_ImData):
         truthtable = truthtable if truthtable.flags['WRITEABLE'] else truthtable.copy()
         # broadcast truthtable, part 2a
         if any(isinstance(g, GateGroup) for g in gates):
-            truthtable, gates = cls._broadcast_truthtable(truthtable, gates)
+            truthtable, gates = broadcast_truthtable(truthtable, gates, _gate_tt_expand, 
+                                                     sort_key=_gate_sort, dtype=np.int8)
+            # truthtable, gates = cls._broadcast_truthtable(truthtable, gates)
         #simplify truthtable, part 2c
         truthtable, gates = cls._simplify_truthtable(truthtable, gates)
         kws = dict() if title is None else {'title':title}
@@ -2434,7 +2565,7 @@ class GateGroup(_ImData):
             else:
                 axi += 1
         return truthtable, gates
-    
+
     def __bool__(self):
         return True if len(self.gates) != 0 else bool(self.truthtable.reshape(1)[0])
 
@@ -2466,7 +2597,7 @@ class GateGroup(_ImData):
         return type(self)(TT_implies, self, other)
 
     def __lshift__(self, other):
-        return type(self)(TT_implies, other, self)
+        return type(self)(TT_rimplies, self, other)
 
     @property
     def nogate(self)->bool:
@@ -2679,12 +2810,12 @@ class GateGroup(_ImData):
         """
         out = f'GateGroup:\n{_indent(self.get_gategroup_descr(0, include_param, include_source),2)}'
         return _indent(out, indent)
-    
+
     @property
     def description(self)->str:
         """YAML-like definition of GateGroup."""
         return  self.get_description() + f'\n{_indent(self.param.description, 2)}'
-    
+
     @property
     def _sort_tuple(self)->tuple[int,tuple[int,...],tuple[tuple[Hashable,...]]]:
         """Tuple that can unambiguously be used to sort against other like objects"""
@@ -2772,7 +2903,7 @@ class MappedGate(Gate_, _ImData):
     expand : bool
     #: (mutable) Human readable title for MappedGate
     title : str
-    
+
     def __post_init__(self):
         self.gatedef.verify(self.params)
 
@@ -2830,7 +2961,7 @@ class MappedGate(Gate_, _ImData):
                f'Source Gate:\n{self.source_gate.get_description(2, include_param, include_source)}\n'+
                f'Mask Gate:\n{self.mask_gate.get_description(2, include_param, include_source)}')
         return _indent(out, indent)
-    
+
     @property
     def description(self)->str:
         """Description of mapped gate"""
@@ -3155,7 +3286,7 @@ class DataSet:
         if not group._created:
             return f'{name}_{i}'
         while (groupname := f'{name}_{i}') in group:
-            if TypeValidator.read_any(group[f'{groupname}/param']) == param:
+            if Param.decode_group(group[f'{groupname}/param']) == param:
                 return groupname
             i += 1
         return groupname
@@ -3191,7 +3322,7 @@ class DataSet:
             if fgroup in group:
                 return fgroup[groupname]
             out = fgroup._create_group(groupname)
-            param.write_group(out, "param")
+            param.encode_group(out, "param")
             return out
         out = _GroupFuture.create_dependant(create_group, fgroup)
         def group_callback(grp:_GroupFuture)->None:
@@ -3228,7 +3359,7 @@ class DataSet:
             raise ValueError("table already exists, cannot reload")
         self._tables[table.param] = table
         return table
-    
+
     def load_all_from_group(self, group:tb.Group, overwrite:bool=False)->list[Param,...]:
         """
         Iterate over all sub-groups within a group (typcially ``/user/smfBursts``)
@@ -3319,7 +3450,7 @@ class DataSet:
             else:
                 out = out[mask]
         return out
-    
+
     def iter_column(self, column:Column, gate:GateGroup=None)->Iterator:
         """
         Iterate over values in specified Column
@@ -3338,7 +3469,7 @@ class DataSet:
         if gate is not None:
             column = column.regate(gate)
         yield from self.get_table(column.source_param).iter_column(column)
-    
+
     def record_column(self, column:Column)->np.ndarray:
         """
         Save specified column in memory.
@@ -3382,7 +3513,7 @@ class DataSet:
             Whether or not :class:`Table` for ``param`` has been calculated.
         """
         return param in self._tables
-    
+
     def has_table_saved(self, param:Param)->bool:
         return self.has_table(param) or self.check_param_saved(param)
 
@@ -3492,7 +3623,7 @@ class DataSet:
                 out = self._gategroups[gategroup][g][relmask]
                 return out
         return comp
-    
+
     def _compute_gategroup_mask(self, gategroup, relative)->np.ndarray[np.bool_]:
         """Compute a gategroup's mask relative to relative from underlying gates masks"""
         return gategroup.truthtable[tuple(self._get_gate(gate, relative) 
@@ -3551,7 +3682,7 @@ class DataSet:
         for gg in gategroups:
             if len(self._gategroups[gg]) == 0:
                 self._gategroups.pop(gg)
-    
+
     def _rebase_tables(self, gate:GateGroup, base_param:Param, origin_param:Param)->None:
         """
         Rebase all tables with matching origin_param to gate, 
@@ -3588,7 +3719,7 @@ class DataSet:
         """
         for gg in self._gategroups.keys():
             _nested_pop(self._gategroups, (gg, relgate))
-    
+
     def _rebase_gates(self, gate:GateGroup, origin_param:Param)->None:
         """
         Internal function for rebasing all masks in self._gategroup with matching 
@@ -3634,7 +3765,7 @@ class DataSet:
         for gt in pop_gates:
             self._gates.pop(gt)
         self._gates.update(new_gates)
-        
+
     def rebase(self, gate:GateGroup, clear_gates:bool=False)->None:
         """
         Rebase tables to gate. This is used to reduce memory usage. Any stored
@@ -3665,7 +3796,7 @@ class DataSet:
                 if gate in rel:
                     return mask.sum()
         return None
-    
+
     def clear_memory(self)->None:
         """
         Clear all cache dictionaries. 
@@ -4036,7 +4167,7 @@ class DataSetList:
     #: name to give to HDF5 groups based on this class attribute.
     #: Should be renamed for each subclass
     _group_name:ClassVar[str] = 'dataset' 
-    
+
     def __init__(self, datas:Sequence[DataSet]):
         if not isinstance(datas[0], DataSet):
             raise TypeError(f"DataSetList can only organize DataSet objects, not {type(datas[0])}")
@@ -4044,12 +4175,16 @@ class DataSetList:
         if any(not isinstance((err:=d), self.settype) for d in datas):
             raise TypeError(f"DataSetList can only organize DataSet objects, not {type(err)}")
         self._datas = tuple(datas)
-    
-    @property 
+
+    @property
     def datas(self):
         """Tuple of the underlying :class:`DataSet` objects that compose self"""
         return self._datas
-    
+
+    @property
+    def dataID(self)->str:
+        return '0x' + '0x'.join(data.dataID for data in self.datas)
+
     def load_all_from_group(self, group:tb.Group, overwrite:bool=False)->set[Param]:
         """
         Load all saved tables stored within a group.
@@ -4076,7 +4211,7 @@ class DataSetList:
             params |= set(data.load_all_from_group(group[f'{self._group_name}{i}'], 
                                                    overwrite=overwrite))
         return params
-        
+
     def get_table(self, param:Param, gate:GateGroup=None)->tuple["Table",...]:
         """
         Retrieve tuple of :class:`Table` objects of ``param``.
@@ -4098,7 +4233,7 @@ class DataSetList:
         if gate is not None:
             param = param.regate(gate)
         return tuple(data.get_table(param) for data in self._datas)
-    
+
     def iter_table(self, param:Param, gate:GateGroup=None)->tuple["Table",...]:
         """
         Iterate over :class:`Table` objects of ``param`` in each dataset.
@@ -4120,7 +4255,7 @@ class DataSetList:
         if gate is not None:
             param = param.regate(gate)
         return tuple(data.get_table(param) for data in self._datas)
-    
+
     def get_column(self, column:Column, gate:GateGroup=None)->tuple[np.ndarray,...]:
         """
         Get tuple of the arrays corresponding to column.
@@ -4141,7 +4276,7 @@ class DataSetList:
         if gate is not None:
             column = column.regate(gate)
         return tuple(data.get_column(column) for data in self._datas)
-    
+
     def iter_column(self, column:Column, gate:GateGroup=None, flatten:bool=False)->Iterator[Iterator|Any]:
         """
         Create an iterator over column values. If ``flatten=False`` then behaves
@@ -4245,7 +4380,7 @@ class DataSetList:
         if isinstance(comp, Param):
             return self.get_table(comp, gate=gate)
         return self.get_column(comp, gate=gate)
-    
+
     def get_frame(self, *args:Column, names:Sequence[str]=None, gate:GateGroup=None,
                   multi_index:bool=False, include_unit:bool=False, index_name:bool=False)->pd.DataFrame:
         r"""
@@ -4287,7 +4422,7 @@ class DataSetList:
         return pd.concat((d.get_frame(*args, names=names, gate=gate, multi_index=multi_index, 
                                       include_unit=include_unit, index_name=index_name) 
                           for d in self.datas), ignore_index=True)
-    
+
     def to_csv(self, *args:Column, path_or_buf:None|str|os.PathLike=None, names:Sequence[str]=None, 
                gate:GateGroup=None, include_unit:bool=False, multi_index:bool=False, **kwargs)->str|None:
         r"""
@@ -4351,7 +4486,7 @@ class DataSetList:
         df = self.get_frame(*args, names=names, gate=gate, include_unit=include_unit,
                             multi_index=multi_index, index_name=True)
         return df.to_csv(path_or_buf=path_or_buf, **kwargs)
-    
+
     def save(self, *args:Param, group:tb.Group=None, name:Callable[[int],str]=None, **kwargs)->list[tb.Group]:
         """
         Save computed tables into HDF5 file. 
@@ -4386,7 +4521,7 @@ class DataSetList:
         else:
             file = lambda i: group._v_file.create_group(group, name(i))
         return list(data.save(*args, group=file(i)) for i, data in enumerate(self._datas))
-    
+
     def close(self, strict:bool=False)->None:
         """
         Close the file(s) to which the :class:`DataSetList` is attached.
@@ -4420,26 +4555,26 @@ class _ParentsTuple:
     __slots__ = ('_origin', '_parents')
     _origin: DataSet #: data on which _ParentsTuple is based
     _parents: dict[str,Param] #: dictionary of :attr:`Param.parents`
-    
+
     def __init__(self, origin:DataSet, parents:dict[str,Param]):
         super().__setattr__('_origin', origin)
         super().__setattr__('_parents', parents)
-        
+
     def __getattribute__(self, attr):
         raise AttributeError("Parents have no attributes")
 
     def __setitem__(self, key, val):
         raise AttributeError("Cannot assign to parents dict")
-    
+
     def __getitem__(self, key):
         return super().__getattribute__('_origin').get_table(super().__getattribute__('_parents')[key])
-    
+
     def __len__(self):
         return len(super().__getattribute__('_parents'))
-    
+
     def __length_hint__(self):
         return len(super().__getattribute__('_parents'))
-    
+
     def __iter__(self):
         for parent in super().__getattribute__('_parents'):
             yield super().__getattribute__('_origin').get_table(parent)
@@ -4462,13 +4597,13 @@ class _ParentsDict:
     __slots__ = ('_origin', '_parents')
     _origin : DataSet #: the data to which parents is linked
     _parents : dict[str,Param] #: dictionary of :attr:`Param.parents`
-    
+
     def __init__(self, origin:DataSet, parents:dict[str,Param]):
         super().__setattr__('_origin', origin)
         parents = {key:_ParentsTuple(origin, val) if isinstance(val, tuple) else val 
                    for key, val in parents.items()}
         super().__setattr__('_parents', parents)
-        
+
     def __getattribute__(self, attr):
         if attr not in ('keys', 'values', 'items', 'get'):
             raise AttributeError("Parents have no attributes")
@@ -4476,19 +4611,19 @@ class _ParentsDict:
 
     def __getattr__(self, attr):
         return self[attr]
-    
+
     def __setitem__(self, key, val):
         raise AttributeError("Cannot assign to parents dict")
-    
+
     def __getitem__(self, key):
         out = super().__getattribute__('_parents')[key]
         if isinstance(out, _ParentsTuple):
             return out
         return super().__getattribute__('_origin').get_table(out)
-    
+
     def __len__(self):
         return len(super().__getattribute__('_parents'))
-    
+
     def __length_hint__(self):
         return len(super().__getattribute__('_parents'))
 
@@ -4513,8 +4648,8 @@ class _ParentsDict:
         except:
             out = default
         return out
-    
-        
+
+
 class TableConstructionError(ValueError):
     """Incorrect definition of subclass of Table"""
     pass
@@ -4571,13 +4706,13 @@ class Table:
     Additional methods can be defined, depending on the needs (``Table`` implements
     these methods in simple, always pass ways):
         
-        #. ``validate_param``, should be a classmethod with siganture
+        #. ``validate_param``, should be a |classmethod| with siganture
            ``(cls, param:Param)->None``, this defines a validator function that
            takes Param with ``tp`` attribute of the given ``Table``, and ensures
            all values in parameters are valid, useful when simple fixed min/max
            etc. values are insufficient. Should raise appropriate error if not
            valid.
-        #. ``param_preprocess`` (should be a classmethod) preprocess parameters
+        #. ``param_preprocess`` (should be a |classmethod|) preprocess parameters
            dictionary. This can be used to create "alternate" parameter contruction
            keys etc. Should have the
            signature: ``(cls, params:Union[Sequence[tuple[str, Any]],tupledict])->dict``
@@ -4598,7 +4733,7 @@ class Table:
     """
     _param: Param  #: full parameter definition for column
     _origin: DataSet  #: DataSet for which data is based
-    _parents: dict[str, "Table"]  #: dictionary of parent tables
+    _parents: dict[str:"Table"]  #: dictionary of parent tables
     _derived: bool  #: whether or not derived
     # : DiskDict storing all atomic non-dynamic columns, used only for primary table
     _cache: DiskDict | Callable[[],DiskDict]
@@ -4619,7 +4754,6 @@ class Table:
     column_defs:ClassVar[tuple[...,ColumnDef]] 
     #: **Specific to subclass** Methods to use as classmethod on param
     _parammethods:ClassVar[frozenset] = frozenset()
-    
 
     @classmethod
     def _get_val_str(cls, value:Any, keylen:int)->str:
@@ -4675,7 +4809,7 @@ class Table:
             if not hasattr(self, '_derived'):
                 self._init_new_()
         self.__post_init__()
-    
+
     def __post_init__(self):
         """Function called after all other inits for table, 
         used per subclasses for final processing"""
@@ -4685,7 +4819,7 @@ class Table:
         self._param = param
         self._origin = origin
         self._parents = _ParentsDict(self.origin, self.param.parents)
-    
+
     # @abstractmethod
     def _init_new_(self)->None:
         """
@@ -4739,7 +4873,7 @@ class Table:
         delattr(self, '_mask')
         self._derived = False
         return self
-    
+
     def _rebase(self, gate:GateGroup)->"Table":
         """Change :attr:`Table._base` (if derived) to table with gategroup gate"""
         if gate == self.param.base_gate:
@@ -4755,7 +4889,7 @@ class Table:
             delattr(self, '_cache')
             self._derived = True
         return self
-    
+
     @classmethod
     def load_group(cls, group:tb.Group, origin:None|DataSet=None)->"Table":
         """
@@ -4837,7 +4971,7 @@ class Table:
     @classmethod
     def validate_param(cls, param:Param)->None:
         """
-        Function that checks parameter is valid. Will run at end of 
+        |classmethod| that checks parameter is valid. Will run at end of 
         __post_init__ when creating new Param
         Used if parameter values have non-trivial dependencies
         """
@@ -4877,7 +5011,7 @@ class Table:
     def origin(self)->DataSet:
         """The DataSet on which the Table is based"""
         return self._origin
-    
+
     @property
     def _bcache(self)->DiskDict:
         """Cache that can look at cache of Table._base, and return approriatly mased arrays"""
@@ -4983,7 +5117,7 @@ class Table:
                                  f"{coldef.offset}, got {keytup[1]}")
         if 'remap' in coldef:
             new_keys = getattr(self.param.tp, coldef.remap)(coldef.name, *keytup)
-            return self._get_keys((new_keys[0],)+new_keys[1]+new_keys[2:])
+            return self._get_keys((new_keys[0],)+new_keys[1])
         if coldef.reg_func:
             keytup = (getattr(self, coldef.reg_func)(self.param, *keytup[0]),) + keytup[1:]
         keytup = (coldef, ) + keytup + (None,)*(3-len(keytup))
@@ -5151,7 +5285,7 @@ class Table:
         if isinstance(group, _GroupFuture):
             group = group._create()
         if 'param' not in group:
-            self.param.write_group(group, 'param')
+            self.param.encode_group(group, 'param')
         if include_dataID and 'dataID_' not in group:
             group._v_file.create_array(group, 'dataID_', self.origin._get_dataID())
         return self._cache.save(group)
@@ -5468,16 +5602,16 @@ class ChildTable(Table):
     """
     Table which has same rows defined by some table in the tree of its parents.
     """
-    _param: Param  # : full parameter definition for column
-    _origin: DataSet  # : DataSet for which data is based
-    _parents: dict[str, Table]  # : dictionary of parent tables
+    _param: Param  #: full parameter definition for column
+    _origin: DataSet  #: DataSet for which data is based
+    _parents: dict[str, Table]  #: dictionary of parent tables
     _derived: bool  # : whether or not derived
-    # : DiskDict storing all stored columns, used only for primary table (**note** these are never mapped or atomic)
+    #: DiskDict storing all stored columns, used only for primary table (**note** these are never mapped or atomic)
     _cache: DiskDict|Callable[[], DiskDict]
     # attributes bellow are specific to derived tables
-    # : Reference to primary table of table, specified if masked.
+    #: Reference to primary table of table, specified if masked.
     _base: Union["Table", None]
-    _base_table: BaseTable  # : reference to the non-gated version of the current table
+    _base_table: BaseTable  #: reference to the non-gated version of the current table
 
     def _init_new_(self):
         self._cache = DiskDict(group=self.origin._get_group_from_param(self.param), 
@@ -5566,15 +5700,22 @@ class TableCaller:
         The class of the decorated method.
     
     """
-    def __init__(self, meth, objtype:type):
+    def __init__(self, meth:"TableDescr", objtype:type):
         self._meth = meth
         self._objtype = objtype
+        update_wrapper(self, meth._meth)
 
     def __call__(self, *args, **kwargs):
         return self._meth._call(self._objtype, *args, **kwargs)
 
-    def __getattr__(self, name):
-        return getattr(self._meth, name)
+    def __set_name__(self, owner, name):
+        self.__name__ = name
+
+    def __set__(self, obj, value):
+        pass
+
+    def __delete__(self, obj):
+        pass
 
 
 class TableDescr:
@@ -5589,8 +5730,7 @@ class TableDescr:
     Methods decorated with subclasses can be called from :class:`Param` objects.
     
     Methods decorated with ``TableDescr`` subclasses function allow for similar to 
-    `classmethod() <https://docs.python.org/3/library/functions.html#classmethod>`_
-    Insofar as they first argument is always the **class** of table 
+    |classmethod|. Insofar as they first argument is always the **class** of table 
     (and so the signature should be ``def meth(cls, ...)``).
     
     ``_executor`` and ``_call`` methods define how access from instance vs class
@@ -5599,18 +5739,27 @@ class TableDescr:
     Parameters
     ----------
     meth : Callable
+        Callable, the signature depends on subclass of TableDescr, first argument
+        is always the class of the object.
     """
     def __init__(self, meth:Callable[[type,...],Any]):
         self._meth = meth
-    
+        update_wrapper(self, meth)
+
     def __get__(self, obj:Table, objtype:type=None):
         if obj is None:
             return TableCaller(self, objtype)
         return self._executor(obj, objtype)
-    
-    def __getattr__(self, name):
-        return getattr(self._meth, name)
-    
+
+    def __set__(self, obj:Table, value:Any):
+        raise AttributeError("Cannot remove {self.__name__} from {obj.__name__}")
+
+    def __delete__(self, obj):
+        raise AttributeError(f'Cannot delete {obj.__name__}, it is a {type(self).__name__}')
+
+    def __set_name__(self, owner, name:str):
+        self.__name__ = name
+
     def _executor(self, *args, **kwargs):
         raise NotImplementedError("Subclasses must implement this method")
 
@@ -5787,7 +5936,7 @@ class parammethod(TableDescr, TableMethod):
 
     def __init__(self, meth, origin_as_kw:bool=False):
         pass
-        
+
     def _executor(self, obj:Table, objtype:type):
         if self._origin_as_kw:
             return partial(self._meth, objtype, obj.param, origin=obj.origin)
@@ -5826,8 +5975,6 @@ class paramproperty(TableDescr):
     Accessing from :class:`Param`::
         
         paramfoo.bar
-        
-        
         
     """
     def _call(self, objtype:type, param:Param):

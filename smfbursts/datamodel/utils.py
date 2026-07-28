@@ -705,6 +705,27 @@ class _DataLike:
         return f'{self.__class__}\n' +'\n'.join(chain.from_iterable(wrap(string, subsequent_indent='    ') 
                                                                     for string in rep))
 
+    def get(self, key:str, default:Any=None)->Any:
+        """
+        Retrieve the value of a key from data. If key not present, return default
+
+        Parameters
+        ----------
+        key : str
+            Key to retrieve.
+        default : Any, optional
+            Value to return if key not in data. The default is None.
+
+        Returns
+        -------
+        Any
+            Value of key, or default value if key not in data.
+
+        """
+        if key in self:
+            return self[key]
+        return default
+
 
 class _ImDataLike(_DataLike):
     """
@@ -853,6 +874,7 @@ def _nested_in(dct:dict, keys:tuple[Hashable,...])->bool:
         return True if len(keys) == 1 else _nested_in(dct[keys[0]], keys[1:])
     return False
 
+
 def _nested_get(dct:dict, keys:tuple, default:Any=None)->Any:
     """Key keys from nested dictionary dct"""
     for k in keys:
@@ -862,14 +884,16 @@ def _nested_get(dct:dict, keys:tuple, default:Any=None)->Any:
             return default
     return dct
 
+
 def _nested_set(dct:dict, keys:tuple[Hashable,...], val:Any)->Any:
-    """Set keys to val in *nested* dictionary dct- will create super-nested dictionarys"""
+    """Set keys to val in *nested* dictionary dct- will create super-nested dictionaries"""
     for key in keys[:-1]:
         if key not in dct:
             dct[key] = dict()
         dct = dct[key]
     dct[keys[-1]] = val
     return val
+
 
 def _nested_pop(dct:dict, keys:tuple[Hashable,...], default:Any=None)->Any:
     """Pop key from nested dictionary dct"""
@@ -884,6 +908,7 @@ def _nested_pop(dct:dict, keys:tuple[Hashable,...], default:Any=None)->Any:
             return default
     return val
 
+
 def _inner_nested_items(dct:dict, outer:tuple[Hashable,...])->Iterator[tuple[Hashable,Any], bool, None]:
     """Iterate over items (key, value pairs) of outer insided nested dictionary"""
     diter = iter(dct.items())
@@ -894,6 +919,7 @@ def _inner_nested_items(dct:dict, outer:tuple[Hashable,...])->Iterator[tuple[Has
             adv = yield outer + (key, ), val
             if adv:
                 break
+
 
 def _nested_items(dct:dict)->Iterator[tuple[Hashable,Any], bool, None]:
     """Iterator over key value pairs in nested dictoinary"""
@@ -999,13 +1025,12 @@ def _large_equal(val0:list|tuple|np.ndarray, val1:list|tuple|np.ndarray)->bool:
     if type(val0) != type(val1):
         return False
     elif isinstance(val0, np.ndarray):
-        if np.any(val0.shape != val1.shape):
-            return False
-        else:
+        if val0.shape == val1.shape:
             return np.all(val0 == val1)
+        return False
     elif isinstance(val0, (list, tuple)):
         if len(val0) == len(val1):
-            return np.all([_large_equal(v0, v1) for v0, v1 in zip(val0, val1)])
+            return all(_large_equal(v0, v1) for v0, v1 in zip(val0, val1))
         else:
             return False
     else:
@@ -1055,6 +1080,46 @@ def s_equal(*lsts:Sequence)->bool:
     return all(f in l0 for f, l0 in product(chain.from_iterable(l for l in lsts), lsts))
 
 
+def _nested_dict_merge(dctin:dict, dctnew:dict, strict:bool, prekey:Sequence[Hashable]=None)->dict:
+    prekey = (prekey, ) if prekey is None else tuple(prekey)
+    for key, val in dctnew.items():
+        if key in dctin:
+            if isinstance(val, dict) and isinstance(dctin[key], dict):
+                _nested_dict_merge(dctin[key], val, strict, prekey=prekey+(key,))
+            elif strict:
+                if not _large_equal(dctin[key], val):
+                    raise ValueError(f"Cannot change value of {prekey+(key,)}")
+            else:
+                dctin[key] = val
+        else:
+            dctin[key] = val
+    return dctin
+
+
+def _nested_dict_mergekey(update:dict, keys:Sequence[str], val:dict, strict:bool)->dict:
+    """
+    Merge nested dictionaries, 
+    strict means existing shared keys must be equal otherwise raise an error, 
+    prekey indicates recursive call from larger dictionary (rarely used except by during recursion)
+    """
+    for key in keys[:-1]:
+        if key not in update:
+            update[key] = dict()
+        update = update[key]
+    key = keys[-1]
+    if key in update:
+        if isinstance(update[key], dict) and isinstance(val, dict):
+            _nested_dict_merge(update[key], val, strict)
+        elif strict:
+            if not _large_equal(update[key], val):
+                raise ValueError(f"{keys} already exists and values are not compatible")
+        else:
+            update[key] = val
+    else:
+        update[keys[-1]] = val
+    return update
+
+
 def _expand_by_index(indices, values, start):
     """
     Return a list mapping the values in *values* to their cooresponding indeces in 
@@ -1097,8 +1162,10 @@ def _ascending_dict_to_tuple(spec:dict, start:int|None=1)->tuple|None:
 
     
 def _ascending_dict_to_tuple_strict(spec:dict, start:int=1)->tuple|None:
-    """Build a tuple from a dictionary of ascending keys, returns None if any
-    key is skipped"""
+    """
+    Build a tuple from a dictionary of ascending keys, 
+    returns None if anykey is skipped
+    """
     if any(i not in spec for i in range(start, len(spec)+start)):
         return None
     return tuple(spec[i] for i in range(start, len(spec)+start))
@@ -1296,6 +1363,57 @@ def _dim_iter(index:IndexType, shape:tuple[int,...])->tuple[int,tuple[int,...],I
     if not isinstance(index, tuple):
         index = (index, )
     return _dim_iter_tuple(index, shape)
+
+
+def _mask_loc(sub_locs:tuple[bool,...], loc:tuple[int])->tuple[int,...]:
+    """mask loc based on gate_loc"""
+    return tuple(l for g, l in zip(sub_locs, loc) if g)
+
+
+def broadcast_truthtable(truthtable:np.ndarray[np.bool_], seqs:Sequence[Hashable|Any],
+                         expand_func:Callable[[Any],Sequence[Hashable]],
+                         sort_key:Callable[[Hashable],int]=None, dtype:np.dtype=np.bool_,
+                         )->tuple[np.ndarray[np.bool_],list[Hashable]]:
+    r"""
+    Broadcast/expand a truthtable based on truthables infered from seqs using
+    expand_func. seqs must be a sequence of objects that can be converted into
+    "sub" truthtables, and seqeuences of sortables.
+
+    Parameters
+    ----------
+    truthtable : np.ndarray[np.bool\_]
+        Truthtable to be expanded.
+    seqs : Sequence[Hashable|Any]
+        Sequence of objects that may or may not need "expanding".
+    expand_func : Callable[[Any],Sequence[Hashable]]
+        Function that takes elements of seqs, and returns 2 tuple of 
+        sequence of sub-elements, and truthtable (ndim truthtable = len(sequence).
+    sort_key : Callable[[Hashable],int], optional
+        key callable for key of sorted. The default is None.
+    dtype : np.dtype, optional
+        datatype of returned truthtable. The default is np.bool\_.
+
+    Returns
+    -------
+    tt : np.ndarray[np.bool\_]
+        Expanded truthtable.
+    all_subs : list[Hashable]
+        Sorted sequence defining .
+
+    """
+    # build set of all gates used
+    expand, truthtables = zip(*(expand_func(element) for element in seqs))
+    # soted(set(..)) removes duplicate gates
+    all_subs = sorted(set(chain.from_iterable(expand)),key=sort_key)
+    idxmap = tuple(tuple(sub in subs for sub in all_subs) for subs in expand)
+    # allocate new table
+    tt = np.empty([2 for _ in range(len(all_subs))], dtype=dtype)
+    # iterate over every position of output table and assign appropriate value
+    for loc in product(*(range(2) for _ in range(len(all_subs)))):
+        sloc = tuple(int(tt[_mask_loc(idx, loc)]) for tt, idx 
+                     in zip(truthtables, idxmap))
+        tt[loc] = truthtable[sloc]
+    return tt, all_subs
 
 
 class _FileFinalizer:

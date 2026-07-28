@@ -14,7 +14,7 @@ authors = [
     {name="Paul David Harris", email="harripd@gmail.com"}]
 description = "Burst analysis toolkit for single and multi-spot smFRET data."
 readme = "README.md"
-license = {file = "LICENSE.txt"}
+license = "MIT"
 keywords = ["single-molecule FRET","smFRET", "burst-analysis", "biophysics"]
 classifiers = [
     "Intended Audience :: Science/Research",

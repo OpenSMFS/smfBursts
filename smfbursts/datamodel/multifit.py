@@ -60,7 +60,7 @@ Where
 Note that in this definition :math:`a_{1} = a_{1}^{\prime}` .
 
 This rescaling makes it so that when setting bounds for these amplitudes in
-minimize_ these amplitudes can be set to (0, 1), and the output distribution will maintain
+|minimize| these amplitudes can be set to (0, 1), and the output distribution will maintain
 either the integral for PDF, or final cumulative size for CDF like single distribution
 functions.
 
@@ -105,8 +105,8 @@ These functions are named according to the following formula\:
 ``value_...`` and ``fit_...`` functions
 ---------------------------------------
 
-The ``value_...`` functions are designed to be used as the ``func`` arg of minimize_
-See each docstring for the expected ``args`` tuple to be supplied to minimize_
+The ``value_...`` functions are designed to be used as the ``func`` arg of |minimize|
+See each docstring for the expected ``args`` tuple to be supplied to |minimize|
 However, in general the last value in the tuple should be one of the ``n<dist>...``
 functions.
 
@@ -120,12 +120,12 @@ functions.
 
 
 The ``fit_...`` functions are further wrappers around ``value_...`` functions that
-direcly call minimize_ .
+direcly call |minimize|.
 
 
-.. _leastsquare: `scipy.optimize.least_squares <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html>`__
-.. _minimize: https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.minimize.html
-.. _optimizeresult: `OptimizeResult <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.OptimizeResult.html>`__
+.. |leastsquare| replace:: `scipy.optimize.least_squares <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html>`__
+.. |minimize| replace:: `scipy.optimize.minimize <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.minimize.html>`__
+.. |optimizeresult| replace:: `OptimizeResult <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.OptimizeResult.html>`__
 .. |Param| replace:: `Column <smfbursts.datamodel.tables.Param>`
 .. |Column| replace:: `Column <smfbursts.datamodel.tables.Column>`
 .. |GateGroup| replace:: `Column <smfbursts.datamodel.tables.GateGroup>`
@@ -823,7 +823,7 @@ def value_mle(params:np.ndarray, samples:np.ndarray, func:FitFunc, **kwargs)->fl
         
         P(X | \theta) = MLE = \prod_{i=1}^{N}{PDF_{\theta}(\vec{x_{i}})}
     
-    For numerical accuracy and use in minimize_ function, computes as
+    For numerical accuracy and use in |minimize| function, computes as
     
     .. math::
         
@@ -1337,7 +1337,7 @@ def make_init(*args:np.ndarray[np.float64], amps:np.ndarray[np.float64]=None,
 
 def make_bounds(*args:np.ndarray[np.float64], free:bool=False, func:FitFunc=None, **kwargs:np.ndarray[np.float64])->np.ndarray[np.float64]:
     """
-    Create a bounds Nx2 shapped array for use with minimize_ and ``fit_...`` functions.
+    Create a bounds Nx2 shapped array for use with |minimize| and ``fit_...`` functions.
 
     Parameters
     ----------
@@ -1358,7 +1358,7 @@ def make_bounds(*args:np.ndarray[np.float64], free:bool=False, func:FitFunc=None
     Returns
     -------
     init : np.ndarray
-        Nx2 bounds array for use with minimize_ .
+        Nx2 bounds array for use with |minimize|.
 
     """
     args, nparam, ndist, adjust = _init_makeparam(func, args, kwargs, free)
@@ -1465,7 +1465,7 @@ def make_nd_bounds(func:NdFitFunc, *args:Sequence[tuple[np.ndarray,np.ndarray]],
                    **kwargs:Sequence[tuple[np.ndarray,np.ndarray]])->np.ndarray[np.float64]:
     """
     Build a bounds Nx2 array for use with :func:`fit_column_mle` or :func:`fit_hist_cdf`
-    (and internally passed to minimize_ ) using ``nd<dist>_...`` distributions
+    (and internally passed to |minimize|) using ``nd<dist>_...`` distributions
     from bounds specified per sub-param.
     Each param should be specified as nested sequence.
     Specify as `[bounds_dist0, bounds_dist1, ..., bounds_distN]``,
@@ -1594,12 +1594,12 @@ def fit_column_mle(data:DataS, column:Column, func:FitFunc, init:np.ndarray,
     func_kwargs : dict, optional
         Kwargs handed to func. The default is None.
     **kwargs : Any
-        Additional kwargs handed to minimize_ .
+        Additional kwargs handed to |minimize|.
 
     Returns
     -------
     OptimizeResult
-        Output of minimize_ .
+        Output of |minimize|.
 
     """
     getcol = data.get_column if isinstance(data, DataSet) else data.concatenate_column
@@ -1610,13 +1610,13 @@ def fit_column_mle(data:DataS, column:Column, func:FitFunc, init:np.ndarray,
 
 #: Type hint for functions that can be passed to ``min_func`` of :func:`fit_hist_cdf`.
 #: These should have the signature ``min_func(param, bins, hist, func)``
-#: and return an optimizeresult_
+#: and return an |optimizeresult|.
 MinFunc = Callable[[np.ndarray,np.ndarray,np.ndarray,FitFunc],OptimizeResult]
 
-#: Function for use with :func:`fit_hist_pdf`, fits histogram with leastsquare_
+#: Function for use with :func:`fit_hist_pdf`, fits histogram with |leastsquare|
 lsq_anyfit = partial(least_squares, value_diff)
 
-#: Function for use with :func:`fit_hist_pdf`, fits histogram with minimize_
+#: Function for use with :func:`fit_hist_pdf`, fits histogram with |minimize|
 min_anyfit = partial(minimize, value_lsq)
 
 def fit_hist_pdf(hist:Hist, func:FitFunc, init:np.ndarray, func_kwargs:dict=None, 
@@ -1637,7 +1637,7 @@ def fit_hist_pdf(hist:Hist, func:FitFunc, init:np.ndarray, func_kwargs:dict=None
         Kwargs handed to func. The default is None.
     min_func : MinFunc, optional
         Minimizer function to use, usually either :attr:`lsq_anyfit` to
-        use leastsquare_, or :attr:`min_anyfit` to use minimize_.
+        use |leastsquare|, or :attr:`min_anyfit` to use |minimize|.
         The default is lsq_anyfit.
     **kwargs : Any
         Additional kwargs passed to ``min_func``.
@@ -1653,10 +1653,10 @@ def fit_hist_pdf(hist:Hist, func:FitFunc, init:np.ndarray, func_kwargs:dict=None
     return min_func(init, args=(x, hist.pdf, func), **kwargs)
 
 
-#: Function for use with ``min_func`` argument of :func:`fit_hist_cdf`, fits histogram with leastsquare_
+#: Function for use with ``min_func`` argument of :func:`fit_hist_cdf`, fits histogram with |leastsquare|
 lsq_cdffit = partial(least_squares, value_diff_by_cdf)
 
-#: Function for use with ``min_func`` argument of :func:`fit_hist_cdf`, fits histogram with minimize_
+#: Function for use with ``min_func`` argument of :func:`fit_hist_cdf`, fits histogram with |minimize|
 min_cdffit = partial(minimize, value_lsq_by_cdf)
 
 
@@ -1678,7 +1678,7 @@ def fit_hist_cdf(hist:Hist, func:FitFunc, init:np.ndarray, func_kwargs:dict=None
         Kwargs handed to func. The default is None.
     min_func : Callable[[np.ndarray,np.ndarray,np.ndarray,FitFunc],OptimizeResult]
         Minimizer function to use, usually either :attr:`min_cdffit` to
-        use minimize_, or :attr:`min_cdffit` to use leastsquare_.
+        use |minimize|, or :attr:`min_cdffit` to use |leastsquare|.
         The default is min_cdffit.
     **kwargs : Any
         Additional kwargs passed to ``min_func``.

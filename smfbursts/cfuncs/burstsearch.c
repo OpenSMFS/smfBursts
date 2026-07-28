@@ -355,14 +355,14 @@ int sliding_window_burst_search(int64_t m, double F, double clk_p, double c, PhS
 // slinding window bursts search, but automatically detects overlapping bursts and returns fused burst arrays
 int sliding_window_burst_search_fuse(int64_t m, double F, double clk_p, double c, PhStream *photons, 
 							 int64_t dsize, uint8_t *dset, int64_t cper, int64_t nper,
-							 double cbg, double nbg, 
+							 int64_t fuse, double cbg, double nbg, 
 							 int64_t alloc_size, Mpos *pos, Bursts *bursts){
 	int err = 0;
 	int64_t dT; 
 	double mindTc = (((double)(m-1)) -c)/F/cbg/clk_p;
 	double mindTn = (((double)(m-1)) -c)/F/nbg/clk_p;
 	int64_t mindT = (int64_t) mindTc;
-	int64_t nstart;
+	int64_t nstart, fuse_start;
 	int bstate = FALSE;
 	// allocate structures
 	// advance through burst background periods
@@ -373,7 +373,8 @@ int sliding_window_burst_search_fuse(int64_t m, double F, double clk_p, double c
 	while (advance_photon_delta(photons, pos, dsize, dset, &dT) && (photons->times[photons->pos] < nper)){
 		if (!bstate && (dT < mindT)) { // transition into burst
 			nstart = pos->times[pos->pos] - mindT;
-			if ((bursts->pos == 0) || (nstart > (bursts->stops[bursts->pos -1]))){
+			fuse_start = nstart - fuse;
+			if ((bursts->pos == 0) || (fuse_start > (bursts->stops[bursts->pos -1]))){
 				if (bursts->pos == bursts->size){
 					if (extend_bursts(bursts, alloc_size)){
 						err = 2; break;
@@ -398,7 +399,8 @@ int sliding_window_burst_search_fuse(int64_t m, double F, double clk_p, double c
 			mindT = (int64_t) ((mindTn*((double) (pos->times[pos->pos]-nper)))+(mindTc*((double) (nper - pos->times[(pos->pos == 0) ? m-1: pos->pos-1])))) / ((double) dT);
 			if (!bstate && (dT < mindT)) { // transition into burst
 				nstart = pos->times[pos->pos] - mindT;
-				if ((bursts->pos == 0) || (nstart < (bursts->stops[bursts->pos -1 ]))){
+				fuse_start = nstart - fuse;
+				if ((bursts->pos == 0) || (nstart > (bursts->stops[bursts->pos -1 ]))){
 					if (bursts->pos == bursts->size){ if (extend_bursts(bursts, alloc_size)) {err = 2; break;}}
 					bursts->starts[bursts->pos] = nstart;
 				}
@@ -479,12 +481,12 @@ int sliding_window_burst_search_T(int64_t m, double clk_p, PhStream *photons,
 // slinding window bursts search, but automatically detects overlapping bursts and returns fused burst arrays
 int sliding_window_burst_search_T_fuse(int64_t m, double clk_p, PhStream *photons, 
 							 int64_t dsize, uint8_t *dset, int64_t cper, int64_t nper,
-							 double mindTc, double mindTn, 
+							 int64_t fuse, double mindTc, double mindTn, 
 							 int64_t alloc_size, Mpos *pos, Bursts *bursts){
 	int err = 0;
 	int64_t dT; 
 	int64_t mindT = (int64_t) mindTc;
-	int64_t nstart;
+	int64_t nstart, fuse_start;
 	int bstate = FALSE;
 	// allocate structures
 	// advance through burst background periods
@@ -495,7 +497,8 @@ int sliding_window_burst_search_T_fuse(int64_t m, double clk_p, PhStream *photon
 	while (advance_photon_delta(photons, pos, dsize, dset, &dT) && (photons->times[photons->pos] < nper)){
 		if (!bstate && (dT < mindT)) { // transition into burst
 			nstart = pos->times[pos->pos] - mindT;
-			if ((bursts->pos == 0) || (nstart > (bursts->stops[bursts->pos -1]))){
+			fuse_start = nstart - fuse;
+			if ((bursts->pos == 0) || (fuse_start > (bursts->stops[bursts->pos -1]))){
 				if (bursts->pos == bursts->size){
 					if (extend_bursts(bursts, alloc_size)){
 						err = 2; break;
@@ -520,7 +523,8 @@ int sliding_window_burst_search_T_fuse(int64_t m, double clk_p, PhStream *photon
 			mindT = (int64_t) ((mindTn*((double) (pos->times[pos->pos]-nper)))+(mindTc*((double) (nper - pos->times[(pos->pos == 0) ? m-1: pos->pos-1])))) / ((double) dT);
 			if (!bstate && (dT < mindT)) { // transition into burst
 				nstart = pos->times[pos->pos] - mindT;
-				if ((bursts->pos == 0) || (nstart < (bursts->stops[bursts->pos -1 ]))){
+				fuse_start = nstart - fuse;
+				if ((bursts->pos == 0) || (fuse_start > (bursts->stops[bursts->pos -1 ]))){
 					if (bursts->pos == bursts->size){ if (extend_bursts(bursts, alloc_size)) {err = 2; break;}}
 					bursts->starts[bursts->pos] = nstart;
 				}
@@ -565,6 +569,13 @@ int fuse_bursts_inplace(Bursts *bursts, int64_t max_gap){
 }
 
 int fuse_bursts(Bursts *inbursts, int64_t max_sep, Bursts *outbursts){
+	if (inbursts->size == 0){
+		outbursts->size = 0;
+		outbursts->pos = 0;
+		outbursts->starts = NULL;
+		outbursts->stops = NULL;
+		return FALSE;
+	}
 	int64_t new_size = inbursts->size;
 	// determine size of new array
 	for (int64_t i = 0, ii = 1; ii < inbursts->size; i++, ii++){
@@ -603,6 +614,8 @@ int fuse_bursts(Bursts *inbursts, int64_t max_sep, Bursts *outbursts){
 	return FALSE;
 }
 
+
+// Determine index in truthtable, where state is boolean array
 static inline int64_t evalstateidx(int64_t n, uint8_t *state){
 	int64_t idx = 0;
 	for (int64_t i = 0; i < n; i++) idx += state[i]*1<<(n-i-1);
@@ -798,5 +811,158 @@ double bva(int64_t n, uint8_t *dets, int64_t dsizeAll, uint8_t *dsetAll,
 		delta_sum += chunk_delta*chunk_delta;
 	}
 	return sqrt(delta_sum/(double)isub);
+}
+
+
+
+static inline int next_cpphoton(CPStream *photons, int64_t nper){
+	int64_t i;
+	for (i = photons->inext + 1; (i < photons->size) && (photons->times[i] < nper); i++){
+		if (in_set(photons->dets[i], photons->dsize, photons->dset)){
+			photons->iprev = photons->inext;
+			photons->inext = i;
+			photons->delta = photons->times[i] - photons->times[photons->iprev];
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+
+static inline int prev_cpphoton(CPStream *photons, int64_t imin){
+	int64_t i;
+	for (i = photons->iprev - 1; i >= imin; i--){
+		if (in_set(photons->dets[i], photons->dsize, photons->dset)){
+			photons->inext = photons->iprev;
+			photons->iprev = i;
+			photons->delta = photons->times[photons->inext] - photons->times[i];
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+
+static inline int SPRT(int64_t cA, int64_t cB, int64_t cC, int64_t nper, CPStream *photons){
+	int64_t Dn = 0, nC = 0, n = 0;
+	do {
+		Dn += photons->delta; // compute new Delta_n
+		nC = n * cC;
+		if ( Dn <= nC - cA ){ Dn = 0; n = 0;}
+		else if ( Dn > nC - cB ){ return TRUE; }
+		n++;
+	} while (next_cpphoton(photons, nper));
+	return FALSE;
+}
+
+
+static inline int fcusum(double Sa, double Sb, double h, int64_t nper, CPStream *photons, int64_t *knprev, int64_t *knnext, int64_t *deltanext){
+	double Sn = 0.0;
+	do{
+		Sn += Sa - (Sb * (double) photons->delta);
+		if ( Sn < 0.0 ) { Sn = 0.0; }
+		else if ( Sn > h ){ 
+			*knprev = photons->iprev; *knnext = photons->inext; *deltanext = photons->delta; 
+			return TRUE; 
+			}
+	} while (next_cpphoton(photons, nper));
+	return FALSE;
+}
+
+
+static inline int rcusum(double Sa, double Sb, double h, int64_t kl, int64_t nd, CPStream *photons, int64_t *kr){
+	double Sn = 0.0;
+	int64_t i;
+	for (i = 0; i < nd; i++){ if ( !prev_cpphoton(photons, kl) ) { return FALSE; } }
+	do{
+		Sn += Sa - (Sb * (double) photons->delta);
+		if ( Sn < 0.0 ) { Sn = 0.0; }
+		else if ( Sn > h ){ 
+			*kr = photons->inext; return TRUE; 
+		}
+	} while ( prev_cpphoton(photons, kl) );
+	return FALSE;
+}
+
+
+/* ********************************************************************
+ *  Yang algorithm
+ * name: cp_burst(alpha, beta, clk_p, photons, dsize, dset, bg, sbr, cper, nper, alloc_size, bursts)
+ * @param
+ * alpha: double, probability of false positive 
+ * beta: double, probability of false negative
+ * clk_p: double, clock rate, photons->times*clk_p will have units of times in seconds
+ * photons: *CPStream, data set to perform burst search on
+ * bg: double, background rate in counts/s
+ * sbf: double, signal to background ratio
+ * cper: int64_t, time in units of times of start of burst search
+ * nper: int64_t, time in units of times of end of burst search
+ * minsep: int64_t minimum separation between bursts, if separation is less, fuse bursts
+ * alloc_size: int64_t, buffer extension size for bursts
+ * bursts: *Bursts, pointer to allocated empty bursts array, where output stored
+ * @return
+ * int: boolean, TRUE if ERROR
+ * *********************************************************************
+ */
+int cp_burst_search(double alpha, double beta, double clk_p, CPStream *photons, 
+			double bg, double sbr, int64_t cper, int64_t nper, int64_t minsep,
+			int64_t alloc_size, Bursts *bursts){
+	/* compute threshold constants */
+	const double A = (1 - beta) / alpha;
+	const double B = beta / (1 - alpha);
+	const double Ibg = bg * clk_p;
+	const double I0 = (sbr - 1.0) * Ibg;
+	const double I1 = I0 / exp(2.0) + Ibg;
+	const double Irat = I1 / Ibg;
+	const double Idiff = I1 - Ibg;
+	const double KL_disc = -Idiff/I1 + log(Irat);
+	const double h = -log(alpha/3.0/(KL_disc+1.0)/(KL_disc+1.0) * log(1.0/alpha));
+	const int64_t cA = (int64_t)(log(A) / Idiff);
+	const int64_t cB = (int64_t) (log(B) / Idiff);
+	const int64_t cC = (int64_t)(log(Irat) / Idiff);
+	const double Sa = log(Irat);
+	const double Sb = Idiff;
+	const int64_t nd = (int64_t) lround(log(1.0/alpha)/KL_disc);
+	/* Temporary variables storing indexes of outputs to SPRT and f/r-CUSUM */
+	int64_t kl, kr; // kl: start of burst, kr: end of burst
+	int64_t knprev, knnext, deltanext; // locations of next "in det" pair for delta
+	/* Advance until inside period */
+	while ((photons->inext < photons->size) && (photons->times[photons->inext] < cper)){ photons->inext++; }
+	kl = photons->inext;
+	
+	/* ************************************************************** *
+	 *                         Main loop                              *
+	 * Note: Compared to the Yang implementation, this allows the     *
+	 * first photon to be in a burst, in the original, there is an    *
+	 * initilization step, which is just the loop withouth r-CUSUM.   *
+	 * In this implementation, there is no initilization, so the      *
+	 * pass through does not skip r-CUSUM. This also results in the   *
+	 * loop begining with f-CUSUM, making the code look simpler       *
+	 * ************************************************************** */
+	while ( fcusum(Sa, Sb, h, nper, photons, &knprev, &knnext, &deltanext) ){
+		/* r-CUSUM, locates true end of burst, returns TRUE if valid burst */
+		if ( rcusum(Sa, Sb, h, kl, nd, photons, &kr) ){
+			if ( ( bursts->pos != 0 ) && ( (bursts->stops[bursts->pos-1] + minsep) > photons->times[kl] ) ){
+				bursts->stops[bursts->pos - 1] = photons->times[kr];
+			}
+			else{
+				/* Check if at end of buffer, extend in necessary, if memory error, return TRUE */
+				if (bursts->pos == bursts->size){ if (extend_bursts(bursts, alloc_size) ) { return TRUE; } }
+				/* update burst */
+				bursts->starts[bursts->pos] = photons->times[kl];
+				bursts->stops[bursts->pos] = photons->times[kr] + 1;
+				bursts->pos++;
+			}
+		}
+		/* set photon positions for next burst */
+		kl = knprev;
+		photons->iprev = knprev;
+		photons->inext = knnext;
+		photons->delta = deltanext;
+		/* SPRT to find max end of next burst */
+		SPRT(cA, cB, cC, nper, photons);
+	}
+	final:
+	return finalize_bursts(bursts);
 }
 

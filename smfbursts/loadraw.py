@@ -3,15 +3,20 @@
 """
 Module for loading data from raw files
 """
+from os import PathLike
 from pathlib import Path
-from collections.abc import Sequence
+from typing import Any, Literal
+from collections.abc import Callable, Hashable, Sequence
+from itertools import chain
+import re
 
 import numpy as np
 
 import phconvert as phc
 from phconvert.loader import loadfile_ptu, loadfile_bh, loadfile_sm
 
-from .photonHDF5 import PhotonHDF5Data, SetupSpec, PhGroupRaw
+from .photondata import PhotonData, PhotonDataList
+from .photonHDF5 import PhotonHDF5Data, SetupSpec, PhGroupRaw, regularize_dets
 
 
 def _none_pop(main:dict, **kwargs)->dict:
@@ -522,3 +527,80 @@ def fill_alex_windows(raw:PhotonHDF5Data, alternation_period:int, *args:np.ndarr
 
 fill_nsalex_windows = fill_pie_windows
 fill_usalex_windows = fill_alex_windows
+
+
+def _regularize_finalizer(raw:list[PhotonHDF5Data], **kwargs:Any)->PhotonDataList:
+    """Default finalizer function, takes sequence of PhotonHDF5Data and creates PhotonDataList"""
+    return PhotonDataList([regularize_dets(r, **kwargs) for r in raw])
+
+
+def _raw_finalizer(raw:list[PhotonHDF5Data], **kwargs:any)->PhotonHDF5Data:
+    setup = raw[0].setup
+    photon_data = tuple(chain.from_iterable(r.photon_data for r in raw))
+    return PhotonHDF5Data(photon_data, setup, **kwargs)
+
+
+_dir_finalizers = {None:_regularize_finalizer, True:_regularize_finalizer, 
+                   'regularize':_regularize_finalizer, 
+                   False:_raw_finalizer, 'raw':_raw_finalizer}
+
+
+_pattern_dict = {'hdf5':(re.compile(r'.*\.hdf5'), PhotonHDF5Data.load_hdf5), 
+                 'sm':(re.compile(r'.*\.sm'), load_sm), 
+                 'ptu':(re.compile(r'.*\.ptu'), load_ptu),
+                 'spc':(re.compile(r'.*\.spc'), load_spc) }
+
+
+def load_dir(path:str|PathLike, pattern:re.Pattern|Literal['hdf5','sm','ptu','spc']='hdf5', 
+             loader:Callable[[Path],PhotonHDF5Data]=None, 
+             finalizer:Literal['regularize','raw']|Callable[[list[PhotonHDF5Data]],PhotonDataList]='regularize',
+             loader_kwargs:dict[str:Any]=None, finalizer_kwargs:dict[str:Any]=None,
+             sort:Callable[[str],Hashable]=None)->PhotonHDF5Data|PhotonDataList:
+    """
+    Load all files in directory path, matching pattern as a 
+    :class:`smfbursts.photondata.PhotonDataList`.
+
+    Parameters
+    ----------
+    path : str | PathLike
+        Path to directory to load.
+    pattern : re.Pattern|Literal['hdf5','sm','ptu','spc'], optional
+        Pattern which files must match to be included. The default is 'hdf5'.
+    loader : [[Path],PhotonHDF5Data], optional
+        Load function, gets ``loader(filename, **loader_kwargs)``, should return
+        a :class:`PhotonHDF5Data` object. The default is None.
+    finalizer : {'regularize', 'raw'} | Callable, optional
+        Finalization function, gets 
+        ``finalizer(list[<result of loader>], **finalizer_kwargs)``, and should
+        return a PhotonDataList object. If 'regularize'
+        The default is 'regularize'.
+    loader_kwargs : dict[str:Any], optional
+        Kwargs passed to loader function. The default is None.
+    finalizer_kwargs : dict[str:Any], optional
+        Kwargs passed to finalizer. The default is None.
+    sort : Callable[[str],Hashable], optional
+        Function takes filename, and returns key to be use in sorting filenames.
+        The default is None.
+
+    Returns
+    -------
+    PhotonDataList
+        :class:`smfbursts.photondata.PhotonDataList` object of all files in directory.
+
+    """
+    if isinstance(pattern, str):
+        if pattern in _pattern_dict:
+            pattern, ld = _pattern_dict[pattern]
+            loader = ld if loader is None else loader
+        else:
+            pattern = re.compile(pattern)
+    loader = PhotonHDF5Data.load_hdf5 if loader is None else loader
+    loader_kwargs = dict() if loader_kwargs is None else loader_kwargs
+    finalizer = finalizer if callable(finalizer) else _dir_finalizers.get(finalizer, finalizer)
+    if not callable(finalizer):
+        raise ValueError(f"Finalizer must be callable, 'regularize', or 'raw', not {finalizer}")
+    finalizer_kwargs = dict() if finalizer_kwargs is None else finalizer_kwargs
+    path = Path(path)
+    files = sorted((f for f in path.iterdir() if pattern.match(f.name)), 
+                   key = None if sort is None else lambda x: sort(x.name))
+    return finalizer([loader(f, **loader_kwargs) for f in files], **finalizer_kwargs)

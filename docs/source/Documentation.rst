@@ -2,12 +2,13 @@ Documentation
 =============
 
 .. toctree::
-    :caption: Data Analysis Modules
+    :caption: Data Analysis
     :maxdepth: 1
 
     photondatadoc
-    backgrounddoc
+    backgroundtablesdoc
     bursttablesdoc
+    childphotontablesdoc
     fcsdoc
     plottingdoc
     fretfactorydoc

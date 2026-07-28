@@ -22,29 +22,56 @@ int read_file(char *fname, long *size, void **out){
 }
 
 int main(int argc, char **argv){
-	if (argc != 5) return 0;
+	if (argc != 6){
+		printf("Bad number of arguments\n");
+		return 0;}
 	// load files
-	int64_t *times = NULL, *periods = NULL;
-	double *bg = NULL;
+	int64_t *times = NULL;
+	int64_t *periods = NULL;
+	double *bg = NULL, *sbr = NULL;
 	uint8_t *dets = NULL;
-	long ltimes = 0, ldets = 0, lperiods = 0, lbg = 0;
+	long ltimes = 0, ldets = 0, lperiods = 0, lbg = 0, lsbr = 0;
 	int64_t dsize = 4;
 	int64_t m = 10;
 	double F = 6.0;
 	double clk_p = 5e-8;
 	int64_t c = -1;
-	int64_t ncore = 1;
+	int64_t ncore = 4;
 	int fuse = TRUE;
-	if (read_file(argv[1], &ltimes, (void*) &times)) return 1;
-	if (read_file(argv[2], &ldets, (void*) &dets)) {free(times); return 1;}
-	if (read_file(argv[3], &lperiods, (void*) &periods)) {free(dets); free(times); return 1;}
-	if (read_file(argv[4], &lbg, (void*) &bg)) {free(periods); free(dets); free(times); return 1;}
+	if (read_file(argv[1], &ltimes, (void*) &times)){
+		printf("Cannot read times file\n");
+		return 1;
+	}
+	if (read_file(argv[2], &ldets, (void*) &dets)) {
+		free(times); 
+		printf("Cannot read dets file\n");
+		return 1;}
+	if (read_file(argv[3], &lperiods, (void*) &periods)) {
+		free(dets); 
+		free(times); 
+		printf("Cannot read periods file\n");
+		return 1;}
+	if (read_file(argv[4], &lbg, (void*) &bg)) {
+		free(periods); 
+		free(dets); 
+		free(times); 
+		printf("Cannot read bg file\n");
+		return 1;}
+	if (read_file(argv[5], &lsbr, (void*) &sbr)) {
+		free(periods); 
+		free(dets); 
+		free(times); 
+		free(bg);
+		printf("Cannot read bg file\n");
+		return 1;}
 	// check matching lengths
 	if ((ltimes % sizeof(int64_t) != 0)||(ldets % sizeof(uint8_t) != 0)||(lperiods % sizeof(int64_t) != 0)||(lbg % sizeof(double) != 0)){
 		free(bg);
 		free(periods);
 		free(dets);
 		free(times);
+		free(sbr);
+		printf("ERROR: Bad size if arrays\n");
 		return 1;
 	}
 	if (ltimes / sizeof(int64_t) != (ldets / sizeof(int8_t))){
@@ -52,6 +79,8 @@ int main(int argc, char **argv){
 		free(periods);
 		free(dets);
 		free(times);
+		free(sbr);
+		printf("ERROR: Non matching lengths\n");
 		return 1;
 	}
 	if (((lperiods / sizeof(int64_t)) - 1) != (lbg / sizeof(double))){
@@ -59,23 +88,50 @@ int main(int argc, char **argv){
 		free(periods);
 		free(dets);
 		free(times);
+		free(sbr);
+		printf("ERROR bad size of bg/periods arrays\n");
+		return 1;
+	}
+	if ((lbg / sizeof(double)) != (lsbr / sizeof(double))){
+		free(bg);
+		free(periods);
+		free(dets);
+		free(times);
+		free(sbr);
+		printf("ERROR bad size of bg/periods arrays\n");
 		return 1;
 	}
 	int64_t nphot = ltimes / sizeof(uint64_t);
 	int64_t nper = lbg / sizeof(double);
 	
+	uint8_t maxdet = 0, mindet = 255;
+	for (int64_t i = 0; i < nphot; i++){
+		if (dets[i] > maxdet) maxdet = dets[i];
+		if (dets[i] < mindet) mindet = dets[i];
+	}
+	printf("Starting analysis, det range: [%d, %d]\n", mindet, maxdet);
 	uint8_t *dset = (uint8_t*) malloc(4*sizeof(uint8_t));
 	int res = 0;
 	for (int64_t i = 0; i < dsize; i++){
-		dset[i] = i;
+		dset[i] = (uint8_t) i;
 	}
 	// nphot -> photons, no more times, nper/cper convert -> cper/nper,
 	// bg -> cbg/nbg, 
 	
-	Bursts **obursts = (Bursts**) calloc(1, sizeof(Bursts*));
-	res = burst_search_sliding_window(m, F, clk_p, c, nphot, times, dets,
-										dsize, dset, nper, periods, bg, 
-										500, ncore, fuse, TRUE, obursts);
+	Bursts *bursts = NULL;
+	res = burst_search_cp(0.0001, 0.01, clk_p, nphot, times, dets,
+						dsize, dset, nper, periods, bg, sbr, 0.0, 512, ncore, &bursts);
+	/*Bursts *bursts = alloc_burst_array(1, 500);
+	CPStream photons;
+	photons.size = nphot;
+	photons.times = times;
+	photons.dets = dets;
+	photons.iprev = 0;
+	photons.inext = 0;
+	photons.dsize = dsize;
+	photons.dset = dset;
+	//res = cp_burst(0.0001, 0.01, clk_p, &photons, dsize, dset, 2000.0, 20.0, 500, bursts);
+	res = cp_burst_search(0.0001, 0.01, clk_p, &photons, 2000.0, 20.0, 0, photons.times[photons.size-1]+1, 500, bursts);*/
 // //
 // // Test for non-parallel burst search
 // //
@@ -124,7 +180,7 @@ int main(int argc, char **argv){
 	printf("Before fuse check bursts valid is %d, is fused %d, pos: %ld\n", check_bursts_valid(bursts), check_bursts_fused(bursts, 0), bursts->pos);
 	*/
 	// End of single threaded type
-	Bursts *bursts = obursts[0];
+	// Bursts *bursts = obursts[0];
 	
 	//printf("bursts size: %ld, pos %ld\n", bursts->size, bursts->pos);
 	//for (int64_t i = bursts->size - 10; (i < bursts->size) ; i++){
@@ -142,6 +198,7 @@ int main(int argc, char **argv){
 	double *maxrates = (double*) malloc(bursts->size*sizeof(int64_t));
 	double *bvas = (double*) malloc(bursts->size*sizeof(int64_t));
 	int64_t pos = 0;
+	// determine start locations of bursts
 	for (int64_t i = 0; i < bursts->size; i++){
 		for( ; times[pos] < bursts->starts[i]; pos++){}
 		istarts[i] = pos;
@@ -160,11 +217,20 @@ int main(int argc, char **argv){
 	//printf("start BVA\n");
 	burst_variance_analysis(m, dets, bursts->size, istarts, istops, dallsize, dallset, dsubsize, dsubset, ncore, bvas);
 	//printf("finish post-process\n");
-	for (int64_t i = 0; (i < 10) && (i < bursts->size); i++){
-		printf("burst %12ld | istart: %12ld, istop: %12ld, start: %12ld, stop: %12ld, maxrate: %4f, bva: %4f\n", i, istarts[i], istops[i], bursts->starts[i], bursts->stops[i], maxrates[i], bvas[i]);
+	int64_t delta_max = 0, delta_max_i = 0;
+	for (int64_t i = 0; i < bursts->size; i++){
+	//	if ((bursts->stops[i] - bursts->starts[i])  > 2) printf("burst %ld reasonable index diff: start %ld, stop %ld, diff: %ld\n", i, bursts->starts[i], bursts->stops[i], bursts->stops[i]-bursts->starts[i]);
+		if ((bursts->stops[i] - bursts->starts[i]) > delta_max){
+			delta_max = bursts->stops[i] - bursts->starts[i];
+			delta_max_i = i;
+		}
 	}
-	for (int64_t i = bursts->size-10; i < bursts->size; i++){
-		printf("burst %12ld | istart: %12ld, istop: %12ld, start: %12ld, stop: %12ld, maxrate: %4f, bva: %4f\n", i, istarts[i], istops[i], bursts->starts[i], bursts->stops[i], maxrates[i], bvas[i]);
+	printf("max size: %ld, index: %ld\n", delta_max, delta_max_i);
+	for (int64_t i = 0; (i < 10) && (i < bursts->size); i++){
+		printf("burst %4ld | istart: %8ld, istop: %8ld, start: %8ld, stop: %8ld, maxrate: %4f, bva: %4f\n", i, istarts[i], istops[i], bursts->starts[i], bursts->stops[i], maxrates[i], bvas[i]);
+	}
+	for (int64_t i = bursts->size-10 > 0 ? bursts->size-10 : 0; i < bursts->size; i++){
+		printf("burst %4ld | istart: %8ld, istop: %8ld, start: %8ld, stop: %8ld, maxrate: %4f, bva: %4f\n", i, istarts[i], istops[i], bursts->starts[i], bursts->stops[i], maxrates[i], bvas[i]);
 	}
 	Bursts fused;
 	fuse_bursts(bursts, 1, &fused);
@@ -177,18 +243,19 @@ int main(int argc, char **argv){
 	free(dallset);
 	frees:
 	free(dset);
-/*	for (int64_t i = 0; i < lbg; i++){
+	/*for (int64_t i = 0; i < lbg; i++){
 		free_bursts_fields(&bursts[i]);
 	}*/
 	free_bursts_fields(bursts);
 	free_bursts_fields(&fused);
-	free(obursts);
+//	free(obursts);
 	free(bursts);
 //	free(photons);
 	free(bg);
 	free(periods);
 	free(dets);
 	free(times);
+	free(sbr);
 	return 1;
 }
 

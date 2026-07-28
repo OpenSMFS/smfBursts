@@ -99,13 +99,13 @@ class DiskDict:
                 continue
             self[key] = val
         self._frozen = self._freeze
-    
+
     def _key_to_node(self, key:Hashable)->str:
         """Convert a python-object key to the str name of the group/array to which 
         the value will be saved in the HDF5 group"""
         self.convert_key(key)
         return self.key_to_node(key)
-    
+
     @classmethod
     def key_to_node(cls, key:Hashable)->str:
         """
@@ -123,7 +123,7 @@ class DiskDict:
 
         """
         return TypeValidator.val_to_nodename(key)
-    
+
     def _node_to_key(self, node:tb.Node)->Hashable:
         """Convert a node/group of the HDF5 file to the python object key that
         the value will be represented in the DiskDict"""
@@ -134,7 +134,7 @@ class DiskDict:
         try:
             TypeValidator.val_to_nodename(key)
         except Exception as e:
-            raise TypeError("cannot convert {type(key)} to nodename") from e
+            raise TypeError(f"cannot convert {type(key)} to nodename") from e
         return key
 
     def convert_value(self, key:Hashable, value:Any)->Any:

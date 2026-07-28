@@ -1,5 +1,5 @@
 Background Analysis Classes
 ---------------------------
 
-.. automodule:: smfbursts.background
+.. automodule:: smfbursts.backgroundtables
     :members:

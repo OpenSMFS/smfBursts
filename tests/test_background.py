@@ -120,9 +120,3 @@ def test_CM_column(data, p_bg):
 def test_tail_min(data, p_bg):
     tmin = smf.Column(p_bg, 'tail_min', smf.PhSel('0ex1em'))
     data.get_column(tmin)
-    # if p_bg.params['compute_stream'] == 'all':
-    #     tminDex = smf.Column(p_bg, 'tail_min', smf.PhSel('0ex'))
-    #     data.get_column(tminDex)
-    # else:
-    #     with pytest.raises(Exception):
-    #         tminDex = smf.Column(p_bg, 'tail_min', smf.PhSel('0ex'))

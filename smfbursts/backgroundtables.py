@@ -11,6 +11,8 @@ division of data in to consecutive periods (for background assemsment) and
 computation of background, respectively.
 
 Additional background functions are defined.
+
+.. |classmethod| replace:: `classmethod() <https://docs.python.org/3/library/functions.html#classmethod>`__
 """
 from typing import Union, ClassVar, Literal
 from collections.abc import Hashable, Callable, Sequence, Iterator
@@ -722,16 +724,18 @@ class BG(ChildPhotonTable):
         
     Columns
     -------
-        bg : float, (ph_sel:Ph_sel, )
+        bg : float, (ph_sel:PhSel, )
             background rate for (cnts*s\ :sup:`-1`) ``ph_sel``
-        err_KS : float, (ph_sel:Ph_sel, )
+        err_KS : float, (ph_sel:PhSel, )
             Kolmogorov-Smirnov error metric, computes the error as the max of 
             deviation of the empirical CDF from the fitted CDF.
-        err_CM : float, (ph_sel:Ph_sel, )
+        err_CM : float, (ph_sel:PhSel, )
             Crames-von Mises error metric. 
             Computes :math:`\int_{-\infty}^{\infty} \left[] L_{n} - L_{*} \right]^{2}`.
             Using trapezoid rule for numerical integration.
-        rangecounts : float (param:Param[BasePhotonTable], ph_sel:Ph_sel, starttype:str, stoptype:str)
+        tail_min : float, (ph_sel:PhSel)
+            tail_min of given period, only useful when ``auto_threshold=True``
+        rangecounts : float (param:Param[BasePhotonTable], ph_sel:PhSel, starttype:str, stoptype:str)
             Expected number of photons in ranges from param for stream ph_sel, using
             duration defined by starttype and stoptype. This is computed as
             ``origin.get_table(param)['dur', starttype, stoptype]*self.origin(self.param)[ph_sel]``
@@ -740,7 +744,7 @@ class BG(ChildPhotonTable):
     #: :meta private:
     param_defs = (
         ParamDef('compute_stream', TV_str(isin=('single', 'single_all', 'any')), default='single_all'),
-        ParamDef('func', TV_PyCode, default=exp_mlefit, append_params=_append_param_bg_func),
+        ParamDef('func', TV_PyCode(subtype="BG_func"), default=exp_mlefit, append_params=_append_param_bg_func),
                   )
     #: :meta private:
     parent_defs = (
@@ -761,16 +765,21 @@ class BG(ChildPhotonTable):
                   dtype=np.float64, reg_func='_regularizecolumn_rangecounts', mapto=BasePhotonTable,
                   title='bg photons'),
                    )
-    
+
     @classmethod
     def param_preprocess(cls, params, parents):
+        """Preprocess for BG param"""
         params = params.asdict if isinstance(params, tupledict) else dict(params)
         params.setdefault('compute_stream', 'single_all')
         preprocess, _, _ , _ = get_pycode_subval('BG_func', params.get('func',exp_mlefit))
         return preprocess(params, parents)
-    
+
     @classmethod
     def validate_param(cls, param:Param)->None:
+        """
+        Validate rest of BG param based on func param 
+        (3rd value of subval function is validator)
+        """
         _, _, validate, _ = get_pycode_subval('BG_func', param.params['func'])
         validate(param)
 
@@ -784,7 +793,7 @@ class BG(ChildPhotonTable):
         elif cstr == 'single':
             return stream_id.size == 1
         return stream_id.size == 1 or stream_id.size == detdef.size
-    
+
     def _get_tail_min(self, phsel:PhSel)->np.ndarray[np.double]:
         """Getter function for determining tail-min threshold. Only useful when 'auto_threshold' is Ture"""
         phsel = phsel.render_positive(self.origin.detdef, convert_all=True)

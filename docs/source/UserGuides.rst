@@ -11,6 +11,7 @@ User Guides
     photonHDF5Tutorial
     PlottingTutorial
     MultiFitTutorial
+    FCStutorial
 
 
 

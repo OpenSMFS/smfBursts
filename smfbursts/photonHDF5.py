@@ -720,7 +720,7 @@ def _get_tcspc_param(i:int, pd:PhGroupRaw, setup:SetupSpec,
     return out
 
 
-def load(filename:str|PathLike, ondisk:bool=False):
+def load(filename:str|PathLike, ondisk:bool=False)->PhotonHDF5Data:
     """
     Load a photon-HDF5 file.
 
@@ -845,8 +845,9 @@ def regularize_dets(raw:PhotonHDF5Data, alex_type:str=None, autosave:bool=False,
     if keepraw is None:
         keepraw = raw.file is None or raw.ondisk
     ref = raw if keepraw else weakref.ref(raw)
+    meta = {'filename':raw.filename} if 'filename' in raw else dict()
     out = tuple(PhotonData(pharray, group=group, group_no=i,
-                           meta={'filename':raw.filename}, autosave=autosave, 
+                           meta=meta, autosave=autosave, 
                            file=file, track=track, ref=ref)
                 for i, pharray in enumerate(pharrays))
     if load_saved:

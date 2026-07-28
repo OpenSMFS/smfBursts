@@ -11,15 +11,19 @@ into the plot (without creating many gates based therein).
 
 .. |PhotonDataList| replace:: `PhotonDataList <smfbursts.photondata.PhotonDataList>`__
 .. |Param| replace:: `Param <smfbursts.datamodel.Param>`__
-.. _pltax : `plt.Axes <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.html>`__
-.. _pltgca : `plt.gca() <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.gca.html>`__
-.. _axscatter: `ax.scatter() <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.scatter.html>`__
-.. _axplot: `ax.plot() <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.plot.html>`__
-.. _axaxvline: `ax.axvline() <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.axvline.html>`__
-.. _plttext: `plt.Text() <https://matplotlib.org/stable/api/text_api.html#matplotlib.text.Text>`__
+.. |pltax| replace:: `plt.Axes <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.html>`__
+.. |pltgca| replace:: `plt.gca() <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.gca.html>`__
+.. |axscatter| replace:: `ax.scatter() <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.scatter.html>`__
+.. |axplot| replace:: `ax.plot() <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.plot.html>`__
+.. |axaxvline| replace:: `ax.axvline() <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.axvline.html>`__
+.. |axaxvspan| replace:: `ax.axvspan() <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.axvspan.html>`__
+.. |axaxhspan| replace:: `ax.axhspan() <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.axhspan.html>`__
+.. |plttext| replace:: `plt.Text() <https://matplotlib.org/stable/api/text_api.html#matplotlib.text.Text>`__
+.. |axsetxlabel| replace:: `ax.set_xlabel <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_xlabel.html>`__
+.. |axsetylabel| replace:: `ax.set_ylabel <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_ylabel.html>`__
 """
 from typing import Union, Any, Literal
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Sequence, Iterator
 from numbers import Integral, Real
 from itertools import repeat
 
@@ -42,8 +46,8 @@ from .datamodel.plot import (
 
 from .ph_sel import PhSel, phsel_union
 from .photondata import PhotonData, PhotonDataList, PhotonDataS, _title_sels
-from .background import BG
-from .bursttables import Bursts
+from .backgroundtables import BG
+from .bursttables import Bursts, BurstOvlp
 
 import smfbursts.cfuncs as smc
 
@@ -62,8 +66,7 @@ def alternation_hist(raw:PhotonHDF5Data, ich:int=0, ax:plt.Axes=None, group_dets
     ich : int, optional
         For multi-spot data, which spot to plot. The default is 0.
     ax : plt.Axes, optional
-        pltax_ in which to plot data, if None, use 
-        pltgca_. 
+        |pltax| in which to plot data, if None, use |pltgca|. 
         The default is None.
     group_dets : None|bool, optional
         Whether to group detectors based on names. The default is None.
@@ -78,7 +81,7 @@ def alternation_hist(raw:PhotonHDF5Data, ich:int=0, ax:plt.Axes=None, group_dets
 
 
 def _time_plot(func:str, ax:plt.Axes, data:PhotonDataS, col:Column, gate:GateGroup,
-               include_unit:bool, plotlabel:str, 
+               include_unit:bool, rescale:Real, record:bool, plotlabel:str, 
                xlabel:str, xlabel_kwargs:dict, ylabel:str, ylabel_kwargs:dict,
                list_style:Literal['ordered','break,','continuous'],
                divlines:bool, divlines_kwargs:dict,
@@ -95,7 +98,10 @@ def _time_plot(func:str, ax:plt.Axes, data:PhotonDataS, col:Column, gate:GateGro
         kwargs = _dict_update(kwargs, {'label':plotlabel})
     xcol = Column(col.base_param, 'midtime', ('istarttime', 'istoptime'))
     if isinstance(data, PhotonData) or list_style == 'continuous':
-        (xarr, yarr), (cxname, cyname) = _get_column_arrays(data, xcol, col, gate=gate, include_unit=include_unit)
+        (xarr, yarr), (cxname, cyname) = _get_column_arrays(data, xcol, col, 
+                                                            gate=gate, 
+                                                            include_unit=include_unit,
+                                                            rescale=rescale, record=record)
     else:
         xarr, yarr = list(), list()
         xlast = 0
@@ -129,15 +135,15 @@ def _time_plot(func:str, ax:plt.Axes, data:PhotonDataS, col:Column, gate:GateGro
 
 
 def time_plot(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
-              include_unit:bool=False, plotlabel:str=None,
+              include_unit:bool=False, rescale:Real=1.0, record:bool=False,
+              plotlabel:str=None,
               xlabel:str=None, xlabel_kwargs:dict=None, 
               ylabel:str=None, ylabel_kwargs:dict=None, 
               list_concatenate:Literal['ordered','break,','continuous']='ordered',
               divlines:bool=False, divlines_kwargs:dict=None,
               **kwargs:Any)->tuple[plt.Line2D,plt.Text,plt.Text]:
     """
-    Plot column col vs time of row. 
-    Wrapper of axplot_
+    Plot column col vs time of row. Wrapper of |axplot|.
 
     Parameters
     ----------
@@ -148,10 +154,15 @@ def time_plot(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.Axes=Non
     gate : GateGroup, optional
         Gate to apply to col. The default is None.
     ax : plt.Axes, optional
-        pltax_ in which to plot data, if None, use pltgca_
+        |pltax| in which to plot data, if None, use |pltgca|.
         The default is None.
     include_unit : bool, optional
         Whether to include unit in column labels. The default is False.
+    rescale : Real, optional
+        Factor (if integral, treat as power of 10) by which to rescale values of col. 
+        The default is 1.0.
+    record : bool, optional
+        Whether to record the column in cache or not. The default is False.
     plotlabel : str optional
         Name to set the 'label' keyword argument handed to ax.plot, if None, will
         automatically assigne based on col. If False, will not set 'label' kwarg.
@@ -160,15 +171,13 @@ def time_plot(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.Axes=Non
         Name to set xlabel, if None, will automatically assign based on col.
         The default is None.
     xlabel_kwargs : dict, optional
-        Keyword arguments passed to 
-        `ax.set_xlabel <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_xlabel.html>`_. 
+        Keyword arguments passed to |axsetxlabel|.
         The default is None.
     ylabel : str, optional
         Name to set ylabel, if None, will automatically assign based on col.
         The default is None.
     ylabel_kwargs : dict, optional
-        Keyword arguments passed to 
-        `ax.set_ylabel <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_ylabel.html>`_. 
+        Keyword arguments passed to |axsetylabel|. 
         The default is None.
     list_concatenate : {'ordered', 'break', 'continuous'}
         How to handle |PhotonDataList| objects
@@ -186,34 +195,35 @@ def time_plot(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.Axes=Non
         whether to add vertical line to indicate transition from one data to the
         next. The default is False.
     divlines_kwargs : dict, optional
-        When ``divlines=True``, kwargs handed to axaxvline_.
+        When ``divlines=True``, kwargs handed to |axaxvline|.
     **kwargs : Any
-        Kwargs passed to axplot_.
+        Kwargs passed to |axplot|.
 
     Returns
     -------
     out : plt.Line2D
         Matplotib line2D of histogram
     xttl : plt.Text
-        plttext_ object of xlabel.
+        |plttext| object of xlabel.
     yttl : plt.Text
-        plttext_ object of ylabel.
+        |plttext| object of ylabel.
     
 
     """
-    return _time_plot('plot', ax, data, col, gate, include_unit, plotlabel, 
-                      xlabel, xlabel_kwargs, ylabel, ylabel_kwargs, list_concatenate, 
-                      divlines, divlines_kwargs, kwargs)
+    return _time_plot('plot', ax, data, col, gate, include_unit, rescale, record, 
+                      plotlabel, xlabel, xlabel_kwargs, ylabel, ylabel_kwargs, 
+                      list_concatenate, divlines, divlines_kwargs, kwargs)
 
 def time_scatter(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
-                 include_unit:bool=False, plotlabel:str=None,
+                 include_unit:bool=False, rescale:Real=1.0, record=False, 
+                 plotlabel:str=None,
                  xlabel:str=None, xlabel_kwargs:dict=None, 
                  ylabel:str=None, ylabel_kwargs:dict=None, 
                  list_concatenate:Literal['ordered', 'continuous']='ordered',
                  divlines:bool=False, divlines_kwargs:dict=None,
                  **kwargs:Any)->tuple[mpl.collections.PathCollection,plt.Text,plt.Text]:
     """
-    Scatter plot column col vs time of row. Wrapper of axscatter_.
+    Scatter plot column col vs time of row. Wrapper of |axscatter|.
 
     Parameters
     ----------
@@ -224,10 +234,15 @@ def time_scatter(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.Axes=
     gate : GateGroup, optional
         Gate to apply to col. The default is None.
     ax : plt.Axes, optional
-        pltax_ in which to plot data, if None, use pltgca_. 
+        |pltax| in which to plot data, if None, use |pltgca|.
         The default is None.
     include_unit : bool, optional
         Whether to include unit in column labels. The default is False.
+    rescale : Real, optional
+        Factor (if integral, treat as power of 10) by which to rescale values of col. 
+        The default is 1.0.
+    record : bool, optional
+        Whether to record the column in cache or not. The default is False.
     plotlabel : str optional
         Name to set the 'label' keyword argument handed to ax.plot, if None, will
         automatically assigne based on col. If False, will not set 'label' kwarg.
@@ -236,15 +251,13 @@ def time_scatter(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.Axes=
         Name to set xlabel, if None, will automatically assign based on col.
         The default is None.
     xlabel_kwargs : dict, optional
-        Keyword arguments passed to 
-        `ax.set_xlabel <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_xlabel.html>`_. 
+        Keyword arguments passed to |axsetxlabel|.
         The default is None.
     ylabel : str, optional
         Name to set ylabel, if None, will automatically assign based on col.
         The default is None.
     ylabel_kwargs : dict, optional
-        Keyword arguments passed to 
-        `ax.set_ylabel <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_ylabel.html>`_. 
+        Keyword arguments passed to |axsetylabel|. 
         The default is None.
     list_concatenate : {'ordered', 'break', 'continuous'}
         How to handle PhotonDataList objects
@@ -262,23 +275,23 @@ def time_scatter(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.Axes=
         whether to add vertical line to indicate transition from one data to the
         next. The default is False.
     divlines_kwargs : dict, optional
-        When ``divlines=True``, kwargs handed to axaxvline_.
+        When ``divlines=True``, kwargs handed to |axaxvline|.
     **kwargs : Any
-        Kwargs passed to `ax.plot() <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.plot.html>`_ .
+        Kwargs passed to |axplot|.
 
     Returns
     -------
     pathcollection : mpl.collections.PathCollection
         Path collection of scatter plot points.
     xttl : plt.Text
-        plttext_ object of xlabel.
+        |plttext| object of xlabel.
     yttl : plt.Text
-        plttext_ Text object of ylabel.
+        |plttext| Text object of ylabel.
 
     """
-    return _time_plot('scatter', ax, data, col, gate, include_unit, plotlabel,
-                      xlabel, xlabel_kwargs, ylabel, ylabel_kwargs, list_concatenate, 
-                      divlines, divlines_kwargs, kwargs)
+    return _time_plot('scatter', ax, data, col, gate, include_unit, rescale, record, 
+                      plotlabel, xlabel, xlabel_kwargs, ylabel, ylabel_kwargs, 
+                      list_concatenate, divlines, divlines_kwargs, kwargs)
 
 
 def _process_startstop(times:np.ndarray[np.int64], clk_p:float, period:int|float,
@@ -322,9 +335,8 @@ def _process_startstop(times:np.ndarray[np.int64], clk_p:float, period:int|float
 
 def time_course_hist(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None, 
                      period:Integral|Real|np.ndarray=10, bins:Integral|np.ndarray=10, 
-                     include_unit:bool=True, 
+                     include_unit:bool=True, rescale:Real=None, record:bool=False,
                      time_direction:Literal['x', 'horizontal', 'y', 'vertical']='x', 
-                     rescale:Real=None, 
                      norm:bool|Callable[[np.ndarray],np.ndarray[np.double]]=True, 
                      norm_zero:bool=False, min_cnts:int=0, min_frac:float=0.0,
                      start_at:Literal['zero','time_min','under','over']='under', 
@@ -344,8 +356,7 @@ def time_course_hist(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.A
         Gate for bursts/rows. The default is None.
     ax : plt.Axes, optional
         `plt.Axes <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.html>`_  
-        in which to plot data, if None, use 
-        `plt.gca() <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.gca.html>`_ . 
+        in which to plot data, if None, use |pltgca|. 
         The default is None.
     period : Integral|Real|np.ndarray, optional
         Time division period. If int, sets number of time bins, if float, sets size
@@ -354,10 +365,12 @@ def time_course_hist(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.A
         Bins of column axis. The default is 10.
     include_unit : bool, optional
         Whether to include unit in column labels. The default is False.
-    time_direction : {'x', 'horizontal', 'y', 'vertical'}, optional
-        Axis of time axis. The default is 'x'.
     rescale : Real, optional
         Factor (u be power of 10) by which to rescale values of col. The default is None.
+    record : bool, optional
+        Whether to record the column in cache or not. The default is False.
+    time_direction : {'x', 'horizontal', 'y', 'vertical'}, optional
+        Axis of time axis. The default is 'x'.
     norm : bool|Callable[[np.ndarray],np.ndarray[np.double]], optional
         Whether to normalize column histograms so all time slice histograms have
         max = 1. Can specify callable to perform custom normalization, handed
@@ -383,15 +396,13 @@ def time_course_hist(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.A
         Name to set xlabel, if None, will automatically assign based on col and normalize.
         The default is None.
     xlabel_kwargs : dict, optional
-        Keyword arguments passed to 
-        `ax.set_xlabel <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_xlabel.html>`_. 
+        Keyword arguments passed to |axsetxlabel|.
         The default is None.
     ylabel : str, optional
         Name to set ylabel, if None, will automatically assign based on col and normalize.
         The default is None.
     ylabel_kwargs : dict, optional
-        Keyword arguments passed to 
-        `ax.set_ylabel <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_ylabel.html>`_. 
+        Keyword arguments passed to |axsetylabel|. 
         The default is None.
     **kwargs : Any
         Kwargs hannded to `ax.pcolor() <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.pcolor.html>`_.
@@ -410,14 +421,16 @@ def time_course_hist(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.A
         `mpl.collections.PolyQuadMesh <https://matplotlib.org/stable/api/collections_api.html>`_
         returned by ax.pcolor
     xttl : plt.Text
-        plttext_ object of xlabel.
+        |plttext| object of xlabel.
     yttl : plt.Text
-        plttext_ object of ylabel.
+        |plttext| object of ylabel.
 
     """
     ax = plt.gca() if ax is None else ax
     tcol = Column(col.base_param, 'midtime', ('istarttime', 'istoptime'))
-    (varr, times), (vname, tname) = _get_column_arrays(data, col, tcol, gate=gate, include_unit=include_unit, rescale=rescale)
+    (varr, times), (vname, tname) = _get_column_arrays(data, col, tcol, gate=gate,
+                                                       include_unit=include_unit, 
+                                                       rescale=rescale, record=record)
     # process time divisions
     period = np.asarray(period)
     # 0d array indicates as number, so process as a Periods param
@@ -462,12 +475,114 @@ def _get_factor(data:PhotonData, rescale:Union[None,int,float])->tuple[str, floa
     return get_unit_prefix(rescale)+'s', data.clk_p/rescale
 
 
+#: Type hint for time_direction keyword argument options in :func:`axaltspan` and :func:`burst_dets`
+TimeDir = Literal['x', 'horizontal', 'y', 'vertical']
+
+
+def axaltspan(data:PhotonData, start:float|int, stop:float|int, ax:plt.Axes=None, 
+              time_shift:float|int=0, rescale:Real=None, 
+              time_direction:TimeDir='x', 
+              span_kwargs:Sequence[dict[str:Any]|bool|None]=None, 
+              **kwargs:Any)->list[list[mpl.patches.Rectangle]]:
+    """
+    Plot the ranges of alternation periods using |axaxvspan| or |axaxhspan|
+
+    Parameters
+    ----------
+    data : PhotonData
+        Source of data for plotting.
+    start : float | int
+        Start time of range of excitation periods to plot. 
+        Must be "original" start time from which alternation periods are calculated.
+        If supplied as int, treat as raw photon time with units of clk_p,
+        if float, treat as time scaled by rescale.
+    stop : float | int
+        Stop time of range of excitation periods to plot.
+        Must be "original" start time from which alternation periods are calculated.
+        If supplied as int, treat as raw photon time with units of clk_p,
+        if float, treat as time scaled by rescale.
+    ax : plt.Axes, optional
+        Axes in which to plot the spans. The default is None.
+    time_shift : float | int, optional
+        Shift time applied to start/stop to match plot.
+        If supplied as int, treat as raw photon time with units of clk_p,
+        if float, treat as time scaled by rescale. The default is 0.
+    rescale : Real, optional
+        Rescale factor for time axis. The default is None.
+    time_direction : TimeDir, optional
+        Direction of time axis. The default is 'x'.
+    span_kwargs : Sequence[dict[str:Any] | bool | None], optional
+        Keyword arguments for |axaxvspan| or |axaxvspan| that are handed per 
+        excitation type. If a given object is not a dictionary, and has truthiness
+        of False, skip plotting spans for the given excitation.
+        The default is None.
+    **kwargs : Any
+        Keyword argumetns passed to |axaxvspan| or |axaxhspan| for all spans.
+
+    Raises
+    ------
+    ValueError
+        Bad input options.
+
+    Returns
+    -------
+    spans : list[list[mpl.patches.Rectangle]]
+        Nested lists of rectangle objects created by |axaxvspan| or |axaxhspan|
+        for each alternation period. L
+
+    """
+    # check for bad input data/conflicts
+    if 'alex_period' not in data.setup:
+        raise ValueError("axaltspan can only ")
+    if time_direction not in ('x', 'horizontal', 'y', 'vertical'):
+        raise ValueError(f"time_direction must be one of: 'x', 'horizontal', 'y', or 'vertical', not {time_direction}")
+    # regularize inputs
+    if span_kwargs is None:
+        span_kwargs = repeat(dict())
+    time_direction = time_direction.lower()
+    # choose which span function to plot
+    spanf = ax.axvspan if time_direction in ('x', 'horizontal') else ax.axhspan
+    ax = _check_ax(ax)
+    # compute scaling and ranges
+    unit, factor = _get_factor(data, rescale)
+    start = start if isinstance(start, Integral) else start / factor
+    stop = stop if isinstance(stop, Integral) else stop / factor
+    period = data.setup['alex_period']
+    off = data.setup['alex_offset'] if 'alex_offset' in data.setup else 0
+    # compute the exication periods (intervals of repetition)
+    periods = np.arange((start-off)//period, (stop-off)//period).reshape(-1,1)
+    periods = periods*period + off  - time_shift
+    spans = list()
+    # iterate over each excitation range
+    for ex_rng, skwargs in zip(data.setup['ex_ranges'], span_kwargs):
+        # check skwargs, should repeat or not
+        if not isinstance(skwargs, dict):
+            if skwargs:
+                skwargs = dict()
+            else:
+                continue
+        kws = _dict_update(skwargs, kwargs)
+        spanlist = list()
+        # iterate each subrange
+        for rng in ex_rng:
+            # check if range is inverted
+            rngs = (rng, ) if rng[0] < rng[1] else (np.array([0,rng[1]]), np.array([rng[0], period]))
+            for rspan in rngs:
+                rspans = (periods + rspan)*factor
+                for start, stop in rspans:
+                    spanlist.append(spanf(start, stop, **kws))
+        spans.append(spanlist)
+    return spans
+
+
 def burst_dets(data:PhotonData, param:Param, burst:int, ax:plt.Axes=None, 
-               time_direction:Literal['x', 'horizontal', 'y', 'vertical']='x', 
-               rescale:Real=None, zerostart:bool=False, det_pos:dict[int|PhSel:float]=None, 
+               time_direction:TimeDir='x', rescale:Real=None, zerostart:bool=False,
+               det_pos:dict[int|PhSel:float]=None, 
                det_kwargs:dict[int|PhSel:dict[str,Any]]=None, label_kwargs:dict[str:Any]=None,
-               nanotime:bool=False, nanotime_scale:float=1e9,
-               **kwargs:Any)->tuple[mpl.collections.PathCollection,...,plt.Text]:
+               nanotime:Literal[False,True,'abs','window','thresh']=False, 
+               nanotime_scale:float=1e9, 
+               alt_span:bool=False, alt_span_kwargs:dict[str:Any]=None,
+               **kwargs:Any)->tuple[mpl.collections.PathCollection,...,plt.Text,list[list[mpl.patches.Rectangle]]]:
     """
     Create a plot of photons vs time for a single time range (usually burst)
 
@@ -482,7 +597,7 @@ def burst_dets(data:PhotonData, param:Param, burst:int, ax:plt.Axes=None,
     ax : plt.Axes, optional
         `plt.Axes <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.html>`_  
         in which to plot data, if None, use 
-        `plt.gca() <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.gca.html>`_ . 
+        |pltgca|. 
         The default is None.
     time_direction : Literal['x', 'horizontal', 'y', 'vertical'], optional
         Direction of time axis. The default is 'x'.
@@ -493,25 +608,31 @@ def burst_dets(data:PhotonData, param:Param, burst:int, ax:plt.Axes=None,
     det_pos : dict[int|PhSel:float], optional
         Dictionary of detector to position mappings. The default is None.
     det_kwargs : dict[int|PhSel:dict[str,Any]], optional
-        Dictionary of kwargs dictionaries passed per detector key to `ax.scatter()`. 
+        Dictionary of kwargs dictionaries passed per detector key to |axscatter|. 
         The default is None.
     label_kwargs : dict[str:Any], optional
         Keyword arguments passed to 
         `ax.set_x/ylabel`. 
-    nanotime : bool, optional
+    nanotime : {False, True, 'abs', 'window', 'thresh'}, optional
         Whether to add shift for nanotimes. The default is False.
     nanotime_scale : float, optional
         Scale value for nanotimes. The default is 1e9.
+    alt_span : bool, optional
+        Whether to plot the alternation periods with :func:`axaltspan`.
+        Should only be :code:`True` if ``data`` is usALEX data.  
+        The default is False.
+    alt_span_kwargs : dict, optional
+        Keyword arguments handed to :func:`axaltspan`.
     **kwargs : Any
-        Universal kwargs hannded to 
-        `ax.scatter() <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.scatter.html>`_
+        Universal kwargs hannded to |axscatter|.
         for each plot of detector class
 
     Returns
     -------
-    tuple[mpl.collections.PathCollection,...,plt.Text]
-        Path collection for each detector index plotted, finished with Text object
-        for set_x/ylabel.
+    list[mpl.collections.PathCollection,...,plt.Text]
+        Path collection for each detector index plotted, and the Text object
+        for set_x/ylabel at the end. If alt_span is True, then output of
+        :func:`axaltspan` appended.
 
     """
     detdef = data.detdef
@@ -544,7 +665,13 @@ def burst_dets(data:PhotonData, param:Param, burst:int, ax:plt.Axes=None,
     out = list()
     unit, factor = _get_factor(data, rescale)
     time_direction = time_direction.lower()
-    nanotime_scale *= data.setup['tcspc_unit'][0]
+    if nanotime:
+        nanotime_scale *= data.setup['tcspc_unit'][0]
+    if alt_span:
+        alt_span_kwargs = dict() if alt_span_kwargs is None else alt_span_kwargs
+        spans = axaltspan(data, times[0], times[-1], ax=ax, 
+                          time_shift= times[0] if zerostart else 0, rescale=rescale,
+                          time_direction=time_direction, **alt_span_kwargs)
     times = times - times[0] if zerostart else times
     for k, p in det_pos.items():
         dids = detdef.get_stream_ids(k)
@@ -566,6 +693,8 @@ def burst_dets(data:PhotonData, param:Param, burst:int, ax:plt.Axes=None,
         out.append(ax.set_ylabel(unit, **label_kwargs))
     else:
         out.append(ax.set_xlabel(unit, **label_kwargs))
+    if alt_span:
+        out.append(spans)
     return out
 
 
@@ -589,13 +718,13 @@ def _timetrace_bg_sort(bg:Param, sel:PhSel)->tuple[Param,float]:
     if bg.tp == Bursts:
         detdef = bg.detdef
         sub, sbg, sF, sublen = None, None, 0, np.inf
-        for bsel, b, F in zip(bg.params['streams'], bg.parents['bg'], bg.params['F']):
-            if bsel == sel:
-                return b, F
-            temp = sel - bsel
-            templen = detdef.get_stream_ids(temp).size
-            if  templen < sublen:
-                sub, sublen, sbg, sF = temp, templen, b, F
+        bsel, b, F = bg.params['stream'], bg.parents['bg'], bg.params['F']
+        if bsel == sel:
+            return b, F
+        temp = sel - bsel
+        templen = detdef.get_stream_ids(temp).size
+        if  templen < sublen:
+            sub, sublen, sbg, sF = temp, templen, b, F
         if sub is not None:
             return sbg, sF
         return bg.params['streams'][0], bg.params['F'][0]
@@ -606,7 +735,8 @@ def _timetrace_bg_sort(bg:Param, sel:PhSel)->tuple[Param,float]:
     return bg, 1.0
 
 
-def _trace_label_proc(data:PhotonData, labels:None|bool|Sequence[str], streams:None|Sequence[PhSel], name:str):
+def _trace_label_proc(data:PhotonData, labels:None|bool|Sequence[str], 
+                      streams:None|Sequence[PhSel], name:str)->tuple[bool,Iterator[str|None]]:
     """Process label sequence for time/ratetrace labels"""
     set_labels = labels is not None and labels is not False
     if set_labels:
@@ -618,14 +748,25 @@ def _trace_label_proc(data:PhotonData, labels:None|bool|Sequence[str], streams:N
     return set_labels, labels
 
 
-def _trtrace_proc(data, streams, bg, stream_kwargs, bg_kwargs, labels, bg_labels, direction):
+def _burst_streams(bursts:Param)->Iterator[PhSel]:
+    """Get the streams used in burst processing, as iterator"""
+    if isinstance(bursts, Param) and bursts.tp == Bursts:
+        if 'stream' in bursts.params:
+            yield bursts.params['stream']
+    elif isinstance(bursts, Param) and bursts.tp == BurstOvlp:
+        for base in bursts.parents['bases']:
+            yield from _burst_streams(base)
+
+
+def _trtrace_proc(data:PhotonData, streams:Sequence[PhSel], bg:Param, 
+                  stream_kwargs:dict|Sequence[dict], bg_kwargs:dict|Sequence[dict], 
+                  labels:Sequence[str], bg_labels:dict|Sequence[dict], direction):
     """Process args common to timetrace and ratetrace"""
     # sort streams
     if streams is None:
-        if isinstance(bg, Param) and bg.base_param.tp == Bursts:
-            bg = bg.base_param
-            streams = bg.params['streams']
-        else:
+        if isinstance(bg, Param):
+            streams = tuple(set(_burst_streams(bg)))
+        if not streams:
             streams = tuple(data.detdef.stream_ids_to_PhSel(i) for i in range(data.detdef.size))
         bg = repeat(bg)
     bg = repeat(bg) if isinstance(bg, Param) or bg is None else bg
@@ -681,7 +822,8 @@ def timetrace(data:PhotonData, ax:plt.Axes=None, streams:Sequence[PhSel]=None,
     ----------
     data : PhotonData
         Data containing photon times.
-    ax : plt.Axes, optional pltax_ in which to plot data, if None, use pltgca_. 
+    ax : plt.Axes, optional 
+        |pltax| in which to plot data, if None, use |pltgca|.
         The default is None.
     streams : Sequence[PhSel], optional
         Sequence of photon streams to plot, if None, will plot each stream separately. 
@@ -702,9 +844,9 @@ def timetrace(data:PhotonData, ax:plt.Axes=None, streams:Sequence[PhSel]=None,
     binwidth : float, optional
         Size of single time bin, ignored if bins is specified. The default is 1e-4.
     stream_kwargs : Sequence[dict], optional
-        Kwargs hannded to axplot_ per stream. The default is None.
+        Kwargs hannded to |axplot| per stream. The default is None.
     bg_kwargs : dict, optional
-        kwargs handed to axplot_ for plotting background/background threshold.
+        kwargs handed to |axplot| for plotting background/background threshold.
         The default is None.
     direction : Sequence[bool|int], optional
         Direction for each stream, if stream is True/1 plot in positive direction, 
@@ -723,15 +865,13 @@ def timetrace(data:PhotonData, ax:plt.Axes=None, streams:Sequence[PhSel]=None,
         Name to set xlabel, if None, will automatically assign based on col and normalize.
         The default is None.
     xlabel_kwargs : dict, optional
-        Keyword arguments passed to 
-        `ax.set_xlabel <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_xlabel.html>`_. 
+        Keyword arguments passed to |axsetxlabel|. 
         The default is None.
     ylabel : str, optional
         Name to set ylabel, if None, will automatically assign based on col and normalize.
         The default is None.
     ylabel_kwargs : dict, optional
-        Keyword arguments passed to 
-        `ax.set_ylabel <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_ylabel.html>`_. 
+        Keyword arguments passed to |axsetylabel|. 
         The default is None.
     **kwargs : Any
         Keyword arguments handed to each call to ax.plot for plotting interphton
@@ -744,9 +884,9 @@ def timetrace(data:PhotonData, ax:plt.Axes=None, streams:Sequence[PhSel]=None,
     bg_lines : list[plt.Line2D]
         list of Matplotib line2D of background-rate or threshold
     xttl : plt.Text
-        plttext_ object from ax.set_xlabel.
+        |plttext| object from |axsetxlabel|.
     yttl : plt.Text
-        plttext_ object from ax.set_ylabel.
+        |plttext| object from |axsetylabel|.
     leg : mpl.legend.Legend
         Legend object from ax.legend.
 
@@ -825,7 +965,7 @@ def ratetrace(data:PhotonData, ax:plt.Axes=None, streams:Sequence[PhSel]=None,
               direction:Sequence[bool|int]=None, 
               labels:Sequence[str]|bool=True, bg_labels:Sequence[str]|bool=True, 
               xlabel:str=None, xlabel_kwargs:dict=None, ylabel:str=None, ylabel_kwargs:dict=None, 
-              **kwargs)->tuple[list[plt.Line2D],list[plt.Line2D],plt.Text,plt.Text,mpl.legend.Legend]:
+              **kwargs:Any)->tuple[list[plt.Line2D],list[plt.Line2D],plt.Text,plt.Text,mpl.legend.Legend]:
     """
     Plot trace of instantaneous photon rate of a section of photon arrival times in data.
 
@@ -834,9 +974,7 @@ def ratetrace(data:PhotonData, ax:plt.Axes=None, streams:Sequence[PhSel]=None,
     data : PhotonData
         Data containing photon times.
     ax : plt.Axes, optional
-        pltax_.
-        in which to plot data, if None, use 
-        pltgca_. 
+        |pltax| in which to plot data, if None, use |pltgca|. 
         The default is None.
     streams : Sequence[PhSel], optional
         Sequence of photon streams to plot, if None, will plot each stream separately. 
@@ -853,9 +991,9 @@ def ratetrace(data:PhotonData, ax:plt.Axes=None, streams:Sequence[PhSel]=None,
     tmax : float, optional
         Time of end (in s) of photon rate trace. The default is 1.0.
     stream_kwargs : Sequence[dict], optional
-        Kwargs hannded to axplot_ per stream. The default is None.
+        Kwargs hannded to |axplot| per stream. The default is None.
     bg_kwargs : Sequence[dict], optional
-        kwargs handed to axplot_ for plotting background/background threshold. 
+        kwargs handed to |axplot| for plotting background/background threshold. 
         The default is None.
     direction : Sequence[bool|int], optional
         Direction for each stream, if stream is True/1 plot in positive direction, 
@@ -874,17 +1012,15 @@ def ratetrace(data:PhotonData, ax:plt.Axes=None, streams:Sequence[PhSel]=None,
         Name to set xlabel, if None, will automatically assign based on col and normalize.
         The default is None.
     xlabel_kwargs : dict, optional
-        Keyword arguments passed to 
-        `ax.set_xlabel <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_xlabel.html>`_. 
+        Keyword arguments passed to |axsetxlabel|. 
         The default is None.
     ylabel : str, optional
         Name to set ylabel, if None, will automatically assign based on col and normalize.
         The default is None.
     ylabel_kwargs : dict, optional
-        Keyword arguments passed to 
-        `ax.set_ylabel <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_ylabel.html>`_. 
+        Keyword arguments passed to |axsetylabel|.
         The default is None.
-    **kwargs : TYPE
+    **kwargs : Any
         DESCRIPTION.
 
     Returns
@@ -894,9 +1030,9 @@ def ratetrace(data:PhotonData, ax:plt.Axes=None, streams:Sequence[PhSel]=None,
     bg_lines : list[plt.Line2D]
         list of Matplotib line2D of background-rate or threshold
     xttl : plt.Text
-        plttext_ object from ax.set_xlabel.
+        |plttext| object from |axsetxlabel|.
     yttl : plt.Text
-        plttext_ object from ax.set_ylabel.
+        |plttext| object from |axsetylabel|.
     leg : mpl.legend.Legend
         Legend object from ax.legend.
 
@@ -1049,30 +1185,30 @@ def hist_interphoton(data:PhotonData, bg:Param=None, n:int=0, ax:plt.Axes=None,
     legend_kwargs : dict, optional
         Kwargs hannded to ax.legend. The default is None.
     xlabel : str, optional
-        Label for x-axis, if False, will not call ax.set_xlabel, if None, set
+        Label for x-axis, if False, will not call |axsetxlabel|, if None, set
         automatically, if str, will set that string as xlabel. The default is None.
     xlabel_kwargs : dict, optional
-        Kwargs handed to ax.set_xlabel. The default is None.
+        Kwargs handed to |axsetxlabel|. The default is None.
     ylabel : str, optional
-        Label for y-axis, if False, will not call ax.set_ylabel, if None, set
+        Label for y-axis, if False, will not call |axsetylabel|, if None, set
         automatically, if str, will set that string as ylabel. The default is None.
     ylabel_kwargs : dict, optional
-        Kwargs handed to ax.set_ylabel. The default is None.
+        Kwargs handed to |axsetylabel|. The default is None.
     **kwargs : Any
-        Additional kwargs handed directly to each ax.scatter for each interphoton
+        Additional kwargs handed directly to each |axscatter| for each interphoton
         time histogram.
 
     Returns
     -------
     pathcol : list[mpl.collections.PathCollection]
-        List of each return of ax.scatter from plotting individual stream interphoton
+        List of each return of |axscatter| from plotting individual stream interphoton
         time histogram.
     line2d : list[plt.Line2D]
         List of each return of ax.plot from plotting fit of stream background count rate.
     xttl : plt.Text
-        plttext_ object from ax.set_xlabel.
+        |plttext| object from |axsetxlabel|.
     yttl : plt.Text
-        plttext_ object from ax.set_ylabel.
+        |plttext| object from |axsetylabel|.
     leg : mpl.legend.Legend
         Legend object from ax.legend.
 
@@ -1092,17 +1228,16 @@ def hist_interphoton(data:PhotonData, bg:Param=None, n:int=0, ax:plt.Axes=None,
     # determine proper peridos
     periods = None
     if bg is None:
-        get_times = _sort_times 
+        times_func = _sort_times 
     else:
         periods = bg.base_param
         _, _, _, stream_proc = get_pycode_subval('BG_func', bg.params['func'])
-        get_times = lambda data, phsel: _get_nth(data, n, Column(periods, 'ph_times', phsel))
-    bg = bg if issubclass(bg.tp, BG) else None
+        times_func = lambda data, phsel: _get_nth(data, n, Column(periods, 'ph_times', phsel))
     pathcol, line2d = list(), list()
     # loop over each stream
     szip = zip(streams, labels, streams_kwargs, fit_streams_kwargs, fit_labels, fit_cps_labels)
     for stream, label, stream_kwarg, f_stream_kwarg, f_label, f_cps in szip:
-        tms = get_times(data, stream)
+        tms = times_func(data, stream)
         hst, bns = np.histogram(np.diff(tms)*data.clk_p, bins)
         rbns = _rescale_value(bns, time_scale)
         if label is True:

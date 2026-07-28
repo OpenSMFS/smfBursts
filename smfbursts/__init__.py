@@ -12,6 +12,13 @@ except PackageNotFoundError:
     print("Cannot find package version")
     __version__ = 'undefined'
 del python_version, version, PackageNotFoundError
+
+import os
+
+from .datamodel import rcParams
+rcParams.update({'core.ncore':os.cpu_count(), 'core.alloc_size':512})
+
+
 # import warnings
 
 ## Citation information
@@ -31,23 +38,29 @@ del python_version, version, PackageNotFoundError
 
 # data model imports
 from .datamodel.utils import ImDict, FixedDict, MutDict, tupledict
+from .datamodel.immutabledata import encode_msgpack, decode_msgpack
 from .datamodel.tables import Param, Column, Gate, MappedGate, GateGroup, GG_all, GG_none
-from .datamodel import gates as gates
+from .datamodel import gates
 from .datamodel import multifit
-from .datamodel.gates import (make_geq_gate, make_lt_gate, make_ellipsoid_gate,
-                              make_inv_ellipsoid_inclusive_gate, make_isin_gate)
-from .cite import (register_citation, cite, add_citation, get_citations, print_citations,
+from .datamodel.gates import (
+    make_geq_gate, make_lt_gate, make_range_gate, make_ellipsoid_gate, 
+    make_inv_ellipsoid_inclusive_gate, make_isin_gate
+    )
+from .cite import (
+    register_citation, cite, add_citation, get_citations, print_citations,
     create_citation_group, set_prefered_style, list_citation_groups, list_tags,
-    registered_citations, registered_citation_groups)
+    registered_citations, registered_citation_groups
+    )
 
 from .datamodel import has_matplotlib, has_numba
 
 # smfbursts imports
 from ._citations import smfbursts_citations
 from .photondata import PhotonData, PhotonDataList
-from .background import Periods, BG, make_bg_param
-from . import background as bg
-from .bursttables import Bursts, NphBG, Ratios
+from .backgroundtables import Periods, BG, make_bg_param
+from . import backgroundtables as bg
+from .bursttables import Bursts, BurstOvlp
+from .childphotontables import NphBG, Ratios, KDE
 from . import ph_sel
 from .ph_sel import PhSel, DetDef
 from .import photonHDF5

@@ -14,11 +14,11 @@ first keyword argument is the gate, which if not ``None`` is the gate to applied
 to the data, overriding any gates in the input.
 
 
-.. _nphistogram: `np.histogram <https://numpy.org/doc/stable/reference/generated/numpy.histogram.html>`__
-.. _gaussian_kde: `scipy.stats.gaussian_kde <https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.gaussian_kde.html>`__
-.. _Text: `plt.Text <https://matplotlib.org/stable/api/text_api.html#matplotlib.text.Text>`__
-.. _axxlabel: `ax.set_xlabel <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_xlabel.html>`__
-.. _axylabel: `ax.set_ylabel <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_ylabel.html>`__
+.. |nphistogram| replace:: `np.histogram() <https://numpy.org/doc/stable/reference/generated/numpy.histogram.html>`__
+.. |gaussian_kde| replace:: `scipy.stats.gaussian_kde <https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.gaussian_kde.html>`__
+.. |Text| replace:: `plt.Text <https://matplotlib.org/stable/api/text_api.html#matplotlib.text.Text>`__
+.. |axxlabel| replace:: `ax.set_xlabel <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_xlabel.html>`__
+.. |axylabel| replace:: `ax.set_ylabel <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_ylabel.html>`__
 """
 from collections.abc import Callable, Sequence
 from typing import Union, Any, Literal
@@ -36,6 +36,12 @@ from scipy.stats import gaussian_kde, sem
 from .utils import fjit, fnumba, _dict_update
 from .tables import DataSet, DataSetList, Param, Column, Gate_, GateGroup
 from .multifit import FitFunc, unwrap_param
+
+from smfbursts import rcParams
+
+rcParams['plot.record'] = False
+
+
 
 DataS = Union[DataSet,DataSetList]
 AxKw = Union[None,plt.Axes]
@@ -77,11 +83,21 @@ def _rescale_value(val:np.ndarray, factor:Real)->np.ndarray[np.float64]:
     return val/factor
 
 
+def _get_column(data:DataS, record:bool):
+    def _getter(col:Column):
+        col = data.record_column(col) if record else data.get_column(col)
+        if isinstance(col, tuple):
+            col = np.concatenate(col)
+        return col
+    return _getter
+
+
 def _get_column_arrays(data:DataS, *cols:Column, gate:GateGroup=None, 
-                       include_unit:bool=False, rescale:Sequence[float]=None)->tuple[list[np.ndarray],list[str]]:
+                       include_unit:bool=False, rescale:Sequence[float]=None,
+                       record:bool=False)->tuple[list[np.ndarray],list[str]]:
     """Get 2 tuple of ([column arrays,...], [column names, ...]) from input to any plot"""
     cols = _regate(gate, *cols)
-    get_col = data.concatenate_column if hasattr(data, "concatenate_column") else data.get_column
+    get_col = _get_column(data, rcParams['plot.record'] if record is None else record)
     include_unit = repeat(include_unit) if isinstance(include_unit, bool) else include_unit
     if rescale is None:
         rescale = 1.0
@@ -93,14 +109,16 @@ def _get_column_arrays(data:DataS, *cols:Column, gate:GateGroup=None,
 NormLiteral = Literal[None,"none",'PMF','sum','max','PDF', 'cumulative','icumulative','CDF','iCDF']
 
 def _histcol(data:DataS, col:Column, gate:Union[None,GateGroup], 
-             include_unit:bool, rescale:Sequence[float], remove_nan:bool,
-             normalize:NormLiteral, bins:Union[int,np.ndarray], minmax:tuple[float,float]):
+             include_unit:bool, rescale:Sequence[float], record:bool, remove_nan:bool,
+             normalize:NormLiteral, bins:Union[int,np.ndarray], minmax:tuple[float,float], 
+             )->tuple[np.ndarray,np.ndarray,str,str]:
     """
     Histogram columns of data and normalize appropriately, 
     returns bins, hist, cname (column) and olabel (based on normalization type)
     """
     (colarr, ), (cname, ) = _get_column_arrays(data, col, gate=gate, 
-                                               include_unit=include_unit, rescale=rescale)
+                                               include_unit=include_unit, 
+                                               rescale=rescale, record=record)
     normalize = 'none' if normalize is None else normalize
     if remove_nan and np.issubdtype(colarr.dtype, np.floating):
         colarr = colarr[~np.isnan(colarr)]
@@ -140,7 +158,8 @@ OrientLiteral = Literal['vertical', 'horizontal']
 
 
 def hist_bar(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None, 
-             include_unit:bool=False, rescale:Real=1.0, normalize:NormLiteral=None, 
+             include_unit:bool=False, rescale:Real=1.0, record:bool=False,
+             normalize:NormLiteral=None, 
              remove_nan:bool=True, bins:Union[int,np.ndarray]=100, 
              minmax:tuple[float,float]=None, orientation:OrientLiteral='vertical',
              xlabel:str=None, xlabel_kwargs:dict[str:Any]=None,
@@ -164,7 +183,10 @@ def hist_bar(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
     include_unit : bool, optional
         Whether to include unit in axes label. The default is False.
     rescale : Real, optional
-        Factor (u be power of 10) by which to rescale values of col. The default is 1.0.
+        Factor (if integral, treat as a power of 10) by which to rescale values of col. 
+        The default is 1.0.
+    record : bool, optional
+        Whether to record the column in cache or not. The default is False.
     normalize : NormLiteral, optional
         How to normalize data, can be one of ``'none'``, ``'sum'``, ``'max'``, 
         ``'PDF'``, ``'cumulative'``, ``'icumulativ'``, ``'CDF'``. 
@@ -184,24 +206,24 @@ def hist_bar(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
         If true, before using np.histogram, remove any nan values. This prevents
         errors when auto-detecting the range. The default is True.
     bins : Union[int,np.ndarray], optional
-        Bins to use, handed to nphistogram_. 
+        Bins to use, handed to |nphistogram|. 
         Either bin edges or number of bins to divide the data into.
         The default is 10.
     minmax : tuple[float,float], optional
-        Minimum and maximum values, handed to nphistogram_. 
+        Minimum and maximum values, handed to |nphistogram|.
         as the *range* keyword argument. Note that this is only valid when bins
         is specified as an integer. The default is None.
     xlabel : str, optional
         Name to set xlabel, if None, will automatically assign based on col and normalize.
         The default is None.
     xlabel_kwargs : dict, optional
-        Keyword arguments passed to axxlabel_. 
+        Keyword arguments passed to |axxlabel|. 
         The default is None.
     ylabel : str, optional
         Name to set ylabel, if None, will automatically assign based on col and normalize.
         The default is None.
     ylabel_kwargs : dict, optional
-        Keyword arguments passed to axylabel_. 
+        Keyword arguments passed to |axylabel|.
         The default is None.
     orientation : OrientLiteral, optional
         Either 'vertical' or 'horizontal', which way the bars will face. 
@@ -226,9 +248,9 @@ def hist_bar(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
     br : mpl.container.BarContainer
         Matplotib container created of histogram.
     xttl : plt.Text
-        Text_ object of xlabel.
+        |Text| object of xlabel.
     yttl : plt.Text
-        Text_ object of ylabel.
+        |Text| object of ylabel.
 
     """
     if not isinstance(orientation, str):
@@ -238,7 +260,7 @@ def hist_bar(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
     ax = _check_ax(ax)
     xlabel_kwargs, ylabel_kwargs = _kwdct(xlabel_kwargs), _kwdct(ylabel_kwargs)
     bns, hst, cname, olabel = _histcol(data, col, gate, include_unit, rescale, 
-                                       remove_nan, normalize, bins, minmax)
+                                       record, remove_nan, normalize, bins, minmax)
     bar = ax.bar if orientation == 'vertical' else ax.barh
     kwargs['width' if orientation == 'vertical' else 'height'] = np.diff(bns)
     kwargs['align'] = 'edge'
@@ -255,7 +277,8 @@ def hist_bar(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
 
 
 def hist_stair(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None, 
-               include_unit:bool=False, rescale:float=1.0, normalize:NormLiteral=None, 
+               include_unit:bool=False, rescale:float=1.0, record:bool=False,
+               normalize:NormLiteral=None, 
                remove_nan:bool=True, bins:Union[int,np.ndarray]=100, 
                minmax:tuple[float,float]=None, orientation:OrientLiteral='vertical',
                xlabel:str=None, xlabel_kwargs:dict[str,:Any]=None,
@@ -284,7 +307,10 @@ def hist_stair(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
     include_unit : bool, optional
         Whether to include unit in axes label. The default is False.
     rescale : float, optional
-        Factor (u be power of 10) by which to rescale values of col. The default is 1.0.
+        Factor (if integral, treat as a power of 10) by which to rescale values of col. 
+        The default is 1.0.
+    record : bool, optional
+        Whether to record the column in cache or not. The default is False.
     normalize : NormLiteral, optional
         How to normalize data, can be one of ``'none'``, ``'sum'``, ``'max'``, 
         ``'PDF'``, ``'cumulative'``, ``'icumulativ'``, ``'CDF'``. 
@@ -304,24 +330,24 @@ def hist_stair(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
         If true, before using np.histogram, remove any nan values. This prevents
         errors when auto-detecting the range. The default is True.
     bins : Union[int,np.ndarray], optional
-        Bins to use, handed to nphistogram_. 
+        Bins to use, handed to |nphistogram|. 
         Either bin edges or number of bins to divide the data into.
         The default is 10.
     minmax : tuple[float,float], optional
-        Minimum and maximum values, handed to nphistogram_. 
+        Minimum and maximum values, handed to |nphistogram|.
         as the *range* keyword argument. Note that this is only valid when bins
         is specified as an integer. The default is None.
     xlabel : str, optional
         Name to set xlabel, if None, will automatically assign based on col and normalize.
         The default is None.
     xlabel_kwargs : dict, optional
-        Keyword arguments passed to axxlabel_. 
+        Keyword arguments passed to |axxlabel|. 
         The default is None.
     ylabel : str, optional
         Name to set ylabel, if None, will automatically assign based on col and normalize.
         The default is None.
     ylabel_kwargs : dict, optional
-        Keyword arguments passed to axylabel_. 
+        Keyword arguments passed to |axylabel|.
         The default is None.
     orientation : OrientLiteral, optional
         Either 'vertical' or 'horizontal', which axis will be assigned to the normalized counts.
@@ -344,9 +370,9 @@ def hist_stair(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
     br : plt.Line2D
         Matplotib line2D of histogram
     xttl : plt.Text
-        Text_ object of xlabel.
+        |Text| object of xlabel.
     yttl : plt.Text
-        Text_ object of ylabel.
+        |Text| object of ylabel.
 
     """
     
@@ -357,7 +383,7 @@ def hist_stair(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
     ax = _check_ax(ax)
     xlabel_kwargs, ylabel_kwargs = _kwdct(xlabel_kwargs), _kwdct(ylabel_kwargs)
     bns, hst, cname, olabel = _histcol(data, col, gate, include_unit, rescale,
-                                       remove_nan, normalize, bins, minmax)
+                                       record, remove_nan, normalize, bins, minmax)
     if orientation == 'vertical':
         xlabel = cname if xlabel is None else xlabel
         ylabel = olabel if ylabel is None else ylabel
@@ -371,7 +397,7 @@ def hist_stair(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
 
 
 def hist_line(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None, 
-              include_unit:bool=False, rescale:float=1.0,
+              include_unit:bool=False, rescale:float=1.0, record:bool=False,
               normalize:NormLiteral=None, remove_nan:bool=True, bins:Union[int,np.ndarray]=100, 
               minmax:tuple[float,float]=None, orientation:OrientLiteral='vertical',
               xlabel:str=None, xlabel_kwargs:dict[str:Any]=None,
@@ -401,7 +427,10 @@ def hist_line(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
     include_unit : bool, optional
         Whether to include unit in axes label. The default is False.
     rescale : float, optional
-        Factor (u be power of 10) by which to rescale values of col. The default is 1.0.
+        Factor (if integral, treat as a power of 10) by which to rescale values of col. 
+        The default is 1.0.
+    record : bool, optional
+        Whether to record the column in cache or not. The default is False.
     normalize : NormLiteral, optional
         How to normalize data, can be one of ``'none'``, ``'sum'``, ``'max'``, 
         ``'PDF'``, ``'cumulative'``, ``'icumulativ'``, ``'CDF'``. 
@@ -418,24 +447,24 @@ def hist_line(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
         
         The default is None.
     bins : Union[int,np.ndarray], optional
-        Bins to use, handed to nphistogram_. 
+        Bins to use, handed to |nphistogram|. 
         Either bin edges or number of bins to divide the data into.
         The default is 10.
     minmax : tuple[float,float], optional
-        Minimum and maximum values, handed to nphistogram_. 
+        Minimum and maximum values, handed to |nphistogram|.
         as the *range* keyword argument. Note that this is only valid when bins
         is specified as an integer. The default is None.
     xlabel : str, optional
         Name to set xlabel, if None, will automatically assign based on col and normalize.
         The default is None.
     xlabel_kwargs : dict, optional
-        Keyword arguments passed to axxlabel_. 
+        Keyword arguments passed to |axxlabel|. 
         The default is None.
     ylabel : str, optional
         Name to set ylabel, if None, will automatically assign based on col and normalize.
         The default is None.
     ylabel_kwargs : dict, optional
-        Keyword arguments passed to axylabel_. 
+        Keyword arguments passed to |axylabel|.
         The default is None.
     orientation : OrientLiteral, optional
         Either 'vertical' or 'horizontal', which axis will be assigned to the normalized counts.
@@ -458,9 +487,9 @@ def hist_line(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
     br : plt.Line2D
         Matplotib line2D of histogram
     xttl : plt.Text
-        Text_ object of xlabel.
+        |Text| object of xlabel.
     yttl : plt.Text
-        Text_ object of ylabel.
+        |Text| object of ylabel.
     
     """
     if not isinstance(orientation, str):
@@ -470,7 +499,7 @@ def hist_line(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
     ax = _check_ax(ax)
     xlabel_kwargs, ylabel_kwargs = _kwdct(xlabel_kwargs), _kwdct(ylabel_kwargs)
     bns, hst, cname, olabel = _histcol(data, col, gate, include_unit, rescale,
-                                       remove_nan, normalize, bins, minmax)
+                                       record, remove_nan, normalize, bins, minmax)
     bcntrs = (bns[:-1] + bns[1:]) / 2
     if orientation == 'vertical':
         xlabel = cname if xlabel is None else xlabel
@@ -488,10 +517,11 @@ def hist_line(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
 
 
 def hist_kdeoverlay(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None, 
-                    include_unit:bool=False, rescale:float=1.0, hist_func:Callable=hist_bar,
-                    normalize:NormLiteral=None, remove_nan:bool=True, 
-                    bins:Union[int,np.ndarray]=100, kde_bins:Union[int, np.ndarray]=500,
-                    minmax:tuple[float,float]=None, orientation:OrientLiteral='vertical',
+                    include_unit:bool=False, rescale:float=1.0, record:bool=False,
+                    hist_func:Callable=hist_bar, normalize:NormLiteral=None, 
+                    remove_nan:bool=True, bins:Union[int,np.ndarray]=100, 
+                    kde_bins:Union[int, np.ndarray]=500, minmax:tuple[float,float]=None, 
+                    orientation:OrientLiteral='vertical',
                     xlabel:str=None, xlabel_kwargs:dict[str:Any]=None,
                     ylabel:str=None, ylabel_kwargs:dict[str:Any]=None,
                     kde_kwargs:dict[str:Any]=None, kdeplot_kwargs:dict[str:Any]=None, 
@@ -515,7 +545,10 @@ def hist_kdeoverlay(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=Non
     include_unit : bool, optional
         Whether to include unit in axes label. The default is False.
     rescale : float, optional
-        Factor (u be power of 10) by which to rescale values of col. The default is 1.0.
+        Factor (if integral, treat as a power of 10) by which to rescale values of col. 
+        The default is 1.0.
+    record : bool, optional
+        Whether to record the column in cache or not. The default is False.
     hist_func : Callable, optional
         **smfBursts** function call to plot histogram. **Note** this is **not** 
         the matplotlib function. The default is :func:`hist_bar`.
@@ -542,7 +575,7 @@ def hist_kdeoverlay(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=Non
     kde_bins : Union[int, np.ndarray], optional
         Bin/evaluation points of KDE, same basic behavior as bins. The default is 500.
     minmax : tuple[float,float], optional
-        Passed to hist_func, Minimum and maximum values, handed to nphistogram_. 
+        Passed to hist_func, Minimum and maximum values, handed to |nphistogram|. 
         as the *range* keyword argument. Note that this is only valid when bins
         is specified as an integer. The default is None.
     orientation : OrientLiteral, optional
@@ -553,17 +586,17 @@ def hist_kdeoverlay(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=Non
         Name to set xlabel, if None, will automatically assign based on col and normalize.
         The default is None.
     xlabel_kwargs : dict, optional
-        Keyword arguments passed to axxlabel_. 
+        Keyword arguments passed to |axxlabel|.
         The default is None.
     ylabel : str, optional
         Name to set ylabel, if None, will automatically assign based on col and normalize.
         The default is None.
     ylabel_kwargs : dict, optional
-        Keyword arguments passed to axylabel_. 
+        Keyword arguments passed to |axylabel|.
         The default is None.
     kde_kwargs : dict[str:Any], optional
-        Keywords arguments passed to gaussian_kde_
-        . The default is None.
+        Keywords arguments passed to |gaussian_kde|.
+        The default is None.
     kdeplot_kwargs : dict[str:Any], optional
         Keyword arguments passed to 
         `ax.plot <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.plot.html>`_. 
@@ -580,15 +613,18 @@ def hist_kdeoverlay(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=Non
     p : plt.Line2D
         Matplotib line2D of histogram
     tx : plt.Text
-        Text_ object of xlabel.
+        |Text| object of xlabel.
     ty : plt.Text
-        Text_ object of ylabel.
+        |Text| object of ylabel.
     k : plt.Line2D
         Matplotib line2D of kde plott
 
     """
     ax = _check_ax(ax)
-    h, b, p, tx, ty = hist_func(data, col, gate=gate, ax=ax, normalize=normalize, remove_nan=remove_nan,
+    h, b, p, tx, ty = hist_func(data, col, gate=gate, ax=ax, 
+                                include_unit=include_unit, rescale=rescale, 
+                                record=record,
+                                normalize=normalize, remove_nan=remove_nan,
                                 bins=bins, minmax=minmax, orientation=orientation, 
                                 xlabel=xlabel, xlabel_kwargs=xlabel_kwargs, 
                                 ylabel=ylabel, ylabel_kwargs=ylabel_kwargs, **kwargs)
@@ -605,6 +641,7 @@ def hist_kdeoverlay(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=Non
 
 def hist2d(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Axes=None, 
                  include_unit:bool=False, rescale:tuple[float, float]=None,
+                 record:bool=False,
                  xlabel:str=None, xlabel_kwargs:dict[str:Any]=None, 
                  ylabel:str=None, ylabel_kwargs:dict[str:Any]=None, 
                  **kwargs:Any):
@@ -636,15 +673,16 @@ def hist2d(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Axe
         Factors (usually powers of 10) by which to rescale values of colx and coly. 
         If not specified, default is converted to (1.0, 1.0).
         The default is None.
+    record : bool, optional
+        Whether to record the column in cache or not. The default is False.
     xlabel_kwargs : dict, optional
-        Keyword arguments passed to 
-        axxlabel_. 
+        Keyword arguments passed to |axxlabel|.
         The default is None.
     ylabel : str, optional
         Name to set ylabel, if None, will automatically assign based on col and normalize.
         The default is None.
     ylabel_kwargs : dict, optional
-        Keyword arguments passed to axylabel_. 
+        Keyword arguments passed to |axylabel|.
         The default is None.
     **kwargs : Any
         Key word argumetns passed to
@@ -661,14 +699,15 @@ def hist2d(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Axe
     image : mpl.collections.QuadMesh
         Image object
     xttl : plt.Text
-        Text_ object of xlabel.
+        |Text| object of xlabel.
     yttl : plt.Text
-        Text_ object of ylabel.
+        |Text| object of ylabel.
     
     """
     ax = _check_ax(ax)
     (cx, cy), (nx, ny) = _get_column_arrays(data, colx, coly, gate=gate, 
-                                            include_unit=include_unit, rescale=rescale)
+                                            include_unit=include_unit, 
+                                            rescale=rescale, record=record)
     xlabel = nx if xlabel is None else xlabel
     xlabel_kwargs = dict() if xlabel_kwargs is None else xlabel_kwargs
     ylabel = ny if ylabel is None else ylabel
@@ -725,9 +764,9 @@ def hist(data:DataS, *args:Column, gate:GateGroup=None, ax:plt.Axes=None,
     br : plt.Line2D
         Matplotib line2D of histogram
     xttl : plt.Text
-        Text_ object of xlabel.
+        |Text| object of xlabel.
     yttl : plt.Text
-        Text_ object of ylabel.
+        |Text| object of ylabel.
     """
     if style is None or style == 'auto':
         style = '2D' if len(args) == 2 else 'bar'
@@ -743,7 +782,7 @@ def hist(data:DataS, *args:Column, gate:GateGroup=None, ax:plt.Axes=None,
 
 
 def hexbin(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Axes=None, 
-           include_unit:bool=False, rescale:tuple[float, float]=None,
+           include_unit:bool=False, rescale:tuple[float, float]=None, record:bool=False,
            xlabel:str=None, xlabel_kwargs:dict[str:Any]=None, 
            ylabel:str=None, ylabel_kwargs:dict[str:Any]=None, 
            **kwargs)->tuple[mpl.collections.PolyCollection, plt.Text, plt.Text]:
@@ -772,17 +811,20 @@ def hexbin(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Axe
     include_unit : bool, optional
         Whether to include unit in axes label. The default is False.
     rescale : tuple[float, float] optional
-        Factors (usually powers of 10) by which to rescale values of colx and coly. 
+        Factors (usually powers of 10, if integral, treat as a power of 10) 
+        by which to rescale values of colx and coly. 
         If not specified, default is converted to (1.0, 1.0).
         The default is None.
+    record : bool, optional
+        Whether to record the column in cache or not. The default is False.
     xlabel_kwargs : dict, optional
-        Keyword arguments passed to axxlabel_. 
+        Keyword arguments passed to |axxlabel|. 
         The default is None.
     ylabel : str, optional
         Name to set ylabel, if None, will automatically assign based on col and normalize.
         The default is None.
     ylabel_kwargs : dict, optional
-        Keyword arguments passed to axylabel_
+        Keyword arguments passed to |axylabel|.
         The default is None.
     **kwargs : Any
         Key word argumetns passed to
@@ -794,14 +836,15 @@ def hexbin(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Axe
         Output of `call to
         ax.hexbin <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.hexbin.html>`_
     xttl : plt.Text
-        Text_ object of xlabel.
+        |Text| object of xlabel.
     yttl : plt.Text
-        Text_ object of ylabel.
+        |Text| object of ylabel.
     
     """
     ax = _check_ax(ax)
     (cx, cy), (nx, ny) = _get_column_arrays(data, colx, coly, gate=gate, 
-                                            include_unit=include_unit, rescale=rescale)
+                                            include_unit=include_unit, 
+                                            rescale=rescale, record=record)
     xlabel = nx if xlabel is None else xlabel
     xlabel_kwargs = dict() if xlabel_kwargs is None else xlabel_kwargs
     ylabel = ny if ylabel is None else ylabel
@@ -844,7 +887,7 @@ def density_kde(colx:np.ndarray, coly:np.ndarray, minzero:bool=True, maxone:bool
         Whether to rescale so that color values have maximum of 1. 
         The default is True.
     **kwargs : Any
-        Keword arguments for gaussian_kde_ used to compute color argument.
+        Keword arguments for |gaussian_kde| used to compute color argument.
 
     Returns
     -------
@@ -999,7 +1042,7 @@ def colorcategory(*args:np.ndarray, cmap:str|mpl.colors.Colormap=None, ncat:int|
 
 
 def scatter(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Axes=None,
-            include_unit:bool=True, rescale:tuple[float,float]=None,
+            include_unit:bool=True, rescale:tuple[float,float]=None, record:bool=False,
             point_func:Callable[[np.ndarray,np.ndarray,...],dict[str:Any]]=None, 
             point_cols:Union[Column,tuple[Column,...]]=None, point_kwargs:dict[str:Any]=None,
             xlabel:str=None, xlabel_kwargs:dict[str:Any]=None, 
@@ -1028,6 +1071,8 @@ def scatter(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Ax
     rescale : tuple[float,float], optional
         Factors by which (usually powers of 10) to rescale values of colx and coly.
         If None, defaults to (1.0, 1.0). The default is None.
+    record : bool, optional
+        Whether to record the column in cache or not. The default is False.
     point_func : Callable[[np.ndarray,np.ndarray,...],dict[str:Any]], optional
         Callable that takes arrays from colx, coly, and those specified in 
         ``point_cols`` as args, and point_kwargs as kwargs, and returns dictionary
@@ -1042,26 +1087,26 @@ def scatter(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Ax
         Name to set xlabel, if None, will automatically assign based on col and normalize.
         The default is None.
     xlabel_kwargs : dict, optional
-        Keyword arguments passed to axxlabel_. 
+        Keyword arguments passed to |axxlabel|. 
         The default is None.
     ylabel : str, optional
         Name to set ylabel, if None, will automatically assign based on col and normalize.
         The default is None.
     ylabel_kwargs : dict, optional
-        Keyword arguments passed to axylabel_. 
+        Keyword arguments passed to |axylabel|.
         The default is None.
     **kwargs : Any
         keyword arguments passed to
-        `ax.scatter <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.scatter.html>`_ .
+        `ax.scatter() <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.scatter.html>`_ .
 
     Returns
     -------
     pathcollection : mpl.collections.PathCollection
         Path collection of scatter plot points.
     xttl : plt.Text
-        Text_ object of xlabel.
+        |Text| object of xlabel.
     yttl : plt.Text
-        Text_ object of ylabel.
+        |Text| object of ylabel.
     
     """
     ax = _check_ax(ax)
@@ -1069,7 +1114,8 @@ def scatter(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Ax
     point_cols = tuple() if point_cols is None else point_cols
     point_cols = point_cols if isinstance(point_cols, tuple) else (point_cols, )
     cols, names = _get_column_arrays(data, colx, coly, *point_cols, gate=gate, 
-                                     include_unit=include_unit, rescale=rescale)
+                                     include_unit=include_unit, 
+                                     rescale=rescale, record=record)
     colx, coly, colsp = cols[0], cols[1], cols[2:]
     namex, namey, _ = names[0], names[1], names[2:]
     if point_func is not None:
@@ -1100,7 +1146,8 @@ def _mean_interval(carrbin:np.ndarray, carrav:np.ndarray,
 
 def _mean_intervalplot(data:DataS, colbin:Column, colav:Column, gate:GateGroup=None, 
                        ax:plt.Axes=None, bins:np.ndarray|int=10, include_unit:bool=True,
-                       rescale:tuple[float,float]=None, thresh:int=20, 
+                       rescale:tuple[float,float]=None, record:bool=False,
+                       thresh:int=20, 
                        orientation:Literal['vertical','horizontal']='vertical',
                        xlabel:str=False, xlabel_kwargs:dict[str:Any]=None, 
                        ylabel:str=False, ylabel_kwargs:dict[str:Any]=None,
@@ -1109,7 +1156,8 @@ def _mean_intervalplot(data:DataS, colbin:Column, colav:Column, gate:GateGroup=N
     """Plot mean interval of one column based on another"""
     ax = _check_ax(ax)
     (cbin, cav), names = _get_column_arrays(data, colbin, colav, gate=gate, 
-                                            include_unit=include_unit, rescale=rescale)
+                                            include_unit=include_unit, 
+                                            rescale=rescale, record=record)
     if not isinstance(bins, np.ndarray):
         bins = np.linspace(np.nanmin(cbin), np.nanmax(cbin), bins+1)
     av = _mean_interval(cbin, cav, bins, thresh)
@@ -1134,7 +1182,8 @@ def _mean_intervalplot(data:DataS, colbin:Column, colav:Column, gate:GateGroup=N
 
 def plot_meaninterval(data:DataS, colbin:Column, colav:Column, gate:GateGroup=None, 
                       ax:plt.Axes=None, bins:np.ndarray|int=10, include_unit:bool=True,
-                      rescale:tuple[float,float]=None, thresh:int=20, 
+                      rescale:tuple[float,float]=None, record:bool=False,
+                      thresh:int=20, 
                       orientation:Literal['vertical','horizontal']='vertical',
                       xlabel:str=False, xlabel_kwargs:dict[str:Any]=None, 
                       ylabel:str=False, ylabel_kwargs:dict[str:Any]=None,
@@ -1165,6 +1214,8 @@ def plot_meaninterval(data:DataS, colbin:Column, colav:Column, gate:GateGroup=No
     rescale : tuple[float,float], optional
         Factors by which (usually powers of 10) to rescale values of colx and coly.
         If None, defaults to (1.0, 1.0). The default is None.
+    record : bool, optional
+        Whether to record the column in cache or not. The default is False.
     thresh : int, optional
         Minimum number of rows in a given range for colbin in order for point to
         be plotted. If number of rows is below, that bin will be given a NaN. 
@@ -1177,13 +1228,13 @@ def plot_meaninterval(data:DataS, colbin:Column, colav:Column, gate:GateGroup=No
         Name to set xlabel, if None, will automatically assign based on col and normalize.
         The default is None.
     xlabel_kwargs : dict, optional
-        Keyword arguments passed to axxlabel_.
+        Keyword arguments passed to |axxlabel|.
         The default is None.
     ylabel : str, optional
         Name to set ylabel, if None, will automatically assign based on col and normalize.
         The default is None.
     ylabel_kwargs : dict, optional
-        Keyword arguments passed to axylabel_.
+        Keyword arguments passed to |axylabel|.
         The default is None.
     **kwargs : Any
         Additional kwargs passed directly to
@@ -1194,9 +1245,9 @@ def plot_meaninterval(data:DataS, colbin:Column, colav:Column, gate:GateGroup=No
     line : plt.Line2D
         Matplotlib Line2D of mean values.
     xlbl : plt.Text
-        Text_ object of xlabel.
+        |Text| object of xlabel.
     ylbl : plt.Text
-        Text_ object of ylabel.
+        |Text| object of ylabel.
     av : np.ndarray[np.float64]
         Array of computed mean values of colav.
     cbins : np.ndarray[np.float64]
@@ -1204,7 +1255,7 @@ def plot_meaninterval(data:DataS, colbin:Column, colav:Column, gate:GateGroup=No
 
     """
     return _mean_intervalplot(data, colbin, colav, gate=gate, ax=ax, bins=bins, 
-                              include_unit=include_unit, rescale=rescale, 
+                              include_unit=include_unit, rescale=rescale, record=record,
                               thresh=thresh, orientation=orientation, xlabel=xlabel,
                               xlabel_kwargs=xlabel_kwargs, ylabel=ylabel_kwargs, 
                               func='plot', **kwargs)
@@ -1212,7 +1263,8 @@ def plot_meaninterval(data:DataS, colbin:Column, colav:Column, gate:GateGroup=No
 
 def scatter_meaninterval(data:DataS, colav:Column, colbin:Column, gate:GateGroup=None, 
                          ax:plt.Axes=None, bins:np.ndarray|int=10, include_unit:bool=True,
-                         rescale:tuple[float,float]=None, thresh:int=20, 
+                         rescale:tuple[float,float]=None, record:bool=False,
+                         thresh:int=20, 
                          orientation:Literal['vertical','horizontal']='vertical',
                          xlabel:str=False, xlabel_kwargs:dict[str:Any]=None, 
                          ylabel:str=False, ylabel_kwargs:dict[str:Any]=None,
@@ -1243,6 +1295,8 @@ def scatter_meaninterval(data:DataS, colav:Column, colbin:Column, gate:GateGroup
     rescale : tuple[float,float], optional
         Factors by which (usually powers of 10) to rescale values of colx and coly.
         If None, defaults to (1.0, 1.0). The default is None.
+    record : bool, optional
+        Whether to record the column in cache or not. The default is False.
     thresh : int, optional
         Minimum number of rows in a given range for colbin in order for point to
         be plotted. If number of rows is below, that bin will be given a NaN. 
@@ -1255,13 +1309,13 @@ def scatter_meaninterval(data:DataS, colav:Column, colbin:Column, gate:GateGroup
         Name to set xlabel, if None, will automatically assign based on col and normalize.
         The default is None.
     xlabel_kwargs : dict, optional
-        Keyword arguments passed to axxlabel_. 
+        Keyword arguments passed to |axxlabel|.
         The default is None.
     ylabel : str, optional
         Name to set ylabel, if None, will automatically assign based on col and normalize.
         The default is None.
     ylabel_kwargs : dict, optional
-        Keyword arguments passed to axylabel_. 
+        Keyword arguments passed to |axylabel|.
         The default is None.
     **kwargs : Any
         Additional kwargs passed directly to
@@ -1272,9 +1326,9 @@ def scatter_meaninterval(data:DataS, colav:Column, colbin:Column, gate:GateGroup
     path : mpl.collections.PathCollection
         Matplotlib PathCollection of mean values.
     xlbl : plt.Text
-        Text_ object of xlabel.
+        |Text| object of xlabel.
     ylbl : plt.Text
-        Text_ object of ylabel.
+        |Text| object of ylabel.
     av : np.ndarray[np.float64]
         Array of computed mean values of colav.
     cbins : np.ndarray[np.float64]
@@ -1283,7 +1337,7 @@ def scatter_meaninterval(data:DataS, colav:Column, colbin:Column, gate:GateGroup
     """
     
     return _mean_intervalplot(data, colav, colbin, gate=gate, ax=ax, bins=bins, 
-                              include_unit=include_unit, rescale=rescale, 
+                              include_unit=include_unit, rescale=rescale, record=record,
                               thresh=thresh, orientation=orientation, xlabel=xlabel,
                               xlabel_kwargs=xlabel_kwargs, ylabel=ylabel_kwargs, 
                               func='scatter', **kwargs)
@@ -1308,7 +1362,7 @@ def _proc_col(a:np.ndarray, c:np.ndarray, func:Literal['mean','median','str','er
 
 def errorbars(data:DataS, colx:Column, coly:Column, colcat:Column,
               gate:GateGroup=None, ax:plt.Axes=None,
-              include_unit:bool=True, rescale:tuple[float,float]=None,
+              include_unit:bool=True, rescale:tuple[float,float]=None, record:bool=False,
               xcenter:Literal['mean','median']|Callable[[np.ndarray],float]='mean', 
               ycenter:Literal['mean','median']|Callable[[np.ndarray],float]='mean',
               xerr:Literal['std','sem']|Callable[[np.ndarray],float]|None='std', 
@@ -1343,6 +1397,8 @@ def errorbars(data:DataS, colx:Column, coly:Column, colcat:Column,
     rescale : tuple[float,float], optional
         Factors by which (usually powers of 10) to rescale values of colx and coly.
         If None, defaults to (1.0, 1.0). The default is None.
+    record : bool, optional
+        Whether to record the column in cache or not. The default is False.
     xcenter : Literal['mean','median']|Callable[[np.ndarray],float], optional
         Type of center moment to use for x axis, may be ``'mean'`` or ``'median'``, or *callable* .
         If callable, must take single array and return a float of the center value.
@@ -1362,13 +1418,13 @@ def errorbars(data:DataS, colx:Column, coly:Column, colcat:Column,
         Name to set xlabel, if None, will automatically assign based on col and normalize.
         The default is None.
     xlabel_kwargs : dict, optional
-        Keyword arguments passed to axxlabel_. 
+        Keyword arguments passed to |axxlabel|. 
         The default is None.
     ylabel : str, optional
         Name to set ylabel, if None, will automatically assign based on col and normalize.
         The default is None.
     ylabel_kwargs : dict, optional
-        Keyword arguments passed to axylabel_. 
+        Keyword arguments passed to |axylabel|.
         The default is None.
     **kwargs : Any
         Additional keyword arguments handed to
@@ -1379,14 +1435,15 @@ def errorbars(data:DataS, colx:Column, coly:Column, colcat:Column,
     ebar : mpl.container.ErrorbarContainer
         Return value of the call to ``ax.errorbar`` .
     xlbl : plt.Text
-        Text_ object representing the x axis caption.
+        |Text| object representing the x axis caption.
     ylbl : plt.Text
-        Text_ object representing the y axis caption.
+        |Text| object representing the y axis caption.
 
     """
     ax = _check_ax(ax)
     (x, y, c), (nx, ny, nc) = _get_column_arrays(data, colx, coly, colcat, gate=gate, 
-                                                 include_unit=include_unit, rescale=rescale)
+                                                 include_unit=include_unit, 
+                                                 rescale=rescale, record=record)
     cx, cy = _proc_col(x, c, xcenter), _proc_col(y, c, ycenter)
     dx, dy = _proc_col(x, c, xerr), _proc_col(y, c, yerr)
     ebar = ax.errorbar(cx, cy, xerr=dx, yerr=dy, **kwargs)
@@ -1534,7 +1591,7 @@ def gaus_2Dkde(datax:np.ndarray[np.float64], datay:np.ndarray[np.float64],
     bw_method : str | BWCall, optional
         If all ``sigmax``, ``sigmay`` and ``rho`` are ``None``. The function called
         for generating said values from data given. If specified as str, use
-        parameters close to gaussian_kde_. The default is None.
+        parameters close to |gaussian_kde|. The default is None.
 
     Raises
     ------
@@ -1604,7 +1661,7 @@ def gaus_2Dkde_cmap(datax:np.ndarray, datay:np.ndarray, outx:np.ndarray, outy:np
     bw_method : str | BWCall, optional
         If all ``sigmax``, ``sigmay`` and ``rho`` are ``None``. The function called
         for generating said values from data given. If specified as str, use
-        parameters close to gaussian_kde_. The default is None.
+        parameters close to |gaussian_kde|. The default is None.
     minzero : bool, optional
         Whether to rescale minimum value to 0. The default is True.
     maxone : bool, optional
@@ -1700,7 +1757,8 @@ def _axim(ax:plt.Axes)->Callable[[np.ndarray,np.ndarray,np.ndarray,...],mpl.imag
 
 def kdeplot(data:DataS, *args:Column, gate:GateGroup=None, ax:plt.Axes=None, 
             plot_style:str|Callable=None,
-            include_unit:bool=False, rescale:Sequence[float]=None, weights:np.ndarray=None,
+            include_unit:bool=False, rescale:Sequence[float]=None, record:bool=False,
+            weights:np.ndarray=None,
             rescale_factor:Callable[[np.ndarray],float]|float=None, edges:bool=False,
             sigmax:ArrReal=None, sigmay:ArrReal=None, rho:ArrReal=None,
             minzero:bool=True, maxone:bool=True, bins:tuple[ArrInt,ArrInt]=None,
@@ -1733,6 +1791,8 @@ def kdeplot(data:DataS, *args:Column, gate:GateGroup=None, ax:plt.Axes=None,
     rescale : Sequence[float]|float, optional
         Factor by which to rescale values of each colvalumn. If not specified, assume
         1.0. The default is None.
+    record : bool, optional
+        Whether to record the column in cache or not. The default is False.
     weights : np.ndarray, optional
         Weight of each point in datax/datay, if None, assume equal weight to all
         points. The default is None.
@@ -1776,11 +1836,12 @@ def kdeplot(data:DataS, *args:Column, gate:GateGroup=None, ax:plt.Axes=None,
     xlabel : str, optional
         Name for x-axis label. The default is None.
     xlabel_kwargs : dict, optional
-        keyword arguments given to axxlabel_. The default is None.
+        keyword arguments given to |axxlabel|. The default is None.
     ylabel : str, optional
         Name for y-axis label. The default is None.
     ylabel_kwargs : dict, optional
-        keyword arguments given to axylabel_. The default is None.
+        keyword arguments given to |axylabel|.
+        The default is None.
     **kwargs : Any
         Keyword argument passed to matplotlib plotting function. Function set
         by plot_style.
@@ -1795,9 +1856,9 @@ def kdeplot(data:DataS, *args:Column, gate:GateGroup=None, ax:plt.Axes=None,
     out : mpl.image.AxesImage
         Output of plotting function.
     xlbl : plt.Text
-        Text_ object of xlabel.
+        |Text| object of xlabel.
     ylbl : plt.Text
-        Text_ object of ylabel.
+        |Text| object of ylabel.
 
     """
     if not args:
@@ -1805,7 +1866,8 @@ def kdeplot(data:DataS, *args:Column, gate:GateGroup=None, ax:plt.Axes=None,
     if len(args) > 2:
         raise TypeError("can specify maximum of 2 columns")
     carrs, names = _get_column_arrays(data, *args, gate=gate, 
-                                      include_unit=include_unit, rescale=rescale)
+                                      include_unit=include_unit, 
+                                      rescale=rescale, record=record)
     ax = plt.gca() if ax is None else ax
     if callable(plot_style):
         func = plot_style
@@ -1835,7 +1897,7 @@ _cpos_map = {0:(1,0), 1:(1,1), 2:(0,1), 3:(0,0)}
 
 def jointplot(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, 
               fig:plt.Figure=None, axmat:np.ndarray[plt.Axes]=None,
-              include_unit:bool=True, rescale:tuple[Real,Real]=None,
+              include_unit:bool=True, rescale:tuple[Real,Real]=None, record:bool=False,
               cxlabel:str=None, cxlabel_kwargs:dict=None, cylabel:str=None, cylabel_kwargs:dict=None,
               xxlabel:str=None, xxlabel_kwargs:dict=None, xylabel:str=None, xylabel_kwargs:dict=None,
               yxlabel:str=None, yxlabel_kwargs:dict=None, yylabel:str=None, yylabel_kwargs:dict=None,
@@ -1874,6 +1936,8 @@ def jointplot(data:DataS, colx:Column, coly:Column, gate:GateGroup=None,
     rescale : tuple[float,float], optional
         Factors by which (usually powers of 10) to rescale values of colx and coly.
         If None, defaults to (1.0, 1.0). The default is None.
+    record : bool, optional
+        Whether to record the column in cache or not. The default is False.
     cxlabel : str, optional
         Name for x-axis label in center axis. The default is None.
     cxlabel_kwargs : dict, optional
@@ -1884,37 +1948,29 @@ def jointplot(data:DataS, colx:Column, coly:Column, gate:GateGroup=None,
     cylabel : str, optional
         Name for y-axis label in center axis. The default is None.
     cylabel_kwargs : dict, optional
-        Keyword arguments passed to 
-        axylabel_. 
-        for the 2D plot axes
+        Keyword arguments passed to |axylabel| for the 2D plot axes.
         The default is None.
     xxlabel : str, optional
         Name for x-axis label in x-axis histogram. The default is None.
     xxlabel_kwargs : dict, optional
-        Keyword arguments passed to 
-        axxlabel_. 
+        Keyword arguments passed to |axxlabel|.
         For the x-axis histogram axes.
         The default is None.
     xylabel : str, optional
         Name for x-axis label in y-axis histogram. The default is None.
     xylabel_kwargs : dict, optional
-        Keyword arguments passed to 
-        axylabel_. 
-        for the x-axis histogram.
+        Keyword arguments passed to |axylabel| for the x-axis histogram.
         The default is None.
     yxlabel : str, optional
         Name for x-axis label in y-axis histogram. The default is None.
     yxlabel_kwargs : dict, optional
-        Keyword arguments passed to 
-        axxlabel_. 
+        Keyword arguments passed to |axxlabel|.
         for the y-axis histogram.
         The default is None.
     yylabel : str, optional
         Name for y-axis label in y-axis histogram. The default is None.
     yylabel_kwargs : dict, optional
-        Keyword arguments passed to 
-        axylabel_. 
-        for the y-axis histogram.
+        Keyword arguments passed to |axylabel| for the y-axis histogram.
         The default is None.
     cfunc : Callable, optional
         **smfBursts** function for plotting in 2D axes. The default is :func:`scatter`.
@@ -2012,13 +2068,13 @@ def jointplot(data:DataS, colx:Column, coly:Column, gate:GateGroup=None,
     rescalex, rescaley = rescale
     xfunc = hfunc if xfunc is None else xfunc
     yfunc = hfunc if yfunc is None else yfunc
-    ckwargs = dict(include_unit=include_unit, rescale=rescale, 
+    ckwargs = dict(include_unit=include_unit, rescale=rescale, record=record,
                    xlabel = cxlabel, ylabel = cylabel, 
                    xlabel_kwargs=cxlabel_kwargs, ylabel_kwargs=cylabel_kwargs)
-    xkwargs = dict(include_unit=include_unit, rescale=rescalex, 
+    xkwargs = dict(include_unit=include_unit, rescale=rescalex, record=False,
                    xlabel=xxlabel, ylabel=xylabel, 
                    xlabel_kwargs=xxlabel_kwargs, ylabel_kwargs=xylabel_kwargs)
-    ykwargs = dict(include_unit=include_unit, rescale=rescaley, 
+    ykwargs = dict(include_unit=include_unit, rescale=rescaley, record=False,
                    xlabel = yxlabel, ylabel=yylabel, 
                    xlabel_kwargs=yxlabel_kwargs, ylabel_kwargs=yylabel_kwargs)
     if 'orientation' in signature(xfunc).parameters.keys():
@@ -2066,7 +2122,12 @@ def plot_multi_dist(func:FitFunc, params:np.ndarray[np.float64], x:np.ndarray[np
     return distplot, subs
 
 
+# TODO: complete this method
 def plot_residuals_cdfbins(func:FitFunc, params:np.ndarray[np.float64], bins:np.ndarray[np.float64],
                            ax:plt.Axes=None, dist_kwargs:dict=None, plot_sub:bool=True,
                            subdist_kwargs:dict|Sequence[dict]=None, **kwargs):
-    ...
+    dist_kwargs = dict() if dist_kwargs is None else dist_kwargs
+    subdist_kwargs = dict() if subdist_kwargs is None else subdist_kwargs
+    subdist_kwargs = repeat(subdist_kwargs) if isinstance(subdist_kwargs, dict) else subdist_kwargs
+    ax = _check_ax(ax)
+

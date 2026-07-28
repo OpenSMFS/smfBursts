@@ -16,6 +16,9 @@ reading and writing from HDF5 files.
 The :class:`_ImData` class is used as a abstract base class for creating classes
 that have specific fields which are immutable, and can be accessed in a dictionary
 like way, and can be wirtten and read from HDF5 files.
+
+.. |MsgPack| replace:: `mMsgPack <https://msgpack.org/index.html>`__
+.. |msgpack| replace:: `**msgpack** <https://msgpack-python.readthedocs.io/en/latest/api.html>`__
 """
 from typing import ClassVar, Any, Union
 from collections import Counter
@@ -29,6 +32,7 @@ from numbers import Number
 
 import numpy as np
 import tables as tb
+import msgpack as msg
 
 from .utils import (_DataLike, _ImDataLike, ImDict, tupledict, FixedDict, 
     _dimscompare, _echo, iter_funcinput, _tuple_array, _eq, 
@@ -77,6 +81,18 @@ class TypeValidator(_ImDataLike):
         as the value to be checked, all additional arguments should be optional
         keyword arguments used for specifying limits or additional conditions
         on typevalidator.
+    encoder : Callable[[Any],tuple]
+        Function that takes object of type ``type_`` and returns a |MsgPack|
+        encodable tuple. Note that this tuple will be prepended with
+        ``(__type__, <typename>)`` when encoded with |msgpack|. In general,
+        if the type is array or dict-like (contains multiple python objects)
+        :meth:`TypeValidator.encode_msgtup` should be called on each of the
+        interal objects, unless they are already str, int, float, or bool 
+        (or dict/tuple thereof, dicts must have keys that are all str).
+    decoder : Callable[[tuple],Any]
+        Function that converts a |msgpack| decoded tuple into the appropriate
+        python object (type ``type_``). Note that this tuple will be the tuple
+        returned by encoder, *with* the ``<typename>`` of the type prepended.
     write : callable
         A function that writes the specified type to an HDF5 file. Must have the
         signature ``write(group:tables.Group, name:str, val:Any)`` where
@@ -104,8 +120,9 @@ class TypeValidator(_ImDataLike):
         and returns val converted appropriately.
     validator_dict : dict, optional
         keyword arguments passed to validator function
+    
     """
-    __slots__ = ('type_', 'check', 'write', 
+    __slots__ = ('type_', 'check', 'encoder', 'decoder', 'write', 
                  'node_prefix', 'node_repr', 'node_read', 'node_check',
                  'data_proc', 'ckwargs', 'validator', 'validator_dict')
     _defaults = ImDict(node_prefix=None, node_repr=None, node_read=None, node_check=None,
@@ -113,6 +130,8 @@ class TypeValidator(_ImDataLike):
                        validator=lambda:_return_first, validator_dict=_emptydict)
     _required = ('type_', 'check', 'write')
     _type_map:ClassVar[FixedDict[type,"TypeValidator"]] = FixedDict()
+    _encoders:ClassVar[str:Callable[[dict],Any]] = FixedDict()
+    _decoders:ClassVar[str:Callable[[dict],Any]] = FixedDict()
     _node_prefixes:ClassVar[FixedDict[str,"TypeValidator"]] = FixedDict()
     _node_types:ClassVar[FixedDict[type,"TypeValidator"]] = FixedDict()
     _grouptypes:ClassVar[FixedDict[str,Callable]] = FixedDict()
@@ -120,6 +139,8 @@ class TypeValidator(_ImDataLike):
 
     type_:type
     check:Callable
+    encoder: Callable[[Any],dict]
+    decoder: Callable[[dict],Any]
     write:Callable
     node_prefix:str
     node_repr:Callable[[Hashable],str]
@@ -133,6 +154,10 @@ class TypeValidator(_ImDataLike):
     def __post_init__(self):
         if self.type_ not in self._type_map:
             self._type_map[self.type_] = self
+            if self.encoder is not None:
+                self._encoders[_type_name(self.type_)] = self.encoder
+            if self.decoder is not None:
+                self._decoders[_type_name(self.type_)] = self.decoder
             if self.node_prefix is not None:
                 if not callable(self.node_repr):
                     raise ValueError("must specify node_repr with node_prefix")
@@ -177,7 +202,7 @@ class TypeValidator(_ImDataLike):
         data_proc = self.data_proc if data_proc is None else data_proc
         validator = self.validator if validator is None else validator
         validator_dict = self.validator_dict if validator_dict is None else validator_dict
-        return TypeValidator(self.type_, self.check, self.write,
+        return TypeValidator(self.type_, self.check, self.encoder, self.decoder, self.write,
                              self.node_prefix, self.node_repr, self.node_read, self.node_check,
                              data_proc, ckwargs, validator, validator_dict)
 
@@ -250,7 +275,7 @@ class TypeValidator(_ImDataLike):
         raise ValueError(f"unregistered type {type_}")
 
     @classmethod
-    def check_any(cls, val:Any, predata=None, type_=None, **kwargs)->Hashable:
+    def check_any(cls, val:Any, predata:Sequence[Any]=None, type_:Union[type,"TypeValidator"]=None, **kwargs)->Hashable:
         """
         Check if a value can be written by any of the existing :class:`TypeValidator`
         objects.
@@ -261,8 +286,9 @@ class TypeValidator(_ImDataLike):
             Value to check/convert into hashable writable type.
         predata : TYPE, optional
             Additional arguments to pass to :meth:`TypeValidator.check_val`. The default is None.
-        type_ : TYPE, optional
-            DESCRIPTION. The default is None.
+        type_ : type | TypeValidator, optional
+            Type or :class:`TypeValitator` to check value against. 
+            The default is None.
             
         **kwargs : Any
             Values passed to check_val function of selected type
@@ -277,6 +303,60 @@ class TypeValidator(_ImDataLike):
         pdtup = tuple() if predata is None else predata
         pdtup = pdtup if isinstance(pdtup, tuple) else (pdtup, )
         return tv.check_val(val, *pdtup, **kwargs)
+    
+    @classmethod
+    def encode_msgtup(cls, val:Hashable)->tuple:
+        """
+        Get the tuple for |msgpack| encoding of an object.
+
+        Parameters
+        ----------
+        val : Hashable
+            Value.
+
+        Returns
+        -------
+        tuple
+            |MsgPack| encodable tuple.
+
+        """
+        if isinstance(val, type):
+            tstr = 'type'
+        elif callable(val):
+            tstr = 'pycode'
+        else:
+            tstr = _type_name(type(val))
+        if tstr in cls._encoders:
+            return ('__type__', tstr) + cls._encoders[tstr](val)
+        elif isinstance(val, (list, tuple)):
+            val = [cls.encode_msgtup(v) for v in val]
+        return val
+
+    @classmethod
+    def encode_msg(cls, val:Any)->bytes:
+        return msg.packb(cls.encode_msgtup(val))
+
+    @classmethod
+    def decode_msgtup(cls, val:tuple)->Any:
+        if isinstance(val, (list, tuple)):
+            if '__type__' == val[0]:
+                return cls._decoders[val[1]](val[1:])
+            else:
+                return tuple(cls.decode_msgtup(v) for v in val)
+        if isinstance(val, dict):
+            return {k:cls.decode_msg(v) for k, v in val.items}
+        return val
+
+    @classmethod
+    def decode_msg(cls, val:bytes)->Any:
+        return cls.decode_msgtup(msg.unpackb(val))
+    
+    def add_subtype(self, subtype:type)->None:
+        tstr = _type_name(subtype)
+        if tstr in self._encoders:
+            return
+        self._encoders[_type_name(subtype)] = self.encoder
+        self._decoders[_type_name(subtype)] = self.decoder
 
     @classmethod
     def write_any(cls, group:tb.Group, name:str, val:Any)->tb.Node:
@@ -551,6 +631,48 @@ class ValidatorConstructionError(ValueError):
     pass
 
 
+def encode_msgpack(val:Any)->bytes:
+    """
+    Encode an object of type registered with :class:`TypeValidator` into a bytes
+    object.
+    
+    This is a wrapper of :meth:`TypeValidator.encode_msg`.
+
+    Parameters
+    ----------
+    val : Any
+        Object to convert to |MsgPack| bytes.
+
+    Returns
+    -------
+    bytes
+        bytes encoded with |msgpack|.
+
+    """
+    return TypeValidator.encode_msg(val)
+
+
+def decode_msgpack(val:bytes)->Any:
+    """
+    Decode a bytes (probably read from file) encoded with |msgpack| into
+    python object.
+    
+    This is a wrapper of :meth:`TypeValidator.decode_msg`.
+
+    Parameters
+    ----------
+    val : bytes
+        bytes encoded with |msgpack|.
+
+    Returns
+    -------
+    Any
+        converted python object.
+
+    """
+    return TypeValidator.decode_msg(val)
+
+
 ###############################################################################
 ### Fucntions for defining TypeDefs
 ###############################################################################
@@ -560,11 +682,30 @@ def _type_name(val:type)->str:
 
 
 def _val_type_name(val:Any)->str:
+    """Get name of type of val, renormalized for typevalidator"""
     tp = TypeValidator.convert_type((type(val))).type_
     return _type_name(tp)
 
 
 def read_byteslike(group:tb.Group, dct:dict, *args)->Any:
+    """
+    Read a bytes array group from HDF5 file, not encoded like |MsgPack|.
+
+    Parameters
+    ----------
+    group : tables.Group
+        PyTables group to read.
+    dct : dict
+        Dictionary of names to read functions.
+    *args : str
+        Args from the title of the group.
+
+    Returns
+    -------
+    Any
+        Python object represented by array.
+
+    """
     convert = dct.get(args[0], _return_first)
     if isinstance(convert, dict):
         dct = convert
@@ -575,6 +716,30 @@ def read_byteslike(group:tb.Group, dct:dict, *args)->Any:
 def write_byteslike(group:tb.Group, name:str, val:Any, 
                     title_func:Callable[[Any],str]=_val_type_name, 
                     convert:Callable[[Any],Any]=_echo)->tb.Node:
+    """
+    Write a bytes array to HDF5 group (*for non |MsgPack| encodings*)
+
+    Parameters
+    ----------
+    group : tb.Group
+        Group in which to create a bytes group.
+    name : str
+        Name to give to bytes-like group.
+    val : Any
+        Value to write to bytes-like group.
+    title_func : Callable[[Any],str], optional
+        Function creates title from val to give to group. 
+        The default is _val_type_name.
+    convert : Callable[[Any],Any], optional
+        Callable that converts object into bytes representation. 
+        The default is _echo.
+
+    Returns
+    -------
+    tables.Node
+        Created bytes-like Pytables Node.
+
+    """
     obj = convert(val)
     title = f'byteslike-{title_func((val))}'
     if isinstance(obj, np.ndarray):
@@ -586,11 +751,51 @@ TypeValidator.register_grouptype('byteslike', read_byteslike)
 
 
 def register_byteslike(type_:type, check:Callable, 
+                       encoder:Callable[[Any],tuple]=None, decoder:Callable[[tuple],Any]=None,
                        read:Callable[[Any,dict,...],Any]=_return_first,
                        write:Callable[[Any],Union[bytes,np.ndarray]]=None,
                        node_prefix:str=None, node_repr:Callable[[Any],str]=None, 
                        node_read:Callable[[str],Any]=None, node_check:Callable[[Hashable],bool]=None,
                        name:str=None, title_func:Callable[[Any],str]=None)->TypeValidator:
+    """
+    Register a new type that can be written to a HDF5 file as 
+
+    Parameters
+    ----------
+    type_ : type
+        DESCRIPTION.
+    check : Callable
+        DESCRIPTION.
+    encoder : Callable[[Any],tuple], optional
+        Function that converts the object into a tuple of objects that can be 
+        encoded in |MsgPack| objects. |MsgPack| can encode the primitive types of
+        str, int, float, bool, and 
+        The default is None.
+    decoder : Callable[[tuple],Any], optional
+        DESCRIPTION. The default is None.
+    read : Callable[[Any,dict,...],Any], optional
+        DESCRIPTION. The default is _return_first.
+    write : Callable[[Any],Union[bytes,np.ndarray]], optional
+        DESCRIPTION. The default is None.
+    node_prefix : str, optional
+        DESCRIPTION. The default is None.
+    node_repr : Callable[[Any],str], optional
+        DESCRIPTION. The default is None.
+    node_read : Callable[[str],Any], optional
+        DESCRIPTION. The default is None.
+    node_check : Callable[[Hashable],bool], optional
+        DESCRIPTION. The default is None.
+    name : str, optional
+        Name of sub-dict in byteslike. The default is None.
+    title_func : Callable[[Any],str], optional
+        DESCRIPTION. The default is None.
+
+    Returns
+    -------
+    TypeValidator
+        DESCRIPTION.
+
+    """
     if name is None:
         TypeValidator.register_groupclass('byteslike', _type_name(type_), read)
         title_func = _val_type_name if title_func is None else title_func
@@ -614,23 +819,42 @@ def register_byteslike(type_:type, check:Callable,
                       node_read=node_read)
         if node_check is not None:
             kwargs['node_check'] = node_check
-    return TypeValidator(type_, check, write, **kwargs)
+    return TypeValidator(type_, check, encoder, decoder, write, **kwargs)
 
 
-def _check_num(supertype:type, outtype:type, val:Number, mn:Number=-np.inf, mx:Number=np.inf, 
-               isin:tuple[Number,...]|list[Number]|set[Number]=None, 
-               notin:tuple[Number,...]|list[Number]|set[Number]=None,
-               **kwargs)->int:
+def make_check_numeric(type_:type, supertype:tuple[type,...]|type)->Callable:
     """
-    Function for number type TypeValidators, checks that val can be converted,
-    and if so, convert to specified type
+    Convenience function for preparing a new number check_function.
+    
+    **For use with :class:`TypeValidator`**
     
     Parameters
     ----------
+    type_ : type
+        The type, or casting function that the value should be
     supertype : type
-        valid types of val
-    outtype : type
-        type that the number will be
+        The supertype (type wich val must be instance of)    
+    """
+    def _check_num(val:Number, mn:Number=-np.inf, mx:Number=np.inf, 
+                   isin:tuple[Number,...]|list[Number]|set[Number]=None, 
+                   notin:tuple[Number,...]|list[Number]|set[Number]=None,
+                   **kwargs)->int:
+        if isinstance(val, np.ndarray) and val.size == 1:
+            val = val.reshape(1)[0]
+        if not np.issubdtype(type(val), supertype):
+            raise TypeError(f"{val} is not an {supertype}")
+        if val < mn or val > mx:
+            raise ValueError(f"{val} out of valid range")
+        if isin is not None and val not in isin:
+            raise ValueError(f"invalid value {val}, must be one of the following:{isin}")
+        return type_(val)
+    _check_num.__doc__ = f"""
+    Check that val can be converted into {type.__name__}, and convert to that
+    type. This function is primarily used as a check function in 
+    :class:`TypeValidator` objects.
+    
+    Parameters
+    ----------
     val : number
         Number to check
     mn : number, optional
@@ -645,31 +869,7 @@ def _check_num(supertype:type, outtype:type, val:Number, mn:Number=-np.inf, mx:N
         Default is None
     
     """
-    if isinstance(val, np.ndarray) and val.size == 1:
-        val = val.reshape(1)[0]
-    if not np.issubdtype(type(val), supertype):
-        raise TypeError(f"{val} is not an {supertype}")
-    if val < mn or val > mx:
-        raise ValueError(f"{val} out of valid range")
-    if isin is not None and val not in isin:
-        raise ValueError(f"invalid value {val}, must be one of the following:{isin}")
-    return outtype(val)
-
-
-def make_check_numeric(type_:type, supertype:Union[tuple[type,...], type])->Callable:
-    """
-    Convenience function for preparing a new number check_function.
-    
-    **For use with :class:`TypeValidator`**
-    
-    Parameters
-    ----------
-    type_ : type
-        The type, or casting function that the value should be
-    supertype : type
-        The supertype (type wich val must be instance of)    
-    """
-    return partial(_check_num, supertype, type_)
+    return _check_num
 
 
 def nhex(val:int)->str:
@@ -839,8 +1039,25 @@ check_int = make_check_numeric(int, np.integer)
 check_float = make_check_numeric(float, np.number)
 check_bool = make_check_numeric(bool, np.bool_)
 
+#: :class:`TypeValidator` for integer objects. Check function is :func:`check_int`
+#: It has the following options:
+#:
+#: - mn: (int | float) minimum (inclusive) value of integer
+#: - mx: (int | float) maximum (inclusive) value of integer
+#: - isin: (Sequence[int]) set of valid values, if this is specified, typically 
+#:   no other kwargs are specified
+#: - notin: (Sequence[int]) set of invalide values
 TV_int = register_byteslike(int, check_int, node_prefix='int', node_repr=node_repr_int, node_read=node_read_int)
+#: :class:`TypeValidator` for integer objects. Check function is :func:`check_float`
+#: It has the following options:
+#:
+#: - mn: (float) minimum (inclusive) value of integer
+#: - mx: (float) maximum (inclusive) value of integer
+#: - isin: (Sequence[float]) set of valid values, if this is specified, typically 
+#:   no other kwargs are specified
+#: - notin: (Sequence[int]) set of invalid values
 TV_float = register_byteslike(float, check_float, node_prefix='float', node_repr=node_repr_float, node_read=node_read_float)
+#: :class:`TypeValidator` for boolean values
 TV_bool = register_byteslike(bool, check_bool, node_prefix='bool', node_repr=node_repr_bool, node_read=node_read_bool)
 
 
@@ -868,8 +1085,8 @@ def check_str(val:str, isin:Sequence[str]=None, startswith:str=None, endswith:st
     allow_empty : bool, optional
         If true, then empty strings allowed regardless of other kwargs. 
         The default is False.
-    **kwargs : TYPE
-        DESCRIPTION.
+    **kwargs : Any
+        Additional kwargs not used.
 
     Raises
     ------
@@ -945,9 +1162,28 @@ def node_check_str(val:str)->bool:
     """TypeValidator node-check function for TV_str"""
     return bool(attr_regex.match(val))
 
-
-TV_str = register_byteslike(str, check_str, dread_str, dwrite_str, 'str', _echo, _echo, node_check_str)
+#: :class:`TypeValidator` for string objects. Uses :func:`check_str` as check
+#: func.
+#: It has the following options:
+#: 
+#: - isin (Sequence[str]) The input string must be one of the strings
+#: - startswith (str) The input string must start with this string
+#: - endswith (str) The input string must end with this string
+#: - pattern (re.Pattern) The input value must give a non-None response 
+#:   to :code:`pattern.match(val)`
+#: - allow_empty (bool) If True, empty strings will also be allowed, regardless of
+#:   the evaluation of the other conditions (the default is False).
+TV_str = register_byteslike(str, check_str, read=dread_str, write=dwrite_str, 
+                            node_prefix='str', node_repr=_echo, 
+                            node_read=_echo, node_check=node_check_str)
+#: Sub- :class:`TypeValidator` of :attr:`TV_str` which must be a string that 
+#: can be an attribute of a Python class/variable 
+#: (begins with alphabetic letter, following contain no reserved characters like \*).
 TV_attrstr = TV_str(pattern=attr_regex)
+#: Sub- :class:`TypeValidator` of :attr:`TV_str` which must be a string that 
+#: can be an attribute of a Python class/variable
+#: (begins with alphabetic letter, following contain no reserved characters like \*)
+#: **OR** and empty string.
 TV_attrstr_allow_empty = TV_str(pattern=attr_regex, allow_empty=True)
 
 
@@ -983,6 +1219,9 @@ def check_bytes(val:bytes, **kwargs)->bytes:
     return val
        
  
+#: :class:`TypeValidator` for bytes objects. 
+#: Uses :func:`check_bytes` as check func.
+#: This check function has no default options.
 TV_bytes = register_byteslike(bytes, check_bytes)
 
 
@@ -1036,11 +1275,21 @@ def dwrite_none(val:None)->bytes:
     return 'None'.encode()
 
 
-TV_none = register_byteslike(type(None), check_none, dread_none, dwrite_none)
+def encode_none(val:None)->dict[str:str]:
+    return tuple()
+
+
+def decode_none(val:dict)->None:
+    return None
+
+#: :class:`TypeValidator` for None type, only None is allowed.
+TV_none = register_byteslike(type(None), check_none, 
+                             encoder=encode_none, decoder=decode_none, 
+                             read=dread_none, write=dwrite_none)
 
 
 def check_arbsequence(type_:type, typecall:Callable[[Sequence],Sequence], vals:Sequence, 
-                       typedefs:Union[type,TypeValidator,Sequence[Union[type,TypeValidator]]]=None,
+                       typedefs:type|TypeValidator|Sequence[type|TypeValidator]=None,
                        minsize:int=None, maxsize:int=None, **kwargs)->Sequence:
     r"""
     Internal funciton for checking Sequence types, used in TypeValidator objects.
@@ -1057,8 +1306,9 @@ def check_arbsequence(type_:type, typecall:Callable[[Sequence],Sequence], vals:S
         Callable that takes val and converts to type, often same as type\_.
     vals : Sequence
         Value to be check/turned into given sequence type.
-    typedefs : Union[type,TypeValidator,Sequence[Union[type,TypeValidator]]], optional
-        DESCRIPTION. The default is None.
+    typedefs : type | TypeValidator | Sequence[type | TypeValidator], optional
+        Type or :class:`TypeValidator` the elements must be, if sequence thereof,
+        must be same length as expected Sequence. The default is None.
     minsize : int, optional
         minimum length of sequence. The default is None.
     maxsize : int, optional
@@ -1181,7 +1431,44 @@ def make_arbsequence(type_:type, typecall:Callable[[list],Sequence]=None)->Calla
     """
     typecall = type_ if typecall is None else typecall
     TypeValidator.register_groupclass('Sequence', _type_name(type_), typecall)
-    return partial(check_arbsequence, type_, typecall)
+    def _check_arbsequence(vals:Sequence, 
+                           typedefs:type|TypeValidator|Sequence[type|TypeValidator]=None,
+                           minsize:int=None, maxsize:int=None, **kwargs)->Sequence:
+        return check_arbsequence(type_, typecall, vals, typedefs=typedefs, 
+                                 minsize=minsize, maxsize=maxsize, **kwargs)
+    _check_arbsequence.__doc__ = fr"""
+    Check/convert to {type_.__name__}, used in TypeValidator objects.
+    
+
+    Parameters
+    ----------
+    vals : Sequence
+        Value to be check/turned into given sequence type.
+    typedefs : type | TypeValidator | Sequence[type | TypeValidator], optional
+        Type or :class:`TypeValidator` the elements must be, if sequence thereof,
+        must be same length as expected Sequence. The default is None.
+    minsize : int, optional
+        minimum length of sequence. The default is None.
+    maxsize : int, optional
+        Maximum lenght of object. The default is None.
+    **kwargs : Any
+        Unused, but needed so that sub-typedefs can take additional kwargs.
+
+    Raises
+    ------
+    ValueError
+        Sequence is either too short or too long.
+    TypeError
+        type\_ is not hashable, and therefore invalid for storing with TypeValidator.
+
+    Returns
+    -------
+    Sequence
+        val converted to type\_ by typecall.
+
+    """
+    
+    return _check_arbsequence
 
 
 def node_repr_arbsequence(val:tuple)->str:
@@ -1236,8 +1523,40 @@ node_read_tuple = partial(node_read_arbsequence, tuple)
 check_frozenset = make_arbsequence(frozenset)
 node_read_frozenset = partial(node_read_arbsequence, frozenset)
 
-TV_tuple = TypeValidator(tuple, check_tuple, write_arbsequence, 'tuple', node_repr_arbsequence, node_read_tuple, node_check_arbsequence)
-TV_frozenset = TypeValidator(frozenset, check_frozenset, write_arbsequence, 'frozenset', node_repr_arbsequence, node_read_frozenset, node_check_arbsequence)
+
+#: :class:`TypeValidator` for tuple objects, uses :func:`check_tuple` as check func.
+#: It has the following options:
+#: 
+#: - typedefs (type | TypeValidator | Sequence[type | TypeValidator]) type or
+#:   :class:`TypeValidator` of each element. If specifed as a single type/
+#:   :class:`TypeValidator`, then apply same to all elements, if specified as
+#:   a Sequence, then the tuple must have that number of elements, and each
+#:   element must match the given type in typedefs
+#: - minsize: (int) minimum number of elements in tuple
+#: - maxsize: (int) maximum number of elements in tuple
+TV_tuple = TypeValidator(tuple, check_tuple, None, None, write_arbsequence, 
+                         'tuple', node_repr_arbsequence, 
+                         node_read_tuple, node_check_arbsequence)
+
+
+def encode_frozenset(val:frozenset)->tuple[Hashable,...]:
+    return tuple(sorted(val, key=hash))
+
+
+def decode_frozenset(val:tuple[Hashable,...])->frozenset:
+    return frozenset(TypeValidator.decode_msgtup(v) for v in val[1:])
+
+
+#: :class:`TypeValidator` for forzen objects. 
+#: Uses :func:`check_frozenset` as check func.
+#: 
+#: - typedefs (type | TypeValidator) type or :class:`TypeValidator` applied to each element
+#: - minsize: (int) minimum number of elements in frozenset
+#: - maxsize: (int) maximum number of elements in frozenset
+TV_frozenset = TypeValidator(frozenset, check_frozenset, 
+                             encode_frozenset, decode_frozenset, write_arbsequence, 
+                             'frozenset', node_repr_arbsequence, 
+                             node_read_frozenset, node_check_arbsequence)
 
 
 def _check_array_dims(val:np.ndarray, dims:tuple[Union[int,slice],...], 
@@ -1286,12 +1605,12 @@ def _check_objectdtype(val:np.ndarray[np.object_], typedefs:Union[TypeValidator,
     return out if diff else val
 
 
-def check_array(val:np.ndarray, superdtype:Union[np.dtype,type]=None, dtype:np.dtype=None, 
+def check_array(val:np.ndarray, superdtype:np.dtype|type=None, dtype:np.dtype=None, 
                 mn:np.number=None, mx:np.number=None, square:bool=False,
                 mindim:int=None, maxdim:int=None, dims:tuple[Union[int,slice], ...]=None, 
-                typedefs:Union[type,TypeValidator,Sequence[Union[type,TypeValidator]]]=None, 
+                typedefs:type|TypeValidator|Sequence[type|TypeValidator]=None, 
                 **kwargs)->np.ndarray:
-    """
+    r"""
     Check function for TV_ndarray, check and if possible converts array to
     specifed dtype etc.
 
@@ -1299,7 +1618,7 @@ def check_array(val:np.ndarray, superdtype:Union[np.dtype,type]=None, dtype:np.d
     ----------
     val : np.ndarray
         Array to check.
-    superdtype : Union[np.dtype,type], optional
+    superdtype : np.dtype | type, optional
         Passed as second argument to np.issubdtype, allowable input dtypes. 
         The default is None.
     dtype : np.dtype, optional
@@ -1316,12 +1635,12 @@ def check_array(val:np.ndarray, superdtype:Union[np.dtype,type]=None, dtype:np.d
         Maximum number of dimensions. The default is None.
     dims : tuple[int|slice, ...], optional
         Definition of allowale size of each dimension. The default is None.
-    typedefs : Union[type,TypeValidator,Sequence[Union[type,TypeValidator]]], optional
+    typedefs : type | TypeValidator | Sequence[type | TypeValidator], optional
         **Only used if dtype is** ``np.object_``. Type definitions for each
         element of array.
         The default is None.
-    **kwargs : TYPE
-        DESCRIPTION.
+    **kwargs : Any
+        Ignored.
 
     Raises
     ------
@@ -1415,8 +1734,73 @@ def read_array(group:tb.Group, dct:dict, *args)->np.ndarray:
     return arr
 
 
+def encode_ndarray(val:np.ndarray)->dict[str:bytes|tuple[int,...]|str]:
+    r"""
+    Convert numpy array into a form encodable by |MsgPack|\ .
+    Converts array into tuple of (dtype, shape, bytes) where dtype is the 
+    dtype-string of the array's dtype', shape is the shape tuple of the array,
+    and bytes are the C-order bytes of the array.
+    
+    Not that object arrays cannot be stored in |MsgPack| format.
+
+    Parameters
+    ----------
+    val : np.ndarray
+        Array to store in |MsgPack| format.
+
+    Returns
+    -------
+    str
+        Datatype string.
+    tuple[int,...]
+        The shape tuple.
+    bytes
+        C-order bytes of numpy array.
+
+    """
+    return val.dtype.str, *val.shape, val.tobytes()
+
+
+def decode_ndarray(val:tuple[str,tuple[int,...],bytes])->np.ndarray:
+    """
+    Decode the tuple stored in |MsgPack| bytes into a numpy array.
+
+    Parameters
+    ----------
+    val : tuple[str,tuple[int,...],bytes]
+        tuple read from |MsgPack| object that was marked with 
+        (__type__, numpy.ndarray) .
+
+    Returns
+    -------
+    np.ndarray
+        Numpy array.
+
+    """
+    return np.frombuffer(val[-1], dtype=val[1]).reshape(val[2:-1])
+
+
 TypeValidator.register_grouptype('ndarray', read_array)
-TV_ndarray = TypeValidator(np.ndarray, check_array, write_array)
+
+#: :class:`TypeValidator` for numpy arrays.
+#: Uses :func:`check_array` as check func.
+#: It has the following options:
+#:
+#: - superdtype (numpy.dtype | type) valid type(s) of input
+#: - dtype (numpy.dtype) the datatype to which the array will be coerced
+#: - mn (Number) minimum value (inclusive) of all elements of the array
+#: - mx (Number) maximum value (inclusive) of all elements of the array
+#: - square (bool) If :code:`True` then all dimensions of the array 
+#:   must be the same size. The default is False
+#: - mindim (int) minimum number of dimensions of the array.
+#: - maxdim (int) maximum number of dimensions of the array.
+#: - dims (tuple[int|slice,...]) specification for the size of each dimension of
+#:   the array. Single Elipsis is allowed for variable dimensioned arrays.
+#: - typedefs (type | TypeValidator | Sequence[type | TypeValidator])
+#:   only for arrays where ``dtype=np.object_``, if a type/TypeValidator, then
+#:   all elements of array must match, if specified as Sequence, then each element
+#:   must match the cooresponding type.
+TV_ndarray = TypeValidator(np.ndarray, check_array, encode_ndarray, decode_ndarray, write_array)
 
 
 def _tupledict_fromorder(val:Union[dict,tupledict,Sequence[tuple[str,Any]]], 
@@ -1454,7 +1838,6 @@ def _get_tupledictargs(val:Any)->tupledict|Sequence[tuple[str,Any]]:
             if all(c==1 for c in Counter((v[0] for v in val)).values()):
                 return val
     return None
-    
 
 
 def _tupledict_fromany(val:tuple[str,Any]|dict|tupledict)->tupledict:
@@ -1636,12 +2019,67 @@ def node_read_tupledict(val:str)->tupledict:
                        for sub in val.split('__')))
 
 
+def encode_tupledict(val:tupledict)->tuple[tuple[str,Any],...]:
+    """
+    Encoder for converting :class:`tupledict <smfbursts.datamodel.utils.tupledict>`
+    into tuple for storing in |MsgPack| bytes.
+
+    Parameters
+    ----------
+    val : tupledict
+        :class:`tupledict <smfbursts.datamodel.utils.tupledict>` to convet to
+        tuple to encode in |MsgPack| bytes.
+
+    Returns
+    -------
+    tuple[tuple[str,Any],...]
+        Tuple of tuples of key:value pairs in 
+        :class:`tupledict <smfbursts.datamodel.utils.tupledict>` maintaining the
+        order.
+
+    """
+    return tuple((k, TypeValidator.encode_msgtup(v)) for k, v in val)
+
+
+def decode_tupledict(val:tuple[tuple[str,Any],...])->tupledict:
+    """
+    Decode tuple from |MsgPack| into 
+    :class:`tupledict <smfbursts.datamodel.utils.tupledict>`.
+
+    Parameters
+    ----------
+    val : tuple[tuple[str,Any],...]
+        tuple of key:value pairs to convert into
+        :class:`tupledict <smfbursts.datamodel.utils.tupledict>`.
+
+    Returns
+    -------
+    tupledict
+        Converted value.
+
+    """
+    return tupledict(*((k, TypeValidator.decode_msgtup(v)) for k, v in val[1:]))
+
+
 TypeValidator.register_grouptype('tupledict', read_tupledict)
-TV_tupledict = TypeValidator(tupledict, check_tupledict, write_tupledict, 'tupledict', node_repr_tupledict, node_read_tupledict)
+
+#: :class:`TypeValidator` for :class:`tupledict <smfbursts.datamodel.utils.tupledict>`.
+#: Uses :func:`check_tupledict` as check function.
+#: Has the following options:
+#: 
+#: - order: (Sequence[str]) the order of keys in tupledict, values will be coerced into this order
+#: - required: (set[str]) the required keys
+#: - typedefs: (dict[str:TypeValidator] | TypeValidator) requied type(s) of each key
+#: - defaults: (dict[str:Any]) Default values, if value not present in input,
+#:   fill with the default value.
+TV_tupledict = TypeValidator(tupledict, check_tupledict,
+                             encode_tupledict, decode_tupledict, write_tupledict,
+                             'tupledict', node_repr_tupledict, node_read_tupledict)
 
 _pycode_subtypes = dict()
 
-PyCode = Union[Callable,type]
+#: Typehint for objects that can be stored/specified as PyCode
+PyCode = Callable|type
 
 
 def check_PyCode(val:PyCode, subtype:Hashable=None, **kwargs)->PyCode:
@@ -1652,7 +2090,7 @@ def check_PyCode(val:PyCode, subtype:Hashable=None, **kwargs)->PyCode:
     ----------
     val : PyCode
         Registered PyCode object.
-    subtype : Hashable, optional
+    subtype : str, optional
         To which pycode subtype the PyCode must belong. The default is None.
     **kwargs 
         Ignored but necessary so TV_PyCode can have additional validators etc.
@@ -1781,11 +2219,57 @@ def node_check_pycode(val:PyCode)->bool:
     return True
 
 
-TV_PyCode = register_byteslike(Callable, check_PyCode, dread_PyCode, dwrite_PyCode, 'pycode', 
+def encode_pycode(val:PyCode)->tuple[str,]:
+    """
+    Encoder for PyCode objects, convert PyCode into tuple with single string
+    that can be stored in |MsgPack| bytes.
+
+    Parameters
+    ----------
+    val : PyCode
+        PyCode object to store in |MsgPack| bytes.
+
+    Returns
+    -------
+    tuple[str]
+        String name of val, suitable for storing in |MsgPack|.
+
+    """
+    return (_type_name(val), )
+
+
+def decode_pycode(val:tuple[str,str])->PyCode:
+    """
+    Decoder for PyCode, reads |MsgPack| stored tuple as PyCode.
+
+    Parameters
+    ----------
+    val : tuple[str,str]
+        |MsgPack| stored tuple to convert to PyCode.
+
+    Returns
+    -------
+    PyCode
+        PyCode object specifed by val.
+
+    """
+    return TypeValidator._grouptypes['byteslike']['pycode'][val[1]]
+
+
+#: :class:`TypeValidator` for PyCode objects 
+#: (typically Table classes or functions associated with Params)
+#: Uses :func:`check_PyCode` as check func.
+#: It has the following options:
+#:
+#: - subtype (str) requires subtype of PyCode, usually associaed with a given Param
+TV_PyCode = register_byteslike(Callable, check_PyCode, encode_pycode, decode_pycode, 
+                               dread_PyCode, dwrite_PyCode, 'pycode', 
                                node_repr_pycode, node_read_pycode, node_check_pycode, name='pycode')
+TypeValidator._encoders['pycode'] = encode_pycode
+TypeValidator._decoders['pycode'] = decode_pycode
 
 
-def register_PyCode(pycode:PyCode, subtype:Hashable=None, subval:Any=None):
+def register_PyCode(pycode:PyCode, subtype:Hashable=None, subval:Any=None)->None:
     """
     Register (make new entry in dictionary of PyCode objects) a new python function
     or class as "PyCode".
@@ -1926,7 +2410,52 @@ def register_type(type_:type)->None:
     TypeValidator.register_groupclass('byteslike', 'type', _type_name(type_), type_)
 
 
-TV_type = register_byteslike(type, check_type, dread_type, dwrite_type, name='type')
+def encode_type(val:type)->tuple[str,]:
+    """
+    Encoder for type objects, convert type into tuple with single string
+    that can be stored in |MsgPack| bytes.
+
+    Parameters
+    ----------
+    val : type
+        type object to store in |MsgPack| bytes.
+
+    Returns
+    -------
+    tuple[str]
+        String name of val, suitable for storing in |MsgPack|.
+
+    """
+    return _type_name(val), 
+
+
+def decode_type(val:dict[str:str])->type:
+    """
+    Decoder for type, reads |MsgPack| stored tuple as type.
+
+    Parameters
+    ----------
+    val : tuple[str,str]
+        |MsgPack| stored tuple to convert to type.
+
+    Returns
+    -------
+    type
+        type object specifed by val.
+
+    """
+    return TypeValidator._grouptypes['byteslike']['type'][val[1]]
+
+#: :class:`TypeValidator` that specifies a Python type object, 
+#: Uses :func:`check_type` as check func.
+#: Has the following options:
+#: 
+#: - subclass: (str) pass a type that allowed types must be subclasses of, The default is None.
+#: - warn: (bool) throw warning if the type passed is not registered. The default is False
+TV_type = register_byteslike(type, check_type, encode_type, decode_type, dread_type, dwrite_type, name='type')
+TypeValidator._encoders['type'] = encode_type
+TypeValidator._decoders['type'] = decode_type
+
 
 register_type(int)
 register_type(float)
@@ -1943,7 +2472,8 @@ def _typewithnodename(val:type, **kwargs)->type:
         raise TypeError(f"{val} does not have a node name representation")
     return val
 
-
+#: Sub- :class:`TypeValidator` of :attr:`TV_type` that restricts valid types to
+#: those which objects thereof have a nodename.
 TV_typewithnodename = TV_type(validator=_typewithnodename)
 
 
@@ -1954,7 +2484,7 @@ def check_dtype(val:np.dtype, size:int=None, kinds:tuple[str,...]=None, **kwargs
     Parameters
     ----------
     val : np.dtype
-        DESCRIPTION.
+        numpy datatype to encode.
     size : int, optional
         Number of bytes in dtype. The default is None.
     kinds : tuple[str,...], optional
@@ -2018,7 +2548,51 @@ def dwrite_dtype(val:np.dtype)->bytes:
     return val.str.encode()
 
 
-TV_dtype = register_byteslike(np.dtype, check_dtype, dread_dtype, dwrite_dtype)
+def encode_dtype(val:np.dtype)->tuple[str,]:
+    """
+    Encoder for numpy.dtype objects, for storing in |MsgPack| bytes.
+    Converts to tuple representation.
+
+    Parameters
+    ----------
+    val : np.dtype
+        numpy dtype to store in |MsgPack| bytes.
+
+    Returns
+    -------
+    tuple[str,]
+        tuple to encode in |MsgPack| bytes.
+
+    """
+    return val.str, 
+
+
+def decode_dtype(val:tuple[str,str])->np.dtype:
+    """
+    Convert tuple from |MsgPack| bytes into numpy dtype.
+
+    Parameters
+    ----------
+    val : tuple[str,str]
+        |MsgPack| converted value to convert to numpy.dtype.
+
+    Returns
+    -------
+    np.dtype
+        numpy dtype retrieved from |MsgPack| tuple.
+
+    """
+    return np.dtype(val[1])
+
+
+#: :class:`TypeValidator` for numpy.dtype objects.
+#: Uses :func:`check_dtype` as check func.
+#: It has the following options:
+#: 
+#: - size (int) number of bytes in dtype
+#: - kinds (tuple[str, ...]) Valid kinds (dtype.kind values)
+TV_dtype = register_byteslike(np.dtype, check_dtype, encode_dtype, decode_dtype, 
+                              dread_dtype, dwrite_dtype)
 
 
 class _ImData(_DataLike):
@@ -2042,10 +2616,11 @@ class _ImData(_DataLike):
     _hashskip = tuple() #: values that need not be considered in equality or hashing
     _typeconversions:ClassVar[ImDict[str,Union[TypeValidator,type]]] = ImDict()
     #: stores all subclasses of _ImData, subclasses MUST NOT overwrite previous names
-    _registered:ClassVar[FixedDict[str,"_ImData"]] = FixedDict() 
+    _registered:ClassVar[FixedDict[str,"_ImData"]] = FixedDict()
 
     def __init_subclass__(cls):
         cls._registered[_type_name(cls)] = cls
+        TV_ImData.add_subtype(cls)
         
     def __new__(cls, *args, **kwargs):
         obj = object.__new__(cls)
@@ -2069,7 +2644,7 @@ class _ImData(_DataLike):
             Key:value pairs of fields to replace in new copy. The default is None.
         pop : tuple[str, ...], optional
             Fields to remove from new _ImData. The default is None.
-        _strict : TYPE, optional
+        _strict : bool, optional
             If :code:`True` peform type validation of new object, set to :code:`False`
             only if confident that new fields are valid. The default is True.
 
@@ -2128,7 +2703,7 @@ class _ImData(_DataLike):
 
         Returns
         -------
-        "_ImData"
+        _ImData
             New object with attribute attr replaced.
 
         """
@@ -2163,16 +2738,14 @@ class _ImData(_DataLike):
         super(_ImData, self).__delattr__(attr)
 
     def __hash__(self):
-        return _const_hash(tuple((key, _const_hash(_tuple_arr_tdct(val))) 
-                                 for key, val in self.items(skip=self._hashskip)))
+        return hash(TypeValidator.encode_msg(self))
 
     def __eq__(self, other):
         if type(self) == type(other):
-            if _const_hash(self) == _const_hash(other):
-                return all(_eq(v, other[k]) for k, v in self.items() if k not in self._hashskip)
+            return TypeValidator.encode_msg(self) == TypeValidator.encode_msg(other)
         return False
 
-    def write_group(self, group:tb.Group, name:Union[str,None]=None)->tb.Group:
+    def write_group(self, group:tb.Group, name:str|None=None)->tb.Group:
         """
         Write object into ``group/name`` 
 
@@ -2180,7 +2753,7 @@ class _ImData(_DataLike):
         ----------
         group : tb.Group
             Group in which to create group `name` is created that represents self.
-        name : Union[str,None], optional
+        name : str | None, optional
             Name to give group representing self. The default is None.
 
         Returns
@@ -2258,6 +2831,69 @@ class _ImData(_DataLike):
         for key in (k.decode() for k in group.slots_.read()):
             kwargs[key] = TypeValidator.read_any(group[key])
         return cls(**kwargs)
+    
+    @property
+    def encode_msg(self)->bytes:
+        """Generate |MsgPack| encoded representation of self"""
+        return TypeValidator.encode_msg(self)
+    
+    def encode_group(self, group:tb.Group, name:str)->tb.Array:
+        """
+        Write the |MsgPack| bytes representation of object to HDF5 group.
+
+        Parameters
+        ----------
+        group : tb.Group
+            Group in which to create bytes array.
+        name : str
+            Name of bytes array to crate.
+
+        Returns
+        -------
+        tb.Array
+            Tables bytes array of created array.
+
+        """
+        file = group._v_file
+        code = TypeValidator.encode_msg(self)
+        return file.create_array(group, name, code, title=_type_name(type(self)))
+    
+    @classmethod
+    def decode_msg(cls, msg:bytes)->"_ImData":
+        """
+        Convert |MsgPack| encoded bytes to its smfbursts object
+
+        Parameters
+        ----------
+        msg : bytes
+            |MsgPack| encoded smfbursts object.
+
+        Returns
+        -------
+        _ImData
+            smfbursts object.
+
+        """
+        return TypeValidator.decode_msg(msg)
+    
+    @classmethod
+    def decode_group(cls, group:tb.Array)->"_ImData":
+        """
+        Read a HDF5 group as a smfbursts object 
+        (must be |MsgPack| encoded bytes array)
+
+        Parameters
+        ----------
+        group : tb.Array
+            Bytes array group representing smfbursts object.
+
+        Returns
+        -------
+        _ImData
+            smfbursts object.
+
+        """
+        return TypeValidator.decode_msg(group.read())
 
 
 def check_ImData(val:_ImData, subclass:type=None, **kwargs):
@@ -2270,8 +2906,8 @@ def check_ImData(val:_ImData, subclass:type=None, **kwargs):
         Value to check.
     subclass : type, optional
         val must be subclass of this, if not None. The default is None.
-    **kwargs : TYPE
-        DESCRIPTION.
+    **kwargs : Any
+        Ignored.
 
     Raises
     ------
@@ -2333,5 +2969,55 @@ def read_ImData(group:tb.Group, dct:dict)->_ImData:
     return _ImData.load_group(group)
 
 
+def encode_imdata(val:_ImData)->tuple[tuple[str,Any]]:
+    """
+    Encoder for :class:`_ImData` objects to convert into tuple representation
+    storable in |MsgPack| bytes.
+
+    Parameters
+    ----------
+    val : _ImData
+        Data to store in tuple for |MsgPack| bytes.
+
+    Returns
+    -------
+    tuple[tuple[str,Any]]
+        tuple of key:value tuples for storage in |MsgPack| bytes.
+
+    """
+    return tuple((k, TypeValidator.encode_msgtup(v)) for k, v in val.items(skip=val._hashskip))
+
+
+def decode_imdata(val:tuple[tuple[str,Any]])->_ImData:
+    """
+    Decoder for :class:`_ImData` objects, converts |MsgPack| read tuple into
+    subclass of :class:`_ImData`.
+
+    Parameters
+    ----------
+    val : tuple[tuple[str,Any]]
+        tuple read from |MsgPack| bytes to convert into the :class:`_ImData` object
+        it represents..
+
+    Returns
+    -------
+    _ImData
+        :class:`_ImData` subclass read from |MsgPack| converted tuple.
+
+    """
+    tp = _ImData._registered[val[0]]
+    return tp(**{k:TypeValidator.decode_msgtup(v) for k, v in val[1:]})
+
+
 TypeValidator.register_grouptype('ImData', read_ImData)
-TV_ImData = TypeValidator(_ImData, check_ImData, write_ImData)
+
+#: :class:`TypeValdiator` for subclasses of :class:`_ImData`
+#: These are most commonly 
+#: :class:`Param <smfbursts.datamodel.tables.Param>`, 
+#: :class:`Column <smfbursts.datamodel.tables.Column>`, and
+#: :class:`GateGroup <smfbursts.datamodel.tables.GateGroup>` objects.
+#: This uses :func:`check_ImData` as it's check func.
+#: The options are:
+#:
+#: - subclass (type) the subclass that the input must belong to
+TV_ImData = TypeValidator(_ImData, check_ImData, encode_imdata, decode_imdata, write_ImData)

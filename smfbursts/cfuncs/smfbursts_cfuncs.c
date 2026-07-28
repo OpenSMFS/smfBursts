@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 #include <math.h>
 
@@ -127,10 +128,10 @@ static PyObject* smfbursts_cfuncs_burstsearch(PyObject* self, PyObject* args, Py
 	char *kwlist[] = {"times", "dets", "periods", "bg", "clk_p", "det_ids", "m", "F", "c", "fuse", "bg_is_thresh", "alloc_size", "ncore", NULL};
 	PyObject *pytimes = NULL, *pydets = NULL, *pyperiods = NULL, *pybg = NULL, *pydetids = NULL;
 	int64_t m = 10;
-	double clk_p = NAN, F = 6.0, c = -1.0;
+	double clk_p = NAN, F = 6.0, c = -1.0, fuse = 0.0;
 	Py_ssize_t alloc_size = 512, ncore = 8;
-	int fuse = TRUE, asT = FALSE;
-	if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOOOd|OLddppnn:burstsearch", kwlist, &pytimes, &pydets, &pyperiods, &pybg, &clk_p, &pydetids, &m, &F, &c, &fuse, &asT, &alloc_size, &ncore)){
+	int asT = FALSE;
+	if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOOOd|OLdddpnn:burstsearch", kwlist, &pytimes, &pydets, &pyperiods, &pybg, &clk_p, &pydetids, &m, &F, &c, &fuse, &asT, &alloc_size, &ncore)){
 		return NULL;
 	}
 	// check for invalid values
@@ -144,6 +145,10 @@ static PyObject* smfbursts_cfuncs_burstsearch(PyObject* self, PyObject* args, Py
 	}
 	if (clk_p <= 0.0){
 		PyErr_SetString(PyExc_ValueError, "clk_p must be positive");
+		return NULL;
+	}
+	if ((fuse < 0.0) && (fuse != -1.0)){
+		PyErr_SetString(PyExc_ValueError, "fuse must be -1.0 or non-negative");
 		return NULL;
 	}
 	if (alloc_size < 1){
@@ -184,7 +189,7 @@ static PyObject* smfbursts_cfuncs_burstsearch(PyObject* self, PyObject* args, Py
 	periods = (int64_t*) PyArray_DATA(npperiods);
 	bg      = (double*)  PyArray_DATA(npbg);
 	// if det_ids is included, extract array, otherwise make detids all detectors
-	if (pydetids != NULL){
+	if ((pydetids != NULL)&&(pydetids != Py_None)){
 		npdetids = (PyArrayObject*) PyArray_FROMANY(pydetids, NPY_UINT8, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
 		if (npdetids == NULL) goto decrefs;
 		dsize = (int64_t) PyArray_DIM(npdetids, 0);
@@ -222,20 +227,24 @@ static PyObject* smfbursts_cfuncs_burstsearch(PyObject* self, PyObject* args, Py
 	PyObject *pystarts = NULL;
 	PyObject *pystops = NULL;
 	if (bursts->size != 0){
-		pystarts = PyArray_SimpleNewFromData(1, dims, NPY_INT64, bursts->starts);
-		pystops= PyArray_SimpleNewFromData(1, dims, NPY_INT64, bursts->stops);
+		//~ pystarts = PyArray_SimpleNewFromData(1, dims, NPY_INT64, bursts->starts);
+		//~ pystops= PyArray_SimpleNewFromData(1, dims, NPY_INT64, bursts->stops);
+		pystarts = PyArray_EMPTY(1, dims, NPY_INT64, 0);
+		pystops = PyArray_EMPTY(1, dims, NPY_INT64, 0);
 		if ((pystarts == NULL) || (pystops == NULL)){
 			free_bursts_fields(bursts);
 			Py_XDECREF(pystarts);
 			pystarts = NULL;
 			Py_XDECREF(pystops);
 			pystops = NULL;
+			goto decrefs;
 		}
-		PyArray_ENABLEFLAGS((PyArrayObject*) pystarts, NPY_ARRAY_OWNDATA);
-		PyArray_ENABLEFLAGS((PyArrayObject*) pystops, NPY_ARRAY_OWNDATA);
+		else{
+			memcpy(PyArray_DATA((PyArrayObject*)pystarts), bursts->starts, sizeof(int64_t)*bursts->size);
+			memcpy(PyArray_DATA((PyArrayObject*)pystops), bursts->stops, sizeof(int64_t)*bursts->size);
+		}
 	}
 	else{
-		free_bursts_fields(bursts);
 		pystarts = PyArray_ZEROS(1, dims, NPY_INT64, FALSE);
 		pystops = PyArray_ZEROS(1, dims, NPY_INT64, FALSE);
 		if ((pystarts == NULL) || (pystops == NULL)){
@@ -245,6 +254,7 @@ static PyObject* smfbursts_cfuncs_burstsearch(PyObject* self, PyObject* args, Py
 			pystops = NULL;
 		}
 	}
+	free_bursts_fields(bursts);
 	if (bursts != NULL){
 		free(bursts);
 		bursts = NULL;
@@ -465,16 +475,21 @@ static PyObject* smfbursts_cfuncs_burstgate(PyObject* self, PyObject* args, PyOb
 	PyArrayObject *outstarts = NULL, *outstops = NULL;
 	const npy_intp dims[] = {(npy_intp) outbursts->size, };
 	if (outbursts->size != 0){
-		outstarts = (PyArrayObject*) PyArray_SimpleNewFromData(1, dims, NPY_INT64, outbursts->starts);
-		outstops= (PyArrayObject*) PyArray_SimpleNewFromData(1, dims, NPY_INT64, outbursts->stops);
+		//~ outstarts = (PyArrayObject*) PyArray_SimpleNewFromData(1, dims, NPY_INT64, outbursts->starts);
+		//~ outstops= (PyArrayObject*) PyArray_SimpleNewFromData(1, dims, NPY_INT64, outbursts->stops);
+		outstarts = (PyArrayObject*) PyArray_EMPTY(1, dims, NPY_INT64, 0);
+		outstops= (PyArrayObject*) PyArray_EMPTY(1, dims, NPY_INT64, 0);
 		if ((outstarts == NULL) || (outstops == NULL)){
 			free_bursts_fields(outbursts);
 			Py_XDECREF(outstarts);
 			Py_XDECREF(outstops);
 			goto decrefs;
 		}
-		PyArray_ENABLEFLAGS((PyArrayObject*) outstarts, NPY_ARRAY_OWNDATA);
-		PyArray_ENABLEFLAGS((PyArrayObject*) outstops, NPY_ARRAY_OWNDATA);
+		memcpy(PyArray_DATA(outstarts), outbursts->starts, sizeof(int64_t)*outbursts->size);
+		memcpy(PyArray_DATA(outstops), outbursts->stops, sizeof(int64_t)*outbursts->size);
+		free_bursts_fields(outbursts);
+		//~ PyArray_ENABLEFLAGS((PyArrayObject*) outstarts, NPY_ARRAY_OWNDATA);
+		//~ PyArray_ENABLEFLAGS((PyArrayObject*) outstops, NPY_ARRAY_OWNDATA);
 	}
 	else{
 		outstarts = (PyArrayObject*) PyArray_ZEROS(1, dims, NPY_INT64, FALSE);
@@ -547,8 +562,10 @@ static PyObject* smfbursts_cfuncs_fusebursts(PyObject* self, PyObject* args, PyO
 		outstops = (PyArrayObject*) PyArray_ZEROS(1, dims, NPY_INT64, FALSE);
 	}
 	else{
-		outstarts = (PyArrayObject*) PyArray_SimpleNewFromData(1, dims, NPY_INT64, outbursts.starts);
-		outstops = (PyArrayObject*) PyArray_SimpleNewFromData(1, dims, NPY_INT64, outbursts.stops);
+		//~ outstarts = (PyArrayObject*) PyArray_SimpleNewFromData(1, dims, NPY_INT64, outbursts.starts);
+		//~ outstops = (PyArrayObject*) PyArray_SimpleNewFromData(1, dims, NPY_INT64, outbursts.stops);
+		outstarts = (PyArrayObject*) PyArray_EMPTY(1, dims, NPY_INT64, 0);
+		outstops = (PyArrayObject*) PyArray_EMPTY(1, dims, NPY_INT64, 0);
 		if ((outstarts == NULL) || (outstops == NULL)){
 			 Py_XDECREF(outstarts);
 			 outstarts = NULL;
@@ -556,11 +573,14 @@ static PyObject* smfbursts_cfuncs_fusebursts(PyObject* self, PyObject* args, PyO
 			 outstops = NULL;
 			 goto decrefs;
 		}
-		PyArray_ENABLEFLAGS((PyArrayObject*) outstarts, NPY_ARRAY_OWNDATA);
-		PyArray_ENABLEFLAGS((PyArrayObject*) outstops, NPY_ARRAY_OWNDATA);
+		memcpy(PyArray_DATA(outstarts), outbursts.starts, sizeof(int64_t)*outbursts.size);
+		memcpy(PyArray_DATA(outstops), outbursts.stops, sizeof(int64_t)*outbursts.size);
+		//~ PyArray_ENABLEFLAGS((PyArrayObject*) outstarts, NPY_ARRAY_OWNDATA);
+		//~ PyArray_ENABLEFLAGS((PyArrayObject*) outstops, NPY_ARRAY_OWNDATA);
 	}
 	out = PyTuple_Pack(2, outstarts, outstops);
 	decrefs:
+	free_bursts_fields(&outbursts);
 	Py_XDECREF(npstarts);
 	Py_XDECREF(npstops);
 	return out;
@@ -718,6 +738,7 @@ static PyObject* smfbursts_cfuncs_burst_variance_analysis(PyObject* self, PyObje
 		out = PyArray_ZEROS(1, dims, NPY_DOUBLE, FALSE);
 		goto decrefs;
 	}
+	// get raw data pointers
 	uint8_t *dets = (uint8_t*) PyArray_DATA(npdets);
 	int64_t *istarts = (int64_t*) PyArray_DATA(npistarts);
 	int64_t *istops = (int64_t*) PyArray_DATA(npistops);
@@ -938,12 +959,142 @@ static PyObject* smfbursts_cfuncs_kde_photons(PyObject* self, PyObject* args, Py
 	}
 	decrefs:
 	Py_XDECREF(nptimes);
+	nptimes = NULL;
 	Py_XDECREF(nplocs);
+	nplocs = NULL;
 	if (err){
 		Py_XDECREF(out);
 		out = NULL;
 	}
 	return (PyObject*) out;
+}
+
+static PyObject* smfbursts_cfuncs_cpburstsearch(PyObject* self, PyObject* args, PyObject* kwargs){
+	char *kwlist[] = {"times", "dets", "periods", "bg", "sbr", "clk_p", "alpha", "beta", "det_ids", "fuse", "alloc_size", "ncore", NULL};
+	PyObject *pytimes = NULL, *pydets = NULL, *pyperiods = NULL, *pybg = NULL, *pysbr = NULL, *pydetids = NULL;
+	double clk_p = 5e-8, alpha = 1e-4, beta = 1e-2, fuse = 0.0;
+	Py_ssize_t alloc_size = 512, ncore = 8;
+	// parse input arguments as python function
+	if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOOOOd|ddOdnn:cpburstsearch", kwlist, &pytimes, &pydets, &pyperiods, &pybg, &pysbr, &clk_p, &alpha, &beta, &pydetids, &fuse, &alloc_size, &ncore)){
+		return NULL;
+	}
+	// Check that non-array arguments are within relevant ranges
+	if (ncore < 1){
+		PyErr_SetString(PyExc_ValueError, "must specify at least 1 core (ncore >= 1");
+		return NULL;
+	}
+	if (alloc_size < 1){
+		PyErr_SetString(PyExc_ValueError, "alloc_size must be greater than 1");
+		return NULL;
+	}
+	if ( fuse < 0.0){
+		PyErr_SetString(PyExc_ValueError, "fuse must be greater than 0");
+		return NULL;
+	}
+	if ((alpha <= 0.0) || (alpha >= 1.0)){
+		PyErr_SetString(PyExc_ValueError, "alpha must be in the open interval (0, 1)");
+		return NULL;
+	}
+	if ((beta <= 0.0) || (beta >= 1.0)){
+		PyErr_SetString(PyExc_ValueError, "beta must be in the open interval (0, 1)");
+		return NULL;
+	}
+	// Define pointers for input to processing
+	PyObject *out = NULL;
+	int64_t nphot, nper, dsize = 0; // number of photons, periods, and valid detectors respectively
+	int64_t *times = NULL, *periods = NULL; // pointers to times and periods arrays (access numpy arrays)
+	double *bg = NULL, *sbr = NULL; // pointers to background and signal to background arrays (access numpy arrays 
+	uint8_t *dets = NULL, *dset = NULL; // pointers to the detectors array, and array of detector ids to consider in search
+	Bursts *bursts = NULL; // where burstsearch_cp will allocate and store outputs
+	// Cast array inputs to the correct types of array 
+	PyArrayObject* nptimes = (PyArrayObject*) PyArray_FROMANY(pytimes, NPY_INT64, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
+	PyArrayObject* npdets = (PyArrayObject*) PyArray_FROMANY(pydets, NPY_UINT8, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
+	PyArrayObject* npperiods = (PyArrayObject*) PyArray_FROMANY(pyperiods, NPY_INT64, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
+	PyArrayObject* npbg = (PyArrayObject*) PyArray_FROMANY(pybg, NPY_DOUBLE, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
+	PyArrayObject* npsbr = (PyArrayObject*) PyArray_FROMANY(pysbr, NPY_DOUBLE, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
+	PyArrayObject *npdetids = (pydetids == NULL)||(pydetids == Py_None) ? NULL: (PyArrayObject*) PyArray_FROMANY(pydetids, NPY_UINT8, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
+	// if any error, go to decrefs, where all arrays decrefed and cleaned up
+	if ((nptimes == NULL)||(npdets == NULL)||(npperiods == NULL)||(npbg == NULL)||(npsbr == NULL)){goto decrefs;}
+	if (!((pydetids == NULL)||(pydetids == Py_None))){ // special check if detids not specified
+		if (npdetids == NULL) { goto decrefs; }
+	}
+	// get sizes of each type of array
+	nphot = (int64_t) PyArray_DIM(nptimes, 0);
+	nper = (int64_t) PyArray_DIM(npbg, 0);
+	// compare sizes of arrays with other that should have the same size, raise error if inconsistent
+	if (nphot != (int64_t) PyArray_DIM(npdets, 0)){
+		PyErr_SetString(PyExc_ValueError, "times and dets arrays must be the same size");
+		goto decrefs;
+	}
+	if (nper != (int64_t) PyArray_DIM(npsbr, 0)){
+		PyErr_SetString(PyExc_ValueError, "bg and sbr arrays must be the same size");
+		goto decrefs;
+	}
+	if (nper != (int64_t) (PyArray_DIM(npperiods, 0) - 1)){
+		PyErr_SetString(PyExc_ValueError, "periods array must be 1 element larger than bg and sbr arrays");
+		goto decrefs;
+	}
+	// get pointers to data in numpy arrays
+	times = (int64_t*) PyArray_DATA(nptimes);
+	dets = (uint8_t*) PyArray_DATA(npdets);
+	periods = (int64_t*) PyArray_DATA(npperiods);
+	bg = (double*) PyArray_DATA(npbg);
+	sbr = (double*) PyArray_DATA(npsbr);
+	if ((pydetids == NULL)||(pydetids == Py_None)){
+		for (int64_t i = 0; i < nphot; i++){ if (dets[i] > dsize) { dsize = (int64_t) dets[i]; } }
+		dsize++;
+		if ((dset = (uint8_t*) malloc(dsize * sizeof(uint8_t))) == NULL){
+			PyErr_SetString(PyExc_MemoryError, "insufficent memory to allocate dset array (how did this happend it should be tiny!)");
+			goto decrefs;
+		}
+		for (uint8_t i = 0; i < dsize; i++){ dset[i] = i; }
+	}
+	else {
+		dsize = (int64_t) PyArray_DIM(npdetids, 0);
+		dset = PyArray_DATA(npdetids);
+	}
+	// perform burst search
+	Py_BEGIN_ALLOW_THREADS;
+	if (burst_search_cp(alpha, beta, clk_p, nphot, times, dets, dsize, dset, nper, periods, bg, sbr, fuse, alloc_size, ncore, &bursts)){
+		PyErr_SetString(PyExc_MemoryError, "insufficent memory for all bursts found");
+		goto decrefs;
+	}
+	Py_END_ALLOW_THREADS;
+	// copy data to output numpy arrays
+	const npy_intp dims[] = {(npy_intp) bursts->size, };
+	PyArrayObject *npstarts = (PyArrayObject*) PyArray_EMPTY(1, dims, NPY_INT64, 0);
+	PyArrayObject *npstops = (PyArrayObject*) PyArray_EMPTY(1, dims, NPY_INT64, 0);
+	if ((npstarts == NULL)||(npstops == NULL)){
+		Py_XDECREF(npstarts);
+		Py_XDECREF(npstops);
+		PyErr_SetString(PyExc_MemoryError, "insufficent memory for output of bursts");
+		goto decrefs;
+	}
+	memcpy(PyArray_DATA(npstarts), bursts->starts, bursts->size * sizeof(int64_t));
+	memcpy(PyArray_DATA(npstops), bursts->stops, bursts->size * sizeof(int64_t));
+	// pack output into tuple
+	out = PyTuple_Pack(2, (PyObject*)npstarts, (PyObject*) npstops);
+	// Decref created numpy arrays
+	decrefs:
+	Py_XDECREF(nptimes);
+	nptimes = NULL;
+	Py_XDECREF(npdets);
+	npdets = NULL;
+	Py_XDECREF(npperiods);
+	npperiods = NULL;
+	Py_XDECREF(npbg);
+	npbg = NULL;
+	Py_XDECREF(npsbr);
+	npsbr = NULL;
+	if ((pydetids == NULL)||(pydetids == Py_None)){if (dset != NULL) {free(dset); dset = NULL;}}
+	Py_XDECREF(npdetids);
+	npdetids = NULL;
+	if (bursts != NULL){
+		free_bursts_fields(bursts);
+		free(bursts);
+		bursts = NULL;
+	}
+	return out;
 }
 
 static PyMethodDef smfbursts_cfuncs_funcs[] = {
@@ -991,10 +1142,31 @@ static PyMethodDef smfbursts_cfuncs_funcs[] = {
 		"istops: np.ndarray[np.int64]]n"
 		"    array of stop indexes (open) of bursts\n\n"},
 	{"burstsearch", (PyCFunction)smfbursts_cfuncs_burstsearch, METH_VARARGS|METH_KEYWORDS, 
-		"burstsearch(times, dets, periods, bg, clk_p, det_ids=None, m=10, F=6.0, c=-1, fuse=True, alloc_size=512, ncore=8)\n"
+		"burstsearch(times, dets, periods, bg, clk_p, det_ids=None, m=10, F=6.0, c=-1.0, fuse=0.0, alloc_size=512, ncore=8)\n"
 		"--\n\n"
-		"Determine first index of first time in times after start and\n"
-		"first time in times after stop\n\n"
+		"Perform sliding window burst search on data.\n"
+		"Iterates over all windows of consecutive photons of size :math;`m`\n"
+		"and if the instantanous rate excedes the computed threshold, it\n"
+		"is treated as a burst.\n\n"
+		"If ``bg_is_thresh=False`` the a burst is defined as any window\n"
+		"Where\n\n"
+		".. math::\n\n"
+		"    F*\\tau_{bg} \\leq \\frac{m-1-c}{\\Delta_{m}t_{i}}\n\n\n"
+		"If ``bg_is_thresh=True`` the a burst is defined as any window\n\n"
+		".. math::\n\n"
+		"    bg \\leq \\frac{m}{\\Delta_{m}t_{i}}\n\n\n"
+		"Note that the start/stop times are \"expanded\" such to included\n"
+		"the \"maximum\" degree so that if the first photon were moved\m"
+		"earlier, the above inequality would still hold true\n"
+		"and likewise, if the last photon where moved later, the\n"
+		"inequality would also still hold true.\n"
+		"This is done by defining\\:\n\n"
+		"#. If ``bg_is_thresh=False``\n\n"
+		"   :math:`b_{start} = t_{i_{first}+m} - (F\\tau_{bg})^{-1}`, and\n\n"
+		"   :math:`b_{stop} = t_{i_{last}} + (F\\tau_{bg})^{-1}`, or\n"
+		"#. If ``bg_thresh=True``\n\n" 
+		"   :math:`b_{start} = t_{i_{first}+m} - \\mathrm{Erlang}_{PPF}(P, k=m, \\lambda = \\tau_{bg}^{-1})^{-1}`\n\n"
+		"   :math:`b_{stop} = t_{i_{last}} + \\mathrm{Erlang}_{PPF}(P, k=m, \\lambda = \\tau_{bg}^{-1})^{-1}`\n\n\n"
 		"Parameters\n"
 		"----------\n"
 		"times: np.ndarray[np.int64]\n"
@@ -1020,12 +1192,63 @@ static PyMethodDef smfbursts_cfuncs_funcs[] = {
 		"    Practically the inverse is used, ie  the maximum time between\n"
 		"    m photons must be :math:`\\delta T_{m} = (m - 1 - c) / (F * bg)`\n"
 		"    The default is -1.0\n"
-		"fuse: bool, optional\n"
-		"    Whether to automatically fuse overlapping bursts. The default is True\n"
+		"fuse: float, optional\n"
+		"    Minimum delta between bursts to fuse (in seconds), \n"
+		"    if -1.0, do not fuse bursts.\n"
+		"    The default is 0.0\n"
 		"bg_is_thresh: bool, optional\n"
 		"    If True, ignore F and c, and treat bg array as maximum\n"
 		"    separation between m photons to be considered in a burst\n"
 		"    The default is False\n"
+		"alloc_size: int, optional\n"
+		"    The size of array to initially allocate for bursts,\n"
+		"    and the ammount by which the array is exteneded when number\n"
+		"    of bursts has reached the current size\n"
+		"    This parameter does not affect the results, but optimizes\n"
+		"    preallocation time. The default is 512\n"
+		"ncore: int, optional\n"
+		"    Number of threads to use in burst search. This parameter does\n"
+		"    not affect the results, only optimizes time, should be related\n"
+		"    to number of cores on the current system.\n"
+		"\n"
+		"Returns\n"
+		"-------\n"
+		"starts: np.ndarray[np.int64]\n"
+		"    (n,) shaped array of start indices\n"
+		"stops: np.ndarray[np.int64]\n"
+		"    (n,) shaped array of stop indices\n"
+		"\n"},
+	{"cpburstsearch", (PyCFunction)smfbursts_cfuncs_cpburstsearch, METH_VARARGS|METH_KEYWORDS, 
+		"cpburstsearch(times, dets, periods, bg, sbr, clk_p, alpha=0.0001, beta=0.01, det_ids=None, fuse=0.0, alloc_size=512, ncore=8)\n"
+		"--\n\n"
+		"Perform change point burst search.\n"
+		"This is a custom implementation of |Yang|.\n"
+		"This burst search presumes that photons are either the result\n"
+		"of background (:math:`H_{B}`) or a molecule, ie a burst (:math:`H_{0}`.\n"
+		"The :math:`alpha` and :math:`beta` parameters define the probabilities\n"
+		"of type I false positives, and type II false negatives respectively.\n\n"
+		".. |Yang| replace:: `Kai Zheng, Haw Yang. J. Phys. Chem. B 2005, 109, 46, 21930–21937 <https://doi.org/10.1021/jp0546047>`__\n\n"
+		"Parameters\n"
+		"----------\n"
+		"times: np.ndarray[np.int64]\n"
+		"    Arrival times of photons\n"
+		"dets: np.ndarray[np.uint8]\n"
+		"    detector indices of photons\n"
+		"periods: np.ndarray[np.int64]\n"
+		"    bins of background periods, size is 1 larger than number of periods\n"
+		"bg: np.ndarray[np.float64]\n"
+		"    background photon rate for given photon selection is photons/s\n"
+		"sbr: np.ndarray[np.float64]\n"
+		"    signal to background ratio of expected bursts.\n"
+		"clk_p: float\n"
+		"    time of single clock in seconds (ie unit of clocks, in s/clock)\n"
+		"alpha: float, optional\n"
+		"    Likelihood of false positive detection. The default is 0.0001.\n"
+		"beta: float, optional\n"
+		"    Likelihood of false negative detection. The default is 0.001.\n"
+		"det_ids: np.ndarray[np.uint8], optional\n"
+		"    array of all detector ids to include in burst search.\n"
+		"    Optional, default is None\n"
 		"alloc_size: int, optional\n"
 		"    The size of array to initially allocate for bursts,\n"
 		"    and the ammount by which the array is exteneded when number\n"
