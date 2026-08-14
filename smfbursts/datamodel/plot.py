@@ -32,12 +32,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from scipy.stats import gaussian_kde, sem
+# must import before other modules to prevent circular import
+from . import rcParams
 
 from .utils import fjit, fnumba, _dict_update
 from .tables import DataSet, DataSetList, Param, Column, Gate_, GateGroup
 from .multifit import FitFunc, unwrap_param
 
-from smfbursts import rcParams
+
 
 rcParams['plot.record'] = False
 

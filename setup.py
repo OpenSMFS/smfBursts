@@ -11,7 +11,6 @@ extension = [Extension("smfbursts.cfuncs", [smfdir+"burstsearch.c", smfdir+"smfb
                        include_dirs=[np.get_include()]),]
 
 setup(name='smfbursts',
-      version='1.0.1',
       ext_modules=extension,
       include_pakage_data = True,
       packages = ['smfbursts','smfbursts.cfuncs'])

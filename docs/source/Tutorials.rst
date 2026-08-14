@@ -11,8 +11,8 @@ They are long, but very informative.
     :caption: Full Tutorials
     :maxdepth: 1
 
-    BurstsTutorial
-    DataModelTutorial
+    notebooks/BurstsTutorial
+    notebooks/DataModelTutorial
 
 
 5 minute tutorials
@@ -27,11 +27,11 @@ Code in these should be pieced together to form a "full" type of analysis.
     :caption: 5 minute tutorials
     :maxdepth: 1
 
-    FRETHistTutorial
-    ESplotTutorial
-    FRETCorrectionsTutorial
-    BVATutorial
-    ETauTutorial
+    notebooks/FRETHistTutorial
+    notebooks/ESplotTutorial
+    notebooks/FRETCorrectionsTutorial
+    notebooks/BVATutorial
+    notebooks/ETauTutorial
 
 Migration guides
 ----------------
@@ -44,9 +44,9 @@ and below showing the ``smfbursts`` equivalent.
     :caption: Migration guide tutorials
     :maxdepth: 1
 
-    SelectingFRETPopulations_translation
-    ns-ALEX_translation
-    us-ALEX_translation
+    notebooks/SelectingFRETPopulations_translation
+    notebooks/ns-ALEX_translation
+    notebooks/us-ALEX_translation
 
 
 .. _fretbursts : `FRETBursts <https://fretbursts.readthedocs.io>`__

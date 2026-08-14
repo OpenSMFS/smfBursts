@@ -5,8 +5,9 @@
 # purpose init file
 """
 """
-
 from . import utils
+rcParams = utils.RCParam()
+
 from . import immutabledata
 from . import diskdict
 from . import tables

@@ -5,13 +5,13 @@ User Guides
     :caption: Core Concepts
     :maxdepth: 1
 
-    GatesTutorial
-    PhSelTutorial
-    BurstSearchTutorial
-    photonHDF5Tutorial
-    PlottingTutorial
-    MultiFitTutorial
-    FCStutorial
+    notebooks/GatesTutorial
+    notebooks/PhSelTutorial
+    notebooks/BurstSearchTutorial
+    notebooks/photonHDF5Tutorial
+    notebooks/PlottingTutorial
+    notebooks/MultiFitTutorial
+    notebooks/FCStutorial
 
 
 

@@ -8,10 +8,11 @@ Utility functions.
 """
 import weakref
 from itertools import chain, product, repeat
-from collections.abc import Callable, Sequence, Iterator, Iterable, Hashable
+from collections.abc import Callable, Sequence, Iterator, Iterable, Hashable, Mapping
 from textwrap import wrap
 from typing import ClassVar, Any, Literal
 from numbers import Integral, Number, Real
+import contextlib
 import math
 import warnings
 
@@ -1812,9 +1813,114 @@ def weakref_alive_test(ref:None|weakref.ReferenceType)->bool:
     """
     if ref is None:
         return False
-    return ref() is not None
+    return ref() is not None        
 
 
+class RCParam(dict):
+    """
+    Basic class for implementing an rcParams (runtime configuration)-like behavior.
+    Class is based on dict, and assumes nested '.' separated keys.
+    """
+    def __init__(self, *args, **kwargs):
+        self._restore:list[dict[str:Any]] = list()
+        self._remove:list[set[str]] = list()
+        self.update(*args, **kwargs)
+
+    def __getitem__(self, key:str):
+        if dict.__contains__(self, key):
+            return dict.__getitem__(self, key)
+        if not isinstance(key, str):
+            raise TypeError("RCParam keys must be strings")
+        elif key.startswith('.') or key.endswith('.') or '..' in key:
+            raise ValueError("keys must be strings with single '.' separators")
+        kd = f'{key}.'
+        l = len(kd)
+        out = {k[l:]:v for k, v in self.items() if k.startswith(kd)}
+        if out:
+            return out
+        raise KeyError(f"{key} does not exist in dictionary")
+    
+    def __setitem__(self, key, value):
+        if not isinstance(key, str):
+            raise TypeError(f'RCParam keys must be strings, not {type(key).__name__}')
+        elif key.startswith('.') or key.endswith('.') or '..' in key:
+            raise ValueError("keys must be strings with single '.' separators")
+        if isinstance(value, Mapping):
+            for k, v in value.items():
+                if not isinstance(k, str):
+                    raise TypeError("RCParam keys must be strings, not {type(k).__name__}")
+                self[f'{key}.{k}'] = v
+        else:
+            kd = f'{key}.'
+            if not dict.__contains__(self, key) and any(k.startswith(kd) 
+                                                        for k in self.keys()):
+                raise ValueError(f"'{key}' must be set with subvalues ")
+            if self._restore:
+                if dict.__contains__(self, key):
+                    if key not in self._restore[-1]:
+                        self._restore[-1][key] = self[key]
+                else:
+                    self._remove[-1].add(key)
+            dict.__setitem__(self, key, value)
+
+    def __contains__(self, key):
+        if dict.__contains__(self, key):
+            return True
+        kd = f'{key}.'
+        return any(k.startswith(kd) for k in self.keys())
+
+    def update(self, *args, **kwargs):
+        if len(args) == 1 and isinstance(args[0], Mapping):
+            kwargs.update(args[0])
+        elif all(len(arg) == 2 for arg in args):
+            kwargs.update({k:v for k, v in args})
+        else:
+            raise TypeError("cannot recognize input format, must be keywords or dict")
+        for key, value in kwargs.items():
+            self[key] = value
+    
+    def get(self, key:Any, default=None)->Any:
+        if key in self:
+            return self[key]
+        return default
+    
+    def setdefault(self, key:str, default:Any=None)->Any:
+        if dict.__contains__(self, key):
+            return self[key]
+        else:
+            self[key] = default
+        return self[key]
+    
+    @contextlib.contextmanager
+    def temporary(self, vals:dict[str:Any])->"RCParam":
+        """
+        Initiate context manager for the given RCParam. New values provided
+        as dict (the only argument) will be restored after exciting context
+        manager.
+
+        Parameters
+        ----------
+        vals : dict[str:Any]
+            Dictionary of keys to use within context manager.
+        
+        Returns
+        -------
+        RCParam
+            The update :class:`RCParam` dictionary.
+
+        """
+        self._restore.append(dict())
+        self._remove.append(set())
+        try:
+            self.update(vals)
+            yield self
+        finally:
+            restore = self._restore.pop()
+            remove = self._remove.pop()
+            self.update(restore)
+            for key in remove:
+                dict.pop(self, key)
+    
 ###############################################################################
 ###################### Dynamic has-numba based decorators #####################
 ###############################################################################
