@@ -67,6 +67,9 @@ jobs:
           conda install -c conda-forge pip
           python -m pip install setuptools build
           conda install -c conda-forge pytest numpy numba scipy pandas matplotlib pytables msgpack-python phconvert
+      - name: Check Cache
+        shell: bash -l {0}
+        run: ls tests/data
       - name: Install Project
         shell: bash -l {0}
         run:
