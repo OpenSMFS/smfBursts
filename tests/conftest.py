@@ -87,6 +87,6 @@ def colstop(request):
 
 @pytest.fixture
 def data()->smf.PhotonData:
-    raw = smf.photonHDF5.load('HP3_TE300_SPC630.hdf5')
+    raw = smf.photonHDF5.load('data/HP3_TE300_SPC630.hdf5')
     data = smf.photonHDF5.regularize_dets(raw)
     return data
