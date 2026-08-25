@@ -1948,6 +1948,8 @@ class _fdummy:
         pass
     def __getitem__(self, item):
         pass
+    def __call__(self, *args, **kwargs):
+        pass
 
 
 _dummy = _fdummy()
