@@ -73,7 +73,7 @@ jobs:
           pip install .
       - name: Test Project
         shell: bash -l {0}
-        run:
+        run: |
           cd tests
           pytest
   BuildWheels:
