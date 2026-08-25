@@ -65,7 +65,7 @@ jobs:
         shell: bash -l {0}
         run: |
           conda install -c conda-forge pip
-          python -m pip install setutools build
+          python -m pip install setuptools build
           conda install -c conda-forge pytest numpy scipy pandas matplotlib pytables msgpack phconvert
       - name: Install Project
         shell: bash -l {0}
