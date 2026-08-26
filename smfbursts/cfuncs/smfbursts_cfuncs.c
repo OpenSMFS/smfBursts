@@ -1419,7 +1419,8 @@ static PyMethodDef smfbursts_cfuncs_funcs[] = {
 		"-------\n"
 		"np.ndarray[np.float64]\n"
 		"    Kernel Density for each time in locs or timesn\n"
-		}
+		},
+	{NULL, NULL, 0, NULL}
 };
 
 static struct PyModuleDef smfbursts_cfuncs_module =
