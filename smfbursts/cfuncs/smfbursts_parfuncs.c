@@ -23,7 +23,7 @@ static inline int64_t get_next_comp(PoolMutex *pool){
 #elif _WIN32
 	if (WaitForSingleObject(pool->comp_mutex, INFINITE) == WAIT_OBJECT_0)
 	{
-		cur_comp = period->cur_comp++;
+		cur_comp = pool->cur_comp++;
 		ReleaseMutex(pool->comp_mutex);
 	}
 #endif
@@ -297,7 +297,7 @@ int burst_search_sliding_window(int64_t m, double F, double clk_p, double c,
 		}
 	}
 	WaitForMultipleObjects((DWORD)ncore, tid, TRUE, INFINITE);
-	for (i = 0;  i < len; i++){
+	for (i = 0;  i < ncore; i++){
 		if (tid[i] != 0) {
 			CloseHandle(tid[i]);
 		}
@@ -436,7 +436,7 @@ int bursts_max_rate(int64_t m, double clk_p, int64_t nphot, int64_t *times, uint
 			tid[i] = CreateThread(NULL, 0, thread_max_rate, (LPVOID) &threads[i], 0, (LPDWORD)&windowsThreadId);
 	}
 	WaitForMultipleObjects((DWORD)ncore, tid, TRUE, INFINITE);
-	for (i = 0;  i < len; i++){
+	for (i = 0;  i < ncore; i++){
 		if (tid[i] != 0) {
 			CloseHandle(tid[i]);
 		}
@@ -579,7 +579,7 @@ int burst_variance_analysis(int64_t n, uint8_t *dets,
 			tid[i] = CreateThread(NULL, 0, thread_bva, (LPVOID) &threads[i], 0, (LPDWORD)&windowsThreadId);
 	}
 	WaitForMultipleObjects((DWORD)ncore, tid, TRUE, INFINITE);
-	for (i = 0;  i < len; i++){
+	for (i = 0;  i < ncore; i++){
 		if (tid[i] != 0) {
 			CloseHandle(tid[i]);
 		}
@@ -726,7 +726,7 @@ int burst_search_cp(double alpha, double beta, double clk_p,
 		tid[i] = CreateThread(NULL, 0, thread_cp_burst_search, (LPVOID) &threads[i], 0, (LPDWORD)&windowsThreadId);
 	}
 	WaitForMultipleObjects((DWORD)ncore, tid, TRUE, INFINITE);
-	for (i = 0;  i < len; i++){
+	for (i = 0;  i < ncore; i++){
 		if (tid[i] != 0) {
 			CloseHandle(tid[i]);
 		}
