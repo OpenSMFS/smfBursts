@@ -83,7 +83,7 @@ def make_bg(detdef:DetDef|PhotonDataS, period:float=60.0, tail_min:float=500e-6,
             start_at:Literal['time_min','zero','under','over']='time_min', 
             stop_at:Literal['under', 'over']='over', 
             **kwargs)->dict[str:Param|Column]:
-    """
+    r"""
     Create dictionary of stardard background analysis |Param| and |Column| s.
     
     Keys in output dictionary\:

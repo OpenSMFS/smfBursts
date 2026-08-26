@@ -221,10 +221,10 @@ class ImDict(dict):
     """
     def __setitem__(self, k, v):
         raise AttributeError("ImDict does not support assignment")
-    
+
     def update(self, *args, **kwargs):
         raise TypeError("update is disabled for fixed dict")
-        
+
     def pop(self, *args, **kwargs):
         raise TypeError("pop is disabled for fixed dict")
 
@@ -241,7 +241,7 @@ class FixedDict(dict):
         if isinstance(value, np.ndarray):
             value = make_immutable(value)
         super().__setitem__(key, value)
-    
+
     def update(self, *args, **kwargs):
         """
         Add new values to dictionary, works like update from built-in ``dict``.
@@ -251,7 +251,7 @@ class FixedDict(dict):
         if any((err:=k) in self for k in update.keys()):
             raise KeyError(f'{err} already set')
         super().update(update)
-    
+
     def pop(self, *args, **kwargs):
         raise TypeError("pop is disabled for fixed dict")
 
@@ -284,7 +284,7 @@ class tupledict(tuple):
                 raise ValueError("one or more keys repeated")
             iterable = args if not isinstance(args, dict) else args.items()
         return super().__new__(tupledict, (cls._verify_input(v) for v in iterable))
-    
+
     @classmethod
     def _verify_input(cls, value):
         """check each key:value pair, and convert if necessary"""
@@ -302,7 +302,7 @@ class tupledict(tuple):
         except Exception as e:
             raise TypeError(f"cannot hash {v}") from e
         return kn, v
-    
+
     @classmethod
     def from_order(cls, order:Sequence[str], *args:Any, defaults_:dict[str,Any]=None, **kwargs:Any)->"tupledict":
         r"""
@@ -493,7 +493,7 @@ class MutDict(dict):
 
     def _check_mut(self)->bool:
         """Check for any differences with original dictionary"""
-        return any(self[k].mut if isinstance(self[k], MutDict) else not _eq(self[k], v) 
+        return any(self[k].mut if isinstance(self[k], MutDict) else not _eq(self[k], v)
                    for k, v in self._orig.items())
 
     @property
@@ -502,7 +502,7 @@ class MutDict(dict):
         return self.added or self.removed or self._check_mut()
 
 
-def iter_funcinput(_slots:Sequence[str], _defaults:ImDict[str:Any|Callable[[],Any]], 
+def iter_funcinput(_slots:Sequence[str], _defaults:ImDict[str:Any|Callable[[],Any]],
                    _required:frozenset[str], *args, **kwargs)->Iterator[tuple[str,Any]]:
     r"""
     Iterator for parseing \*args, \*\*kwargs by the specification in _slots and _defaults.
@@ -630,7 +630,7 @@ class _DataLike:
     def class_fields(cls)->tuple[str,...]:
         """The allowed attributes of the object the object"""
         return tuple(slot for slot in cls.__slots__)
-    
+
     def __setattr__(self, attr, value):
         if attr not in self.__slots__:
             if hasattr(type(self), attr) and isinstance(getattr(type(self), attr), property) and getattr(type(self), attr).fset is not None:
@@ -639,16 +639,16 @@ class _DataLike:
                 raise AttributeError(f'{type(self).__name__} object has no attribute {attr}')
         else:
             super().__setattr__(attr, value)
-        
+
     def __getitem__(self, key):
         return getattr(self, key)
-    
+
     def __setitem__(self, key, value):
         self.__setattr__(key, value)
-    
+
     def __contains__(self, key):
         return key in self.__slots__ and hasattr(self, key)
-    
+
     def keys(self, skip:None|str|tuple[str,...]=None)->Iterator[str]:
         """
         Iterate over all attributes except those in skip.
@@ -666,7 +666,7 @@ class _DataLike:
         """
         skip = _tuple_kwarg(skip)
         yield from (key for key in self.__slots__ if hasattr(self, key) if key not in skip)
-    
+
     def values(self, skip:None|str|tuple[str,...]=None)->Iterator[Any]:
         """
         Iterate over values pairs in data.
@@ -683,7 +683,7 @@ class _DataLike:
 
         """
         yield from (getattr(self, key) for key in self.keys(skip=skip))
-    
+
     def items(self, skip:None|str|tuple[str,...]=None)->Iterator[tuple[str,Any]]:
         """
         Iterate over key:value pairs in data.
@@ -700,7 +700,7 @@ class _DataLike:
 
         """
         yield from ((key, getattr(self, key)) for key in self.keys(skip=skip))
-    
+
     def __repr__(self):
         rep = (f'{key} = {getattr(self, key)}' for key in self.keys())
         return f'{self.__class__}\n' +'\n'.join(chain.from_iterable(wrap(string, subsequent_indent='    ') 
@@ -795,14 +795,14 @@ class SequenceDefaults:
     """
     def __init__(self, **kwargs):
         self._kwargs = kwargs
-    
+
     def __getattr__(self, name):
         try:
             out = self[name]
         except KeyError:
             raise AttributeError(f"no attribute {name}")
         return out
-        
+    
     def __getitem__(self, key):
         if isinstance(key, str):
             if key in self._kwargs:
@@ -839,7 +839,7 @@ class SequenceDefaults:
                 else:
                     out.update({name:val})
         return out
-    
+
     def add(self, key:str, val:Any)->None:
         """
         Add a Sequence or dictionary to the SequenceDefaults
@@ -1161,7 +1161,7 @@ def _ascending_dict_to_tuple(spec:dict, start:int|None=1)->tuple|None:
     stop = max(spec.keys()) + 1
     return tuple(spec.get(i, None) for i in range(start, stop))
 
-    
+
 def _ascending_dict_to_tuple_strict(spec:dict, start:int=1)->tuple|None:
     """
     Build a tuple from a dictionary of ascending keys, 
@@ -1813,7 +1813,7 @@ def weakref_alive_test(ref:None|weakref.ReferenceType)->bool:
     """
     if ref is None:
         return False
-    return ref() is not None        
+    return ref() is not None
 
 
 class RCParam(dict):
@@ -1839,7 +1839,7 @@ class RCParam(dict):
         if out:
             return out
         raise KeyError(f"{key} does not exist in dictionary")
-    
+
     def __setitem__(self, key, value):
         if not isinstance(key, str):
             raise TypeError(f'RCParam keys must be strings, not {type(key).__name__}')
@@ -1878,19 +1878,19 @@ class RCParam(dict):
             raise TypeError("cannot recognize input format, must be keywords or dict")
         for key, value in kwargs.items():
             self[key] = value
-    
+
     def get(self, key:Any, default=None)->Any:
         if key in self:
             return self[key]
         return default
-    
+
     def setdefault(self, key:str, default:Any=None)->Any:
         if dict.__contains__(self, key):
             return self[key]
         else:
             self[key] = default
         return self[key]
-    
+
     @contextlib.contextmanager
     def temporary(self, vals:dict[str:Any])->"RCParam":
         """
@@ -1940,14 +1940,16 @@ def fjit(*args, **kwargs):
         return numba.jit(*args, **kwargs)
     else:
         return lambda x: x
-    
-    
+
+
 class _fdummy:
     """Echo type for when getting item or attr should return None"""
     def __getattr__(self, attr):
         pass
+
     def __getitem__(self, item):
         pass
+
     def __call__(self, *args, **kwargs):
         pass
 
@@ -1962,8 +1964,18 @@ class _fnumba:
     def __getattr__(self, attr):
         if has_numba:
             return getattr(numba, attr)
-        return _dummy
-    
+        return self
+
+    def __getitem__(self, key):
+        if has_numba:
+            return numba[key]
+        return self
+
+    def __call__(self, *args, **kwargs):
+        if has_numba:
+            return numba(*args, **kwargs)
+        return self
+
     @property
     def has_numba(self)->bool:
         return has_numba

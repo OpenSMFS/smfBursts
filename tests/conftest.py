@@ -85,15 +85,18 @@ def colstart(request):
 def colstop(request):
     return request.param
 
+
 @pytest.fixture
 def data()->smf.PhotonData:
     raw = smf.photonHDF5.load('data/HP3_TE300_SPC630.hdf5')
     data = smf.photonHDF5.regularize_dets(raw)
     return data
 
+
 @pytest.fixture
 def default_bg(data)->smf.Param:
     return smf.fretfactory.make_bg(data)['bg']
+
 
 @pytest.fixture
 def sper_bg(data)->smf.Param:
