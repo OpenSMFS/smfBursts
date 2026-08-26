@@ -4,7 +4,7 @@
 
 import pooch
 
-DATASET_DIR = u'.'
+DATASET_DIR = u'data'
 
 repo = pooch.create(path=DATASET_DIR, base_url='doi:10.5281/zenodo.20038738')
 repo.load_registry_from_doi()
