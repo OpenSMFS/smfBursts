@@ -280,7 +280,7 @@ int burst_search_sliding_window(int64_t m, double F, double clk_p, double c,
 #elif _WIN32
 	for (i = 0; i < ncore; i++){
 		if (asT){
-			if (fuse){
+			if ( fuse >= 0.0 ){
 				tid[i] = CreateThread(NULL, 0, thread_sliding_window_burst_search_T_fuse, (LPVOID) &threads[i], 0, (LPDWORD)&windowsThreadId);
 			}
 			else{
@@ -288,7 +288,7 @@ int burst_search_sliding_window(int64_t m, double F, double clk_p, double c,
 			}
 		}
 		else{
-			if (fuse){
+			if ( fuse >= 0.0 ){
 				tid[i] = CreateThread(NULL, 0, thread_sliding_window_burst_search_fuse, (LPVOID) &threads[i], 0, (LPDWORD)&windowsThreadId);
 			}
 			else{

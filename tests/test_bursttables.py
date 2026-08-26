@@ -124,10 +124,16 @@ def test_changepoint_constantsbr(data):
                                       'alpha':1e-4, 'beta':1e-2}, 
                          {'bg':bg})
 
-@pytest.fixture()
-def burstAll(data):
-    bg = smf.bg.make_bg_param(data)
-    return smf.Param(smf.Bursts, {'stream':smf.PhSel('all'), 'm':10, 'F':6.0}, {'bg':bg})
+@pytest.fixture(params=[{'func':smf.bursttables.burstsearch_mwindowF_bg , 'stream':smf.PhSel('all'), 'm':10, 'F':6.0}, 
+                        {'func':smf.bursttables.burstsearch_mwindowP_bg , 'stream':smf.PhSel('all'), 'm':10, 'P':0.95},
+                        {'func':smf.bursttables.burstsearch_changepoint_constantsbr, 'stream':smf.PhSel('all'), 'alpha':1e-4, 'beta':1e-2, 'sbr':20.0},
+                        {'func':smf.bursttables.burstsearch_changepoint_maxrate, 'stream':smf.PhSel('all'), 'alpha':1e-4, 'beta':1e-2, 'm':30}])
+def burstAll(data, request):
+    param = request.param
+    func = param['func']
+    bg = smf.bg.make_bg_param(data, period=60.0 if func in (smf.bursttables.burstsearch_mwindowF_bg,
+                                                            smf.bursttables.burstsearch_mwindowP_bg) else 3600.0)
+    return smf.Param(smf.Bursts, param, {'bg':bg})
 
 
 @pytest.fixture()
@@ -194,7 +200,7 @@ def test_burst_ratio_raw(data, burstAll):
 
 def test_meanT(data, burstAll):
     meanT = smf.Column(burstAll, 'meanT', smf.PhSel('all'))
-    assert np.all(np.diff(data.get_column(meanT)) > 0), "non-monotonic mean T"
+    assert np.all(np.diff(data.get_column(meanT)) > 0.0), "non-monotonic mean T"
 
 
 def test_mTdiff(data, burstAll):
