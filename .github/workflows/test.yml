@@ -99,7 +99,7 @@ jobs:
         uses: pypa/cibuildwheel@v4.2.0
         env:
           CIBW_SKIP: "cp310-win_arm64"
-          CIBW_TEST_REQUIRES: pytest numpy scipy pandas msgpack
+          CIBW_TEST_REQUIRES: pytest matplotlib
           CIBW_TEST_COMMAND: cd {package}/tests; pytest test_tables.py test_TypeValidator.py test_immutabledata.py test_diskdict.py test_gates.py test_phsel.py test_multifit.py
           CIBW_CACHE_PATH: $GITHUB_WORKSPACE/tests/data
       - uses: actions/upload-artifact@v4
