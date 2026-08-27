@@ -67,9 +67,6 @@ jobs:
           conda install -c conda-forge pip
           python -m pip install setuptools build
           conda install -c conda-forge pytest numpy numba scipy pandas matplotlib pytables msgpack-python phconvert
-      - name: Check Cache
-        shell: bash -l {0}
-        run: ls tests/data
       - name: Install Project
         shell: bash -l {0}
         run:
@@ -95,7 +92,7 @@ jobs:
         id: cache-action
         uses: actions/cache/restore@v6
         with:
-          path: tests/data
+          path: ./tests/data
           key: testfiles
           enableCrossOsArchive: true
       - name: Build wheels
