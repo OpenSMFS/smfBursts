@@ -1408,7 +1408,7 @@ static PyMethodDef smfbursts_cfuncs_funcs[] = {
 		"    Photons with same time not dropped from KDE computation.\n"
 		"func: int | Callable[[int,int,float],float], optional\n"
 		"    Integer index specifying which KDE function to use.\n\n"
-		"    - ``0`` laplace KDE :math:`exp( -|t_{j} - t_{i}| / \\tau)`, lim defaults to 5.0"
+		"    - ``0`` laplace KDE :math:`exp( -|t_{j} - t_{i}| / \\tau)`, lim defaults to 5.0\n"
 		"    - ``1`` gaussian KDE :math:`exp(-(t_{j}-t_{i})^2/(2*\tau^{2}))`, lim defaults to 3.0\n"
 		"    - ``2`` rectanular kde 1.0 if :math:`|t_{j}-t_{i}| < \\tau / 2` 0.0 otherwise\n\n\n"
 		"    Or a callable with the signature \n"

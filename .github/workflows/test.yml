@@ -104,6 +104,7 @@ jobs:
           CIBW_SKIP: "cp310-win_arm64"
           CIBW_TEST_REQUIRES: pytest numpy
           CIBW_TEST_COMMAND: python -m pytest {package}/tests
+          CIBW_CACHE_PATH: ./tests/data
       - uses: actions/upload-artifact@v4
         with:
           name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
