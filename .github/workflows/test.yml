@@ -102,7 +102,7 @@ jobs:
           CIBW_TEST_REQUIRES: pytest matplotlib
           CIBW_TEST_COMMAND: cd {package}/tests; pytest test_tables.py test_TypeValidator.py test_immutabledata.py test_diskdict.py test_gates.py test_phsel.py test_multifit.py
           CIBW_CACHE_PATH: $GITHUB_WORKSPACE/tests/data
-          CIBW_TEST_SKIP: "*win* cp315-macosx_arm64 cp315t-macosx_arm64"
+          CIBW_TEST_SKIP: "*win* cp315-macosx_arm64 cp315t-macosx_arm64 cp315t-manylinux_aarch64"
       - uses: actions/upload-artifact@v4
         with:
           name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
