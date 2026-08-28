@@ -1,0 +1,4 @@
+include LICENSE.txt
+include README.md
+include smfbursts/cfuncs/smfbursts_burstwise.h
+include smfbursts/fcs.py
