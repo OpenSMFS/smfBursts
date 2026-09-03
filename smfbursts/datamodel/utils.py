@@ -753,7 +753,7 @@ class _ImDataLike(_DataLike):
 
 def _dict_update(dct:dict, update:dict)->dict:
     """Return updated dictionary copy, used to combine dictionaries without changing originals"""
-    return {k:v for k, v in chain(dct.items(), update.items())}
+    return {k:v for k, v in chain(((k, v) for k, v in dct.items() if k not in update.values()), update.items())}
 
 
 def _return_update(dct:dict, update:dict)->dict:

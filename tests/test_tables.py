@@ -17,7 +17,6 @@ Prds, DSet = None, None
 
 def get_TableClass(name):
     for cname, imclass in TypeValidator.get_subgroup('byteslike', 'type').items():
-        print()
         if cname.split('.')[-1] == name:
             return imclass
     return None

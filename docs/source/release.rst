@@ -1,6 +1,13 @@
 Release Notes
 -------------
 
+(draft) 0.1.3
+-------------
+Internal alterations only
+
+- fix docstrings in cfuncs
+- Rewrite some utils functions to ensure concsistency across platforms
+
 0.1.2
 -----
 
