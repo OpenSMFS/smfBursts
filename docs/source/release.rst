@@ -1,8 +1,8 @@
 Release Notes
 -------------
 
-(draft) 0.1.3
--------------
+0.1.3
+-----
 Internal alterations only
 
 - fix docstrings in cfuncs
