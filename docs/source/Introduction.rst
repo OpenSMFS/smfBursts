@@ -4,27 +4,24 @@ Introduction
 Installation
 ------------
 
-In the future, smfBursts will be available through PIP and conda-forge,
-
-currently you can install smfBursts locally like so:
-
-
-.. code-block:: bash
-
-    git clone FretTables
-    cd FretTables
-    pip install -e .
-
-
-Eventually install
+Installation from PyPi is simple:
 
 .. code-block:: bash
 
     pip install smfbursts
 
+
+The repository is still under review for CondaForge, so the following hopefully will work in the future, but not now
+
 .. code-block:: bash
 
     conda install smfbursts -c conda-forge
+
+You can also install from source:
+
+.. code-block:: bash
+   pip install git+https://github.com/OpenSMFS/smfBursts.git
+
 
 
 Usage

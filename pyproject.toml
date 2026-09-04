@@ -10,7 +10,6 @@ build-backend = "setuptools.build_meta"
 name = "smfbursts"
 dynamic = ["version", ]
 authors = [
-    {name="Antonio Ingargiola", email="tritemio@gmail.com"}, 
     {name="Paul David Harris", email="harripd@gmail.com"}]
 description = "Burst analysis toolkit for single and multi-spot smFRET data."
 readme = "README.md"
