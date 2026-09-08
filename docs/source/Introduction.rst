@@ -20,6 +20,7 @@ The repository is still under review for CondaForge, so the following hopefully 
 You can also install from source:
 
 .. code-block:: bash
+
    pip install git+https://github.com/OpenSMFS/smfBursts.git
 
 

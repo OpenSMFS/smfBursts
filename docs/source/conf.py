@@ -11,7 +11,16 @@ from importlib.metadata import version as get_version
 project = 'smfBursts'
 copyright = '2026, Paul David Harris'
 author = 'Paul David Harris'
-release:str = '.'.join(get_version('smfbursts').split('.')[:3])
+
+def compute_release()->str:
+    subversions = get_version('smfbursts').split('.')
+    if len(subversions) <= 3:
+        return '.'.join(subversions)
+    vnum = [int(s) for s in subversions[:3]]
+    vnum[-1] -= 1
+    return '.'.join(str(n) for n in vnum)
+
+release:str = compute_release()
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

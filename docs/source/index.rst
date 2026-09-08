@@ -29,9 +29,11 @@ citations for each method used in the current environment.
 Current Install
 ---------------
 
-Install by downloading the git repo, navigating into the top level directory of said repo and running the following command.
+smfBursts can be installed with the simple command:
 
-``pip install .``
+``pip install smfbursts``
+
+It is currently still under review in conda-forge, but hopefully will be available there soon as well.
 
 Contents
 ========
