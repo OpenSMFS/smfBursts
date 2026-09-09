@@ -95,10 +95,10 @@ class Citation:
         The standard is to suply "bibtex" and "ris"styles.
     
     """
-    _prefered:ClassVar[str] = None
-    _tag:str
-    _citation:str
-    _styles:dict[str,str]
+    _prefered:ClassVar[str] = None #: prefered citation style, set by user
+    _tag:str #: tag associated with the given citation
+    _citation:str #: default name for ciation
+    _styles:dict[str,str] #: dictionary of citation type:citation string
     
     def __init__(self, tag:str=None, citation:str=None, 
                  styles:dict[str,str]=None):
@@ -313,8 +313,8 @@ class CitedReason:
     
     """
     __slots__ = ('_cites', '_purpose')
-    _cites:Citation
-    _purpose:set[str]
+    _cites:Citation #: citation being paired with reasons
+    _purpose:set[str] #: list of all reasons citation was cited for
 
     def __init__(self, cites:Citation, purpose:Union[str, Sequence[str]]=None):
         self._cites = cites
@@ -329,7 +329,7 @@ class CitedReason:
         return getattr(self, key)
     
     @property
-    def cites(self):
+    def cites(self)->Citation:
         """:class:`Citation` object (without purpose) of self"""
         return self._cites
 
@@ -338,7 +338,7 @@ class CitedReason:
         """Purpose(s) for citation"""
         return tuple(self._purpose)
 
-    def add_purpose(self, purpose:Union[str,Sequence[str]])->None:
+    def add_purpose(self, purpose:str|Sequence[str])->None:
         """
         Add purposes to purpose field of citation.
 
@@ -358,7 +358,7 @@ _citegroups:dict[str,list[Citation]] = dict()
 _cited:list[CitedReason] = list()
 
 
-def _get_citation_attr(check:str, attr:str)->Union[Citation,None]:
+def _get_citation_attr(check:str, attr:str)->Citation|None:
     """
     Get the :class:`Citation` that has a an attr matching name,
     if it exists, otherwise return None
@@ -369,7 +369,7 @@ def _get_citation_attr(check:str, attr:str)->Union[Citation,None]:
     return None
 
 
-def _get_citation_style(name:str, style:str)->Union[Citation,None]:
+def _get_citation_style(name:str, style:str)->Citation|None:
     """
     Get the :class:`Citation` that has a style kwarg matching name,
     if it exists, otherwise return None
@@ -486,7 +486,7 @@ def create_citation_group(name:str, *tags:str, modify:bool=True, noreplace:bool=
     for tag in tags:
         tag = str(tag)
         ct = _get_citation_attr(tag, 'tag')
-        if any(ct is ct for ct in citations):
+        if any(c is ct for c in citations):
             continue
         if ct is None:
             ct = register_citation(tag)

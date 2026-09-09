@@ -5335,11 +5335,11 @@ class Table:
         out = ''
         inc_gate = include_gate or issubclass(cls, BaseTable)
         for key, value in param.parents.items():
-            out += f'\n{key}:\n'
+            out += f'\n{key}:'
             if not isinstance(value, Param):
                 for i, val in enumerate(value):
                     txt = val.tp.get_param_description(val, 2, inc_gate).lstrip()
-                    out += _indent(f'- {txt}', 2)
+                    out += _indent(f'\n- {txt}', 2)
             else:
                 out += value.tp.get_param_description(value, 2, inc_gate)
         return _indent(out.strip(), indent)
