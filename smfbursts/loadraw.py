@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Module for loading data from raw files
+Module for loading data from raw files.
+
+This module can also be accessed using the ``smfbursts.lr`` alias.
 """
 from os import PathLike
 from pathlib import Path

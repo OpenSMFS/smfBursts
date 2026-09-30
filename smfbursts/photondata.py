@@ -17,6 +17,8 @@ and the various attributes and tables that can be defined thereof.
 .. |Param| replace:: :class:`Param <smfbursts.datamodel.tables.Param>`
 .. |DetDef| replace:: :class:`DetDef <smfburts.ph_sel.DetDef>`
 .. |classmethod| replace:: `classmethod() <https://docs.python.org/3/library/functions.html#classmethod>`__
+.. |Terterov| replace:: `Terterov et. al. <https://doi.org/10.1016/j.bpr.2023.100116>`__
+.. |Torella| replace:: `Torella et. al. 2011 <https://doi.org/10.1016/j.bpj.2011.01.066>`__
 """
 from typing import Union, Any, ClassVar, Literal
 from collections.abc import Sequence, Iterator, Hashable, Callable
@@ -38,16 +40,19 @@ from .datamodel.immutabledata import (
     _ImData, TV_int, TV_float, TV_ndarray, TV_ImData, TV_str, TypeValidator
     )
 from .ph_sel import DetDef, PhSel, TV_DetDef, ChannelSet, _csall, phsel_all
-from .datamodel.diskdict import AttrDD, TypedValueDD, SubDiskDict
+from .datamodel.diskdict import DiskDict, AttrDD, TypedValueDD, SubDiskDict
 from .datamodel.tables import (
     TableLike, BaseTable, ChildTable, DataSet, DataSetList, TableConstructionError,
-    paramproperty, Param, ColumnDef, Column, Gate, GateGroup, GroupFuture
+    paramproperty, Param, ColumnDef, Column, Gate, GateGroup, GroupFuture, ColumnWarning
     )
 from .cite import cite, add_citation
 
 import smfbursts.cfuncs as smc
 
-_alloc_size:int = 512
+from . import rcParams
+
+rcParams['warn.anisotropy'] = 'warn'
+rcParams['warn.lifetime'] = 'warn'
 
 
 def _proc_detdef(imdata:"PhSpec", kwarg_append:dict)->dict:
@@ -124,29 +129,29 @@ class PhSpec(_ImData):
                          split=('split_ratio',))
     _typeconversions = ImDict(clk_p=TV_float(mn=0.0),
                               tcspc_unit=TV_ndarray(dims=arr_slc[:], mn=0.0, 
-                                                    dtype=np.float64, superdtype=np.number),
+                                                    dtype='<f8', superdtype=np.number),
                               tcspc_num_bins=TV_ndarray(dims=arr_slc[:], mn=1, 
-                                                        dtype=np.uint16, superdtype=np.integer),
+                                                        dtype='<u2', superdtype=np.integer),
                               tcspc_range=TV_float, alex_type=TV_str(isin=('macro', 'nano', 'none')),
                               ex_ranges=TV_ndarray(dims=arr_slc[:], dtype=np.object_, 
-                                                   typedefs=TV_ndarray(dtype=np.int64, 
+                                                   typedefs=TV_ndarray(dtype='<i8', 
                                                                        superdtype=np.number, 
                                                                        dims=arr_slc[:,2])),
                               alex_period=TV_int(mn=0), alex_offset=TV_int,
                               alternated=TV_ndarray(dims=arr_slc[:], dtype=np.bool_),
                               pulsed=TV_ndarray(dims=arr_slc[:], dtype=np.bool_),
-                              ex_wv=TV_ndarray(dtype=np.float64, superdtype=np.number, 
+                              ex_wv=TV_ndarray(dtype='<f8', superdtype=np.number, 
                                                dims=arr_slc[:]),
-                              ex_pol=TV_ndarray(dims=arr_slc[:], dtype=np.float64),
-                              ex_pow=TV_ndarray(dims=arr_slc[:], dtype=np.float64),
-                              ex_intensities=TV_ndarray(dims=arr_slc[:], dtype=np.float64),
-                              em_wv_centers=TV_ndarray(dtype=np.float64, 
+                              ex_pol=TV_ndarray(dims=arr_slc[:], dtype='<f8'),
+                              ex_pow=TV_ndarray(dims=arr_slc[:], dtype='<f8'),
+                              ex_intensities=TV_ndarray(dims=arr_slc[:], dtype='<f8'),
+                              em_wv_centers=TV_ndarray(dtype='<f8', 
                                                        superdtype=np.number, dims=arr_slc[:]),
-                              em_wv_widths=TV_ndarray(dtype=np.float64, 
+                              em_wv_widths=TV_ndarray(dtype='<f8', 
                                                       superdtype=np.number, dims=arr_slc[:]),
-                              pol_angle=TV_ndarray(dtype=np.float64, superdtype=np.number, 
+                              pol_angle=TV_ndarray(dtype='<f8', superdtype=np.number, 
                                                    dims=arr_slc[:]),
-                              split_ratio=TV_ndarray(dtype=np.float64, superdtype=np.number, 
+                              split_ratio=TV_ndarray(dtype='<f8', superdtype=np.number, 
                                                      dims=arr_slc[:]), 
                               detdef=TV_DetDef(data_proc=_proc_detdef))
     _defaults = ImDict(detdef=None, alex_type='none')
@@ -175,7 +180,7 @@ class PhSpec(_ImData):
         if not hasattr(self, 'tcspc_unit') and (hasattr(self, 'tcspc_num_bins') + hasattr(self, 'tcspc_range')) == 1:
             raise ValueError('Cannot compute tcspc_unit')
         if not hasattr(self, 'tcspc_unit') and hasattr(self, 'tcspc_num_bins') and hasattr(self, 'tcspc_range'):
-            super(_ImData, self).__setattr__("tcspc_unit", self.tcspc_range[:,np.newaxis] / self.tcspc_num_bins)
+            super(_ImData, self).__setattr__("tcspc_unit", self.tcspc_range / self.tcspc_num_bins)
         if self.alex_type == 'none' and hasattr(self, 'ex_ranges'):
             if hasattr(self, 'tcspc_unit'):
                 super(_ImData, self).__setattr__('alex_type', 'nano')
@@ -246,8 +251,8 @@ class PhArray(AttrDD, TypedValueDD):
     
     _attrs = frozenset({'setup', 'times', 'dets', 'nanos', 'particles'})
     _typemap = ImDict(setup=TV_ImData(sublcass=PhSpec),
-                      times=TV_pharray_mtch(dtype=np.int64), dets=TV_pharray_mtch(dtype=np.uint8),
-                      nanos=TV_pharray_mtch(dtype=np.uint16), particles=TV_pharray_mtch(np.uint8))
+                      times=TV_pharray_mtch(dtype='<i8'), dets=TV_pharray_mtch(dtype='<u1'),
+                      nanos=TV_pharray_mtch(dtype='<i2'), particles=TV_pharray_mtch('<u1'))
     
     @classmethod
     def _valtype(cls, key):
@@ -453,7 +458,7 @@ def regularize_photon_data(setup:PhSpec,
     return pharray
 
 
-def get_phsel_ex_range(setup:PhSpec, phsel:PhSel)->int:
+def get_phsel_ex_range(setup:PhSpec, phsel:PhSel, force_contig:bool=False)->tuple[int,int]:
     """
     Extract the number of bins in the excitation window of ph_sel
 
@@ -463,11 +468,16 @@ def get_phsel_ex_range(setup:PhSpec, phsel:PhSel)->int:
         photon data settings to be queried.
     ph_sel : PhSel
         :class:`smfbursts.ph_sel.Ph_sel` of interest.
+    force_contig : bool, optional
+        If True, raise an error if the excitation range is non-contiguous.
+        The default is False.
 
     Returns
     -------
-    int
-        number of bins in ex range of ph_sel.
+    start : int
+        start index of excitation range in TCSPC bins
+    stop : int
+        stop index of excitation range in TCSPC bins
 
     """
     phsel = phsel.render_positive(setup['detdef'])
@@ -476,6 +486,8 @@ def get_phsel_ex_range(setup:PhSpec, phsel:PhSel)->int:
     iex = list(phsel.ex.elements)[0]
     rng = setup['ex_ranges'][iex]
     if rng.shape[0] != 1:
+        if force_contig:
+            raise ValueError("Excitation range for this process must be contiguous")
         warnings.warn("non-contiguous excitation range")
     if np.any(rng[:,0] > rng[:,1]):
         warnings.warn("wrapped excitation rang")
@@ -559,6 +571,9 @@ class PhotonData(DataSet):
     r"""
     |DataSet| for confocal single photon counting data. Typically single molecule
     diffusion based data.
+    
+    Note that this class is made a top-level class, ie can be accessed as
+    ``smfbursts.PhotonData``.
     
     Parameters
     ----------
@@ -1011,6 +1026,9 @@ class PhotonDataList(DataSetList):
     DataSetList object for PhotonData. Stores mutliple :class:`PhotonDataList`
     useful for multi-spot photon-HDF5 files, or when wanting to perform the same
     operation on multiple data sets.
+    
+    Note that this class is made a top-level class, ie can be accessed as
+    ``smfbursts.PhotonDataList``.
     """
     _group_name = 'photon_data'
     def __init__(self, datas:Sequence[PhotonData]):
@@ -1465,12 +1483,14 @@ def _pol_ps(sel:PhSel, detdef:DetDef=None, setup:PhSpec=None)->bool:
     if setup is None and detdef is None:
         return all(s == _csall or s == _cs01 for s in sel.streams)
     if setup is not None and 'pol_angle' in setup:
-        ipar = np.argwhere(setup.pol_angle == 0.0)
-        iperp = np.argwhere(setup.pol_angle == 90.0)
+        ipar = np.argwhere(setup.pol_angle == 0.0) # get p channnels
+        iperp = np.argwhere(setup.pol_angle == 90.0) # get s channels
         if ipar.size and iperp.size:
+            # Channel set of par and perp channels
             _cs = ChannelSet(True, {ipar[0], iperp[0]}).render_positive(setup.pol_angle.size, 
                                                                         conver_all=True)
         else:
+            # setup does not have par and perp channels, cannot do anisotropy
             return False
     elif detdef is not None and (setup is None or 'pol_angle' not in setup):
         if detdef.pol == 1:
@@ -1479,6 +1499,100 @@ def _pol_ps(sel:PhSel, detdef:DetDef=None, setup:PhSpec=None)->bool:
     else:
         return all(s == _cs01 or s == _csall for s in sel.streams)
     return all(s == _cs for s in sel.streams)
+
+
+def _valid_anisotropy(sel_p:PhSel, sel_s:PhSel, detdef:DetDef=None, setup:PhSpec=None, single:bool=True)->str|None:
+    """
+    Check if sel_p and sel_s are sensible channels for anisotropy calculation.
+    Check that:
+        - same number of streams in sel_p and sel_s
+        - streams differ in only polarization between sel_p and sels_s
+        - sel_p and sel_s each contain only single polarization channel
+        - if setup is supplied, that sel_p and sel_s specify correct channel
+        - if single is True, that sel_p and sel_s only contain 1 combination of ex/em channels
+    """
+    if detdef is None and setup is None:
+        # computationally expensive evaulation from PhSel, instead of using detids
+        if len(sel_p.streams) != len(sel_s.streams):
+            return f"Mismatched number of streams between parallel and perpendicular channels {sel_p} vs {sel_s}"
+        streams_p, streams_s = tuple(sel_p.streams), tuple(sel_s.streams)
+        pset_p, pset_s = streams_p[0], streams_s[0]
+        if any(pset_p != stream.pol for stream in streams_p):
+            return f"Parallel channels contains mixed polarization streams: {sel_p}"
+        if any(pset_s != stream.pol for stream in streams_s):
+            return f"Perpendicular channels contains mixed polarization streams: {sel_p}"
+        if len(pset_p.pol.elements) != 1:
+            return f"Multiple polarization channels in parallel stream: {sel_p}"
+        if len(pset_s.pol.elements) != 1:
+            return f"Multiple polarization channels in perpendicular stream: {sel_s}"
+        if list(pset_p.pol.elements)[0] >= list(pset_p.pol.elements)[0]:
+            return f"Parallel stream has polarization channel of higher angle than perpendicular: {sel_p} vs {sel_s}"
+        return None
+    if detdef is None and setup is not None:
+        detdef = setup.detdef
+    if setup is not None and detdef != setup.detdef:
+        raise RuntimeWarning("Impropper use of _valid_anisotropy, detdef and setup.detdef do not match")
+    p_id, s_id = detdef.get_stream_ids(sel_p), detdef.get_stream_ids(sel_s)
+    if p_id.size != s_id.size:
+        return f"Mismatched number of streams between parallel and perpendicular channels {sel_p} vs {sel_s}"
+    # shows "allignment" of par/perp streams
+    if np.any(np.diff(s_id.astype(np.int16) - p_id.astype(np.int16)) != 0):
+        return f"Channels are not symetric across polarization, {sel_p} vs {sel_s}"
+    # shows all same pol channel
+    if np.any(np.diff(detdef.pol_stream_id_to_channel(p_id)) != 0):
+        return f"Parallel/perpendicular channels contains mixed polarization streams: {sel_p} and {sel_s}"
+    if single:
+        if np.any(np.diff(p_id // detdef.pol_group) != 0):
+            return f"Parallel/perpendicular channels contain multiple spectral streams: {sel_p} and {sel_s}"
+    if setup is not None and "pol_angle" in setup:
+        ipar = np.argwhere(setup.pol_angle == 0.0) # get p channnels
+        iperp = np.argwhere(setup.pol_angle == 90.0) # get s channels
+    elif detdef is None or detdef.pol == 2:
+        ipar = np.array([True, False])
+        iperp = np.array([False, True])
+    else:
+        return "Cannot infer parallel and perpendicular streams"
+    if ipar.size == 1 and iperp.size == 1:
+        if np.any((err:=detdef.pol_stream_id_to_channel(p_id)) != ipar[0]):
+            return f"Parellel channel appears to specify polarization channel other than 0 degrees: expected {ipar[0]}, got {err[0]}"
+        if np.any((err:=detdef.pol_stream_id_to_channel(s_id)) != iperp[0]):
+            return f"Perpendicular channel appears to specify polarization channel other than 90 degrees: expected {iperp[0]}, got {err[0]}"
+    return None
+
+
+def _validate_anisotropy(sel_p:PhSel, sel_s:PhSel, detdef:DetDef=None, setup:PhSpec=None, single:bool=True)->str|None:
+    if rcParams['warn.anisotropy'] == 'ignore':
+        return
+    msg = _valid_anisotropy(sel_p, sel_s, detdef, setup, single)
+    if msg is not None:
+        if rcParams['warn.anisotropy'] == 'raise':
+            raise ValueError(msg)
+        elif rcParams['warn.anisotropy'] == 'warn':
+            warnings.warn(msg, ColumnWarning)
+
+
+def _validate_lifetime(sel:PhSel, detdef:DetDef=None):
+    if rcParams['warn.lifetime'] == 'ignore':
+        return
+    msg = None
+    if detdef is None:
+        streams = sel.streams
+        exset = streams[0].ex
+        emset = streams[0].em
+        for stream in streams[1:]:
+            exset |= stream.ex
+            emset |= stream.em
+        if len(exset.elements) > 1 or len(emset.elements) > 1:
+            msg = f"Multiple spectral channels in photon stream: {sel}"
+    else:
+        d_id = detdef.get_stream_ids(sel)
+        if np.any(np.diff(d_id // detdef.pol_group) != 0):
+            msg = f"Multiple spectral channels in photon stream: {sel}"
+    if msg:
+        if rcParams['warn.lifetime'] == 'raise':
+            raise ValueError(msg)
+        elif rcParams['warn.lifetime'] == 'warn':
+            warnings.warn(msg, ColumnWarning)
 
 
 class BasePhotonTableLike(metaclass=TableLike):
@@ -1558,23 +1672,41 @@ class BasePhotonTable(PhotonTable, BaseTable):
             suparation (in seconds) between successive ranges
         bva : float, (ph_sel_num:PhSel, ph_sel_dem:PhSel, n:int) 
             variance of ratio of :math:`N(ph\_sel\_num)/N(ph\_sel\_dem)` of chuncks 
-            of size ``n``.
+            of size ``n``. This measure was defined in |Torella|.
         ebva : float, (ph_sel_num:PhSel, ph_sel_dem:PhSel, n:int) 
             "Excess" variance of bva, defined as :math:`S^{2} = s^{2} - \sigma^{2}`
             where :math:`s` is the classical BVA, and 
-            :math:`$\sigma^{2}=\frac{\langle\epsilon\rangle (1-\langle\epsilon\rangle)}{m}$`
+            :math:`\sigma^{2}=\frac{\langle\epsilon\rangle (1-\langle\epsilon\rangle)}{m}`
             and :math:`\epsilon` is the ratio of the raw number of photons in
             phsel_num to phsel_dem of the entire burst.
+            This measure was defined in |Terterov|.
         nanohist : np.ndarray[np.int64] (phsel:PhSel, full:bool)
             histogram (1 per range) of nanotimes of photons in range. If full, the
             return histogram using TCSPC raw bins, if full=False, then trim to excitation range.
         nanomean : float, (:class:`smfbursts.ph_sel.PhSel`, )
-            mean nanotime (in seconds) of ph_sel of photons in range. All streams in
+            Mean nanotime (in seconds) of ph_sel of photons in range. All streams in
             ph_sel should have same irf_thresh in origin data, and be reasonable to
             be treated collectively (single stream, or at least same excitation and
             emission).
+            .. note::
+                
+                It is encouraged to use the ``nanomean_bg`` column of the table
+                :class:`smfbursts.childphotontables.NphBG` instead of this column.
+                This is because mean nanotimes are affected by background photons,
+                typically background results in an overestimate of the lifetime.
+                The ``nanomean_bg`` column has a correction for this, making its
+                performance more or less equivalent to burst integrated 
+                fluoresence lifetimes.
+                
+                
         nmdiff : float : (phsel_a:PhSel, phsel_b:PhSel)
-            Difference in nanomean between phsel_a and phsel_b.
+            Difference in nanomean between ``phsel_a`` and ``phsel_b`` .
+            .. note::
+                
+                It is encouraged to usee the ``nmdiff_bg`` column of the table
+                :class:`smfbursts.childphotontables.NphBG` instead of this column.
+                This is for the same reason as noted for the ``nanomean``
+                column.
         
     Remapped Columns
     ----------------
@@ -1782,16 +1914,22 @@ class BasePhotonTable(PhotonTable, BaseTable):
 
     def _get_anisotropy_raw(self, phsel_p:PhSel, phsel_s:PhSel)->np.ndarray[np.float64]:
         """Getter function for anisotropy_raw column"""
+        _valid_anisotropy(phsel_p, phsel_s, self.param.detdef, self.origin.setup)
         p, s = self['nph_raw', phsel_p], self['nph_raw', phsel_s]
-        with np.errstate(divide='ignore'):
+        with np.errstate(divide='ignore', invalid='ignore'):
             out = (p-s)/(p+2*s)
         return out
+
+    @classmethod
+    def _check_anisotropy_raw(cls, col:Column):
+        sel_p, sel_s = col.keytup
+        _validate_anisotropy(sel_p, sel_s, col.source_param.detdef)
 
     @classmethod
     def _get_anisotropy_raw_title(cls, col:Column, include_unit:Real=False, origin:PhotonData=None)->str:
         """Title getter function for anisotropy_raw column"""
         kw = {'name':'_{raw}I'}
-        par, perp, start, stop = col.keytup
+        par, perp = col.keytup
         fuse = par | perp
         overlap = par | perp
         detdef = None
@@ -1805,11 +1943,11 @@ class BasePhotonTable(PhotonTable, BaseTable):
             title = fuse.tex_str(kw)
         else:
             title = rf'anis({par.tex_str(**kw)},\: {perp.tex_str(**kw)})'
-        return title
+        return f'${title}$'
 
-    def _iter_meanT(self, ph_sel:PhSel)->Iterator[float]:
+    def _iter_meanT(self, phsel:PhSel)->Iterator[float]:
         """Iterator function for meanT column, mean time of given photon stream"""
-        for time, s in zip(self.iter_column('ph_times', ph_sel), self.iter_column('istart')):
+        for time, s in zip(self.iter_column('ph_times', phsel), self.iter_column('istart')):
             yield (np.mean(time-s)+s)*self.origin.clk_p if time.size else np.nan
 
     @classmethod
@@ -1899,6 +2037,14 @@ class BasePhotonTable(PhotonTable, BaseTable):
         title =  _title_unit_append(title, 's', include_unit)
         return f'${title}$'
 
+    @cite('IngargiolaPLOSOne2016')
+    def _get_max_rate(self, phsel:PhSel, m:int)->np.ndarray[np.float64]:
+        """Getter function for max_rate column"""
+        stream_ids = self.origin.detdef.get_stream_ids(phsel)
+        return smc.maximum_rate(self.origin.times, self.origin.dets, 
+                                self['istart',], self['istop',], 
+                                self.origin.clk_p, stream_ids, m=m)
+
     @classmethod
     def _regularizecolumn_max_rate(self, source_param:Param, *args)->tuple[PhSel, int]:
         """Column regularization function for max_rate column"""
@@ -1913,20 +2059,21 @@ class BasePhotonTable(PhotonTable, BaseTable):
             raise ValueError('m must be 2 or greater')
         return phsel, m
 
-    @cite('IngargiolaPLOSOne2016')
-    def _get_max_rate(self, phsel:PhSel, m:int)->np.ndarray[np.float64]:
-        """Getter function for max_rate column"""
-        stream_ids = self.origin.detdef.get_stream_ids(phsel)
-        return smc.maximum_rate(self.origin.times, self.origin.dets, 
-                                self['istart',], self['istop',], 
-                                self.origin.clk_p, stream_ids, m=m)
-
     @classmethod
     def _get_max_rate_title(cls, col:Column, include_unit:bool=True, origin:PhotonData=None)->str:
         """Title getter function for max_rate column"""
         title = _title_sels(r'peak\: rate _{%d}r' % (col.keytup[1],), origin, col.keytup[0])[0]
         title = _title_unit_append(title, r'cnts\:s^{-1}', include_unit)
         return f'${title}$'
+
+    @cite('TorellaBioPhyJ2011', purpose='Burst Variance Analysis')
+    def _get_bva(self, phsel_num:PhSel, phsel_dem:PhSel, n:int)->np.ndarray[np.float64]:
+        """Getter function for bva column"""
+        stream_idsSub = self.origin.detdef.get_stream_ids(phsel_num)
+        stream_idsAll = self.origin.detdef.get_stream_ids(phsel_dem)
+        return smc.burst_variance_analysis(self.origin.dets, 
+                                           self['istart',], self['istop'], 
+                                           stream_idsAll, stream_idsSub, n=n)
 
     @classmethod
     def _regularizecolumn_bva(cls, source_param:Param, *args)->tuple[PhSel, int]:
@@ -1945,22 +2092,13 @@ class BasePhotonTable(PhotonTable, BaseTable):
             raise ValueError('n must be 2 or greater')
         return phsel_num, phsel_dem, n
 
-    @cite('TorellaBioPhyJ2011', purpose='Burst Variance Analysis')
-    def _get_bva(self, phsel_num:PhSel, phsel_dem:PhSel, n:int)->np.ndarray[np.float64]:
-        """Getter function for bva column"""
-        stream_idsSub = self.origin.detdef.get_stream_ids(phsel_num)
-        stream_idsAll = self.origin.detdef.get_stream_ids(phsel_dem)
-        return smc.burst_variance_analysis(self.origin.dets, 
-                                           self['istart',], self['istop'], 
-                                           stream_idsAll, stream_idsSub, n=n)
-
     @classmethod
     def _get_bva_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
         """Title getter function for bva column"""
         num, dem = _title_sels('n', origin, *col.keytup[:2])
         return r'$_{%d}\sigma_{%s/%s}$' % (col.keytup[2], num, dem)
 
-    @cite('TorellaBioPhyJ2011', purpose='Burst Variance Analysis')
+    @cite('TerterovBiophysJ2023', purpose='Time Resovled Burst Variance Analysis')
     def _get_ebva(self, phsel_num:PhSel, phsel_dem:PhSel, n:int)->np.ndarray[np.float64]:
         """Getter function for ebva column"""
         bva, r = self['bva', phsel_num, phsel_dem, n], self['ratio_raw', phsel_num, phsel_dem]
@@ -1972,7 +2110,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
     def _get_ebva_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
         """Title getter function for ebva column"""
         num, dem = _title_sels('n', origin, *col.keytup[:2])
-        return r'$_{%d,\: excess}\sigma_{%s/%s}$' % (col.keytup[2], num, dem)
+        return r'$_{%d,\:excess\:\sigma}\S^{2}_{%s/%s}$' % (col.keytup[2], num, dem)
 
     def _iter_nanomean(self, phsel:PhSel)->Iterator[float]:
         """Iter function for nanomean column"""
@@ -1982,10 +2120,8 @@ class BasePhotonTable(PhotonTable, BaseTable):
             tcspc_unit = self.origin.setup['tcspc_unit'][stream_ids[0] % self.origin.detdef.ex_stride]
             thresh = self.origin.irf_thresh[phsel]
             for nanos in self.iter_column('ph_nanos', phsel):
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    out = np.mean((nanos[nanos>=thresh]-thresh)*tcspc_unit)
-                yield out
+                mask = nanos>=thresh
+                yield np.mean((nanos[mask]-thresh)*tcspc_unit) if np.any(mask) else np.nan
         else:
             thresh_dict = {i:self.origin.irf_thresh[self.origin.detdef.stream_ids_to_PhSel(i)] for i in stream_ids}
             threshs = np.array([thresh_dict.get(i, 0) for i in range(self.origin.detdef.size)])
@@ -1999,12 +2135,16 @@ class BasePhotonTable(PhotonTable, BaseTable):
                 yield np.mean((nano_off)*tcspc_unit) if nano_off.size else np.nan
 
     @classmethod
+    def _check_nanomean(cls, col:Column):
+        _validate_lifetime(col.keytup[0], col.source_param.detdef)
+
+    @classmethod
     def _get_nanomean_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
         """Title getter function for nanomean"""
         title = _title_sels(r'\bar \tau', origin, col.keytup[0])[0]
         title = _title_unit_append(title, 's', include_unit)
         return f'${title}$'
-    
+
     def _iter_nmdiff(self, phsel_a:PhSel, phsel_b:PhSel)->Iterator[float]:
         """Iterator for difference between nanomeans"""
         for nma, nmb in zip(self.iter_column('nanomean', phsel_a),
@@ -2012,12 +2152,18 @@ class BasePhotonTable(PhotonTable, BaseTable):
             yield nma - nmb
 
     @classmethod
+    def _check_nmdiff(cls, col:Column):
+        detdef = col.source_param.detdef
+        _validate_lifetime(col.keytup[0], detdef)
+        _validate_lifetime(col.keytup[1], detdef)
+
+    @classmethod
     def _get_nmdiff_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
         """Title getter function for nanomean"""
         ta, tb = _title_sels(r'\bar \tau', origin, *col.keytup[:2])
         title = _title_unit_append(f'{ta}-{tb}', 's', include_unit)
         return f'${title}$'
-    
+
     def _iter_nanohist(self, phsel:PhSel, full:bool)->Iterator[np.uint16]:
         """Iter function for nanohist column"""
         if not phsel.positive:
@@ -2044,31 +2190,31 @@ class BasePhotonTable(PhotonTable, BaseTable):
 
 
 _basetimecolumndefs = (
-    ColumnDef('start', tuple(), 0, 'all', dtype=np.int64, title='start', unit='clk_p'), 
-    ColumnDef('stop', tuple(), 0, 'all', dtype=np.int64, title='stop', unit='clk_p'),
-    ColumnDef('istart', tuple(), 0, 'all', dtype=np.int64, title='istart'), 
-    ColumnDef('istop', tuple(), 0, 'all', dtype=np.int64, title='istop'), 
-    ColumnDef('istarttime', tuple(), 0, 'never', dtype=np.dtype('<i8'), 
+    ColumnDef('start', tuple(), 0, 'all', dtype='<i8', title='start', unit='clk_p'), 
+    ColumnDef('stop', tuple(), 0, 'all', dtype='<i8', title='stop', unit='clk_p'),
+    ColumnDef('istart', tuple(), 0, 'all', dtype='<i8', title='istart'), 
+    ColumnDef('istop', tuple(), 0, 'all', dtype='<i8', title='istop'), 
+    ColumnDef('istarttime', tuple(), 0, 'never', dtype='<i8', 
               get_func='_get_istarttime', get_derived=True, unit='(clk_p)'),
-    ColumnDef('istoptime', tuple(), 0, 'never', dtype=np.dtype('<i8'), 
+    ColumnDef('istoptime', tuple(), 0, 'never', dtype='<i8', 
               get_func='_get_istoptime', get_derived=True, unit='(clk_p)'),
     ColumnDef('ph_mask', (PhSel, ), 0, 'never', iter_func='_iter_ph_mask', 
               get_derived=True, dtype=np.object_, typedef=np.dtype(np.bool_)),
     ColumnDef('ph_times', (PhSel, ), 0, 'never', iter_func='_iter_ph_times', 
               get_derived=True, dtype=np.object_, typedef=np.dtype('<i8')),
     ColumnDef('ph_nanos', (PhSel, ), 0, 'never', iter_func='_iter_ph_nanos', 
-              get_derived=True, dtype=np.object_, typedef=np.dtype('<u2')),
+              get_derived=True, dtype=np.object_, typedef='<u2'),
     ColumnDef('ph_dets', (PhSel, ), 0, 'never', iter_func='_iter_ph_dets', 
-              get_derived=True, dtype=np.object_, typedef=np.dtype('<u1')), 
+              get_derived=True, dtype=np.object_, typedef='<u1'), 
     ColumnDef('ph_particles', (PhSel, ), 0, 'never', iter_func='_iter_ph_particles', 
-              get_derived=True, dtype=np.object_, typedef=np.dtype('<u1')),
-    ColumnDef('nph_raw', (PhSel, ), 0, 'user', dtype=np.dtype('<i8'), iter_func='_iter_nph_raw', 
+              get_derived=True, dtype=np.object_, typedef='<u1'),
+    ColumnDef('nph_raw', (PhSel, ), 0, 'user', dtype='<i8', iter_func='_iter_nph_raw', 
               get_derived=True, title_func='_get_nph_raw_title', unit='cnts', 
               index_unit='cnts'),
-    ColumnDef('ratio_raw', (PhSel, PhSel), 0, 'user', dtype=np.dtype('<f8'), 
+    ColumnDef('ratio_raw', (PhSel, PhSel), 0, 'user', dtype='<f8', 
               get_func='_get_ratio_raw', get_derived=True, 
               title_func='_get_ratio_raw_title'),
-    ColumnDef('anisotropy_raw', (PhSel, PhSel), 0, 'user', dtype=np.dtype('<f8'),
+    ColumnDef('anisotropy_raw', (PhSel, PhSel), 0, 'user', dtype='<f8',
               get_func='_get_anisotropy_raw', get_derived=True,
               title_func='_get_anisotropy_raw_title'),
     ColumnDef('meanT', (PhSel, ), 0, 'user', iter_func='_iter_meanT', get_derived=True,
@@ -2076,22 +2222,23 @@ _basetimecolumndefs = (
     ColumnDef('mTdiff', (PhSel, PhSel), 0, 'user', iter_func='_iter_mTdiff', get_derived=True,
               title_func='_get_mTdiff_title', unit='s'),
     ColumnDef('max_rate', (PhSel, int), 0, 'user', get_func='_get_max_rate',
-              dtype=np.dtype('<f8'), get_derived=True, reg_func='_regularizecolumn_max_rate',
+              dtype='<f8', get_derived=True, reg_func='_regularizecolumn_max_rate',
               title_func='_get_max_rate_title', unit=r'cnts\: s^{-1}', index_unit='cnts s-1'),
     ColumnDef('bva', (PhSel, PhSel, int), 0, 'user', get_func='_get_bva', 
-              dtype=np.dtype('<f8'), get_derived=True, reg_func='_regularizecolumn_bva',
+              dtype='<f8', get_derived=True, reg_func='_regularizecolumn_bva',
               title_func='_get_bva_title'),
     ColumnDef('ebva', (PhSel, PhSel, int), 0, 'user', get_func='_get_ebva', 
-              dtype=np.dtype('<f8'), get_derived=True, reg_func='_regularizecolumn_bva',
+              dtype='<f8', get_derived=True, reg_func='_regularizecolumn_bva',
               title_func='_get_ebva_title'),
     ColumnDef('nanohist', (PhSel, bool), 0, 'never', iter_func='_iter_nanohist',
               reg_func='_regularizecolumn_nanohist',
-              get_derived=True, dtype=np.dtype('<i8'), ndim=2),
+              get_derived=True, dtype='<i8', ndim=2),
     ColumnDef('nanomean', (PhSel, ), 0, 'user', iter_func='_iter_nanomean', get_derived=True,
-              dtype=np.dtype('<f8'), title_func='_get_nanomean_title', unit='s'),
+              dtype='<f8', unit='s',
+              title_func='_get_nanomean_title', check_func="_check_nanomean"),
     ColumnDef('nmdiff', (PhSel, PhSel), 0, 'user', iter_func='_iter_nmdiff', get_derived=True,
-              dtype=np.dtype('<f8'), title_func='_get_nmdiff_title', unit='s'),
-    
+              dtype='<f8', unit='s',
+              title_func='_get_nmdiff_title', check_func="_check_nmdiff",),
     ColumnDef('E_raw', tuple(), 0, remap='_replace_E_raw'),
     ColumnDef('S_raw', tuple(), 0, remap='_replace_S_raw'),
                   )
@@ -2104,13 +2251,13 @@ def make_base_column_defs(startV:TypeValidator=TV_str_start, stopV:TypeValidator
                   get_derived=True, reg_func='_regularizecolumn_middur', 
                   title_func='_get_midtime_title', unit='(s)'),
         ColumnDef('sep', (startV, stopV), -1, 'never', get_func='_get_sep', atomic=False, 
-                  dtype=np.dtype('<f8'), reg_func='_regularizecolumn_sep', 
+                  dtype='<f8', reg_func='_regularizecolumn_sep', 
                   title_func='_get_sep_title', unit='s', index='sep', index_unit='s'),
-        ColumnDef('brightness', (PhSel, startV, stopV), 0, 'user', dtype=np.dtype('<f8'), 
+        ColumnDef('brightness', (PhSel, startV, stopV), 0, 'user', dtype='<f8', 
                   get_func='_get_brightness', get_derived=True, 
                   reg_func='_regularizecolumn_brightness', title_func='_get_brightness_title',
                   unit=r'cnts\: s^{-1}', index_unit='cnts s-1'),
-        ColumnDef('dur', (startV, stopV), 0, 'never', dtype=np.dtype('<f8'), get_func='_get_dur', 
+        ColumnDef('dur', (startV, stopV), 0, 'never', dtype='<f8', get_func='_get_dur', 
                   get_derived=True, reg_func='_regularizecolumn_middur', 
                   title_func='_get_dur_title', unit='s', index='dur', index_unit='s')
         )

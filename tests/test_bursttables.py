@@ -369,14 +369,17 @@ def test_ratio_c(data, ratio, colstart, colstop):
     assert np.allclose(s, d/daa, equal_nan=True), "ratio s calculated incorrectly"
 
 
-def test_anisotropy_c(data, ratio, colstart, colstop):
+def test_anisotropy_c(data, ratio, irfstyle, colstart, colstop):
     nphDD = smf.Column(ratio, 'nph_c', (smf.PhSel('0ex0em'), colstart, colstop))
     nphDA = smf.Column(ratio, 'nph_c', (smf.PhSel('0ex1em'), colstart, colstop))
-    Ani = smf.Column(ratio, 'anisotropy_c', (smf.PhSel('0ex0em'), smf.PhSel('0ex1em'), colstart, colstop))
+    with pytest.warns():
+        Ani = smf.Column(ratio, 'anisotropy_c', (smf.PhSel('0ex0em'), smf.PhSel('0ex1em'), irfstyle, colstart, colstop))
     dd = data.get_column(nphDD)
     da = data.get_column(nphDA)
-    ani = data.get_column(Ani)
-    assert np.allclose(ani, (dd-da)/(dd+2*da), equal_nan=True), "incorrect anisotropy calculation"
+    if irfstyle == 'thresh':
+        with pytest.warns():
+            ani = data.get_column(Ani)
+        assert np.allclose(ani, (dd-da)/(dd+2*da), equal_nan=True), "incorrect anisotropy calculation"
 
 
 def test_ES(data, nph, colstart, colstop):

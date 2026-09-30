@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 r"""
+This module can also be accessed with the alias ``smfbursts.ff``
+
 The fretfacory module provides a set of "helper" factory functions, which create
 dictionaries of associated |Param| and |Column| objects.
 These are designed to be the most commonly used params of a set.

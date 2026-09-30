@@ -1607,7 +1607,7 @@ def _check_objectdtype(val:np.ndarray[np.object_], typedefs:Union[TypeValidator,
 
 def check_array(val:np.ndarray, superdtype:np.dtype|type=None, dtype:np.dtype=None, 
                 mn:np.number=None, mx:np.number=None, square:bool=False,
-                mindim:int=None, maxdim:int=None, dims:tuple[Union[int,slice], ...]=None, 
+                mindim:int=None, maxdim:int=None, dims:tuple[int|slice, ...]=None, 
                 typedefs:type|TypeValidator|Sequence[type|TypeValidator]=None, 
                 **kwargs)->np.ndarray:
     r"""

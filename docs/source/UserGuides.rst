@@ -26,5 +26,3 @@ New paramters can be defined.
     :maxdepth: 1
 
     DefineExtensions
-
-

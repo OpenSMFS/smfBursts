@@ -96,7 +96,7 @@ def _get_column(data:DataS, record:bool):
 
 def _get_column_arrays(data:DataS, *cols:Column, gate:GateGroup=None, 
                        include_unit:bool=False, rescale:Sequence[float]=None,
-                       record:bool=False)->tuple[list[np.ndarray],list[str]]:
+                       record:bool|None=None)->tuple[list[np.ndarray],list[str]]:
     """Get 2 tuple of ([column arrays,...], [column names, ...]) from input to any plot"""
     cols = _regate(gate, *cols)
     get_col = _get_column(data, rcParams['plot.record'] if record is None else record)
@@ -111,7 +111,7 @@ def _get_column_arrays(data:DataS, *cols:Column, gate:GateGroup=None,
 NormLiteral = Literal[None,"none",'PMF','sum','max','PDF', 'cumulative','icumulative','CDF','iCDF']
 
 def _histcol(data:DataS, col:Column, gate:Union[None,GateGroup], 
-             include_unit:bool, rescale:Sequence[float], record:bool, remove_nan:bool,
+             include_unit:bool, rescale:Sequence[float], record:bool|None, remove_nan:bool,
              normalize:NormLiteral, bins:Union[int,np.ndarray], minmax:tuple[float,float], 
              )->tuple[np.ndarray,np.ndarray,str,str]:
     """
@@ -160,7 +160,7 @@ OrientLiteral = Literal['vertical', 'horizontal']
 
 
 def hist_bar(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None, 
-             include_unit:bool=False, rescale:Real=1.0, record:bool=False,
+             include_unit:bool=False, rescale:Real=1.0, record:bool=None,
              normalize:NormLiteral=None, 
              remove_nan:bool=True, bins:Union[int,np.ndarray]=100, 
              minmax:tuple[float,float]=None, orientation:OrientLiteral='vertical',
@@ -188,7 +188,9 @@ def hist_bar(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
         Factor (if integral, treat as a power of 10) by which to rescale values of col. 
         The default is 1.0.
     record : bool, optional
-        Whether to record the column in cache or not. The default is False.
+        Whether to record the column in cache or not.
+        If None, use default from ``rcParams['plot.record']`` .
+        The default is None.
     normalize : NormLiteral, optional
         How to normalize data, can be one of ``'none'``, ``'sum'``, ``'max'``, 
         ``'PDF'``, ``'cumulative'``, ``'icumulativ'``, ``'CDF'``. 
@@ -279,7 +281,7 @@ def hist_bar(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
 
 
 def hist_stair(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None, 
-               include_unit:bool=False, rescale:float=1.0, record:bool=False,
+               include_unit:bool=False, rescale:float=1.0, record:bool=None,
                normalize:NormLiteral=None, 
                remove_nan:bool=True, bins:Union[int,np.ndarray]=100, 
                minmax:tuple[float,float]=None, orientation:OrientLiteral='vertical',
@@ -312,7 +314,9 @@ def hist_stair(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
         Factor (if integral, treat as a power of 10) by which to rescale values of col. 
         The default is 1.0.
     record : bool, optional
-        Whether to record the column in cache or not. The default is False.
+        Whether to record the column in cache or not.
+        If None, use default from ``rcParams['plot.record']`` .
+        The default is None.
     normalize : NormLiteral, optional
         How to normalize data, can be one of ``'none'``, ``'sum'``, ``'max'``, 
         ``'PDF'``, ``'cumulative'``, ``'icumulativ'``, ``'CDF'``. 
@@ -399,7 +403,7 @@ def hist_stair(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
 
 
 def hist_line(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None, 
-              include_unit:bool=False, rescale:float=1.0, record:bool=False,
+              include_unit:bool=False, rescale:float=1.0, record:bool=None,
               normalize:NormLiteral=None, remove_nan:bool=True, bins:Union[int,np.ndarray]=100, 
               minmax:tuple[float,float]=None, orientation:OrientLiteral='vertical',
               xlabel:str=None, xlabel_kwargs:dict[str:Any]=None,
@@ -432,7 +436,9 @@ def hist_line(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
         Factor (if integral, treat as a power of 10) by which to rescale values of col. 
         The default is 1.0.
     record : bool, optional
-        Whether to record the column in cache or not. The default is False.
+        Whether to record the column in cache or not.
+        If None, use default from ``rcParams['plot.record']`` .
+        The default is None.
     normalize : NormLiteral, optional
         How to normalize data, can be one of ``'none'``, ``'sum'``, ``'max'``, 
         ``'PDF'``, ``'cumulative'``, ``'icumulativ'``, ``'CDF'``. 
@@ -519,7 +525,7 @@ def hist_line(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
 
 
 def hist_kdeoverlay(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None, 
-                    include_unit:bool=False, rescale:float=1.0, record:bool=False,
+                    include_unit:bool=False, rescale:float=1.0, record:bool=None,
                     hist_func:Callable=hist_bar, normalize:NormLiteral=None, 
                     remove_nan:bool=True, bins:Union[int,np.ndarray]=100, 
                     kde_bins:Union[int, np.ndarray]=500, minmax:tuple[float,float]=None, 
@@ -550,7 +556,9 @@ def hist_kdeoverlay(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=Non
         Factor (if integral, treat as a power of 10) by which to rescale values of col. 
         The default is 1.0.
     record : bool, optional
-        Whether to record the column in cache or not. The default is False.
+        Whether to record the column in cache or not.
+        If None, use default from ``rcParams['plot.record']`` .
+        The default is None.
     hist_func : Callable, optional
         **smfBursts** function call to plot histogram. **Note** this is **not** 
         the matplotlib function. The default is :func:`hist_bar`.
@@ -643,7 +651,7 @@ def hist_kdeoverlay(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=Non
 
 def hist2d(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Axes=None, 
                  include_unit:bool=False, rescale:tuple[float, float]=None,
-                 record:bool=False,
+                 record:bool=None,
                  xlabel:str=None, xlabel_kwargs:dict[str:Any]=None, 
                  ylabel:str=None, ylabel_kwargs:dict[str:Any]=None, 
                  **kwargs:Any):
@@ -676,7 +684,9 @@ def hist2d(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Axe
         If not specified, default is converted to (1.0, 1.0).
         The default is None.
     record : bool, optional
-        Whether to record the column in cache or not. The default is False.
+        Whether to record the column in cache or not.
+        If None, use default from ``rcParams['plot.record']``.
+        The default is None.
     xlabel_kwargs : dict, optional
         Keyword arguments passed to |axxlabel|.
         The default is None.
@@ -784,7 +794,7 @@ def hist(data:DataS, *args:Column, gate:GateGroup=None, ax:plt.Axes=None,
 
 
 def hexbin(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Axes=None, 
-           include_unit:bool=False, rescale:tuple[float, float]=None, record:bool=False,
+           include_unit:bool=False, rescale:tuple[float, float]=None, record:bool=None,
            xlabel:str=None, xlabel_kwargs:dict[str:Any]=None, 
            ylabel:str=None, ylabel_kwargs:dict[str:Any]=None, 
            **kwargs)->tuple[mpl.collections.PolyCollection, plt.Text, plt.Text]:
@@ -818,7 +828,9 @@ def hexbin(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Axe
         If not specified, default is converted to (1.0, 1.0).
         The default is None.
     record : bool, optional
-        Whether to record the column in cache or not. The default is False.
+        Whether to record the column in cache or not. 
+        If None, use default from ``rcParams['plot.record']`` .
+        The default is None.
     xlabel_kwargs : dict, optional
         Keyword arguments passed to |axxlabel|. 
         The default is None.
@@ -1044,7 +1056,7 @@ def colorcategory(*args:np.ndarray, cmap:str|mpl.colors.Colormap=None, ncat:int|
 
 
 def scatter(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Axes=None,
-            include_unit:bool=True, rescale:tuple[float,float]=None, record:bool=False,
+            include_unit:bool=True, rescale:tuple[float,float]=None, record:bool=None,
             point_func:Callable[[np.ndarray,np.ndarray,...],dict[str:Any]]=None, 
             point_cols:Union[Column,tuple[Column,...]]=None, point_kwargs:dict[str:Any]=None,
             xlabel:str=None, xlabel_kwargs:dict[str:Any]=None, 
@@ -1074,7 +1086,9 @@ def scatter(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Ax
         Factors by which (usually powers of 10) to rescale values of colx and coly.
         If None, defaults to (1.0, 1.0). The default is None.
     record : bool, optional
-        Whether to record the column in cache or not. The default is False.
+        Whether to record the column in cache or not.
+        If None, use default from ``rcParams['plot.record']`` .
+        The default is None.
     point_func : Callable[[np.ndarray,np.ndarray,...],dict[str:Any]], optional
         Callable that takes arrays from colx, coly, and those specified in 
         ``point_cols`` as args, and point_kwargs as kwargs, and returns dictionary
@@ -1148,7 +1162,7 @@ def _mean_interval(carrbin:np.ndarray, carrav:np.ndarray,
 
 def _mean_intervalplot(data:DataS, colbin:Column, colav:Column, gate:GateGroup=None, 
                        ax:plt.Axes=None, bins:np.ndarray|int=10, include_unit:bool=True,
-                       rescale:tuple[float,float]=None, record:bool=False,
+                       rescale:tuple[float,float]=None, record:bool=None,
                        thresh:int=20, 
                        orientation:Literal['vertical','horizontal']='vertical',
                        xlabel:str=False, xlabel_kwargs:dict[str:Any]=None, 
@@ -1184,7 +1198,7 @@ def _mean_intervalplot(data:DataS, colbin:Column, colav:Column, gate:GateGroup=N
 
 def plot_meaninterval(data:DataS, colbin:Column, colav:Column, gate:GateGroup=None, 
                       ax:plt.Axes=None, bins:np.ndarray|int=10, include_unit:bool=True,
-                      rescale:tuple[float,float]=None, record:bool=False,
+                      rescale:tuple[float,float]=None, record:bool=None,
                       thresh:int=20, 
                       orientation:Literal['vertical','horizontal']='vertical',
                       xlabel:str=False, xlabel_kwargs:dict[str:Any]=None, 
@@ -1217,7 +1231,9 @@ def plot_meaninterval(data:DataS, colbin:Column, colav:Column, gate:GateGroup=No
         Factors by which (usually powers of 10) to rescale values of colx and coly.
         If None, defaults to (1.0, 1.0). The default is None.
     record : bool, optional
-        Whether to record the column in cache or not. The default is False.
+        Whether to record the column in cache or not, 
+        If None, use default from ``rcParams['plot.record']`` .
+        The default is None.
     thresh : int, optional
         Minimum number of rows in a given range for colbin in order for point to
         be plotted. If number of rows is below, that bin will be given a NaN. 
@@ -1265,7 +1281,7 @@ def plot_meaninterval(data:DataS, colbin:Column, colav:Column, gate:GateGroup=No
 
 def scatter_meaninterval(data:DataS, colav:Column, colbin:Column, gate:GateGroup=None, 
                          ax:plt.Axes=None, bins:np.ndarray|int=10, include_unit:bool=True,
-                         rescale:tuple[float,float]=None, record:bool=False,
+                         rescale:tuple[float,float]=None, record:bool=None,
                          thresh:int=20, 
                          orientation:Literal['vertical','horizontal']='vertical',
                          xlabel:str=False, xlabel_kwargs:dict[str:Any]=None, 
@@ -1298,7 +1314,9 @@ def scatter_meaninterval(data:DataS, colav:Column, colbin:Column, gate:GateGroup
         Factors by which (usually powers of 10) to rescale values of colx and coly.
         If None, defaults to (1.0, 1.0). The default is None.
     record : bool, optional
-        Whether to record the column in cache or not. The default is False.
+        Whether to record the column in cache or not.
+        If None, use default from ``rcParams['plot.record']`` .
+        The default is None.
     thresh : int, optional
         Minimum number of rows in a given range for colbin in order for point to
         be plotted. If number of rows is below, that bin will be given a NaN. 
@@ -1364,7 +1382,7 @@ def _proc_col(a:np.ndarray, c:np.ndarray, func:Literal['mean','median','str','er
 
 def errorbars(data:DataS, colx:Column, coly:Column, colcat:Column,
               gate:GateGroup=None, ax:plt.Axes=None,
-              include_unit:bool=True, rescale:tuple[float,float]=None, record:bool=False,
+              include_unit:bool=True, rescale:tuple[float,float]=None, record:bool=None,
               xcenter:Literal['mean','median']|Callable[[np.ndarray],float]='mean', 
               ycenter:Literal['mean','median']|Callable[[np.ndarray],float]='mean',
               xerr:Literal['std','sem']|Callable[[np.ndarray],float]|None='std', 
@@ -1400,7 +1418,9 @@ def errorbars(data:DataS, colx:Column, coly:Column, colcat:Column,
         Factors by which (usually powers of 10) to rescale values of colx and coly.
         If None, defaults to (1.0, 1.0). The default is None.
     record : bool, optional
-        Whether to record the column in cache or not. The default is False.
+        Whether to record the column in cache or not.
+        If None, use default from ``rcParams['plot.record']`` .
+        The default is None.
     xcenter : Literal['mean','median']|Callable[[np.ndarray],float], optional
         Type of center moment to use for x axis, may be ``'mean'`` or ``'median'``, or *callable* .
         If callable, must take single array and return a float of the center value.
@@ -1759,7 +1779,7 @@ def _axim(ax:plt.Axes)->Callable[[np.ndarray,np.ndarray,np.ndarray,...],mpl.imag
 
 def kdeplot(data:DataS, *args:Column, gate:GateGroup=None, ax:plt.Axes=None, 
             plot_style:str|Callable=None,
-            include_unit:bool=False, rescale:Sequence[float]=None, record:bool=False,
+            include_unit:bool=False, rescale:Sequence[float]=None, record:bool=None,
             weights:np.ndarray=None,
             rescale_factor:Callable[[np.ndarray],float]|float=None, edges:bool=False,
             sigmax:ArrReal=None, sigmay:ArrReal=None, rho:ArrReal=None,
@@ -1794,7 +1814,9 @@ def kdeplot(data:DataS, *args:Column, gate:GateGroup=None, ax:plt.Axes=None,
         Factor by which to rescale values of each colvalumn. If not specified, assume
         1.0. The default is None.
     record : bool, optional
-        Whether to record the column in cache or not. The default is False.
+        Whether to record the column in cache or not.
+        If None, use default from ``rcParams['plot.record']`` .
+        The default is None.
     weights : np.ndarray, optional
         Weight of each point in datax/datay, if None, assume equal weight to all
         points. The default is None.
@@ -1899,7 +1921,7 @@ _cpos_map = {0:(1,0), 1:(1,1), 2:(0,1), 3:(0,0)}
 
 def jointplot(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, 
               fig:plt.Figure=None, axmat:np.ndarray[plt.Axes]=None,
-              include_unit:bool=True, rescale:tuple[Real,Real]=None, record:bool=False,
+              include_unit:bool=True, rescale:tuple[Real,Real]=None, record:bool=None,
               cxlabel:str=None, cxlabel_kwargs:dict=None, cylabel:str=None, cylabel_kwargs:dict=None,
               xxlabel:str=None, xxlabel_kwargs:dict=None, xylabel:str=None, xylabel_kwargs:dict=None,
               yxlabel:str=None, yxlabel_kwargs:dict=None, yylabel:str=None, yylabel_kwargs:dict=None,
@@ -1939,7 +1961,9 @@ def jointplot(data:DataS, colx:Column, coly:Column, gate:GateGroup=None,
         Factors by which (usually powers of 10) to rescale values of colx and coly.
         If None, defaults to (1.0, 1.0). The default is None.
     record : bool, optional
-        Whether to record the column in cache or not. The default is False.
+        Whether to record the column in cache or not.
+        If None, use default from ``rcParams['plot.record']`` .
+        The default is None.
     cxlabel : str, optional
         Name for x-axis label in center axis. The default is None.
     cxlabel_kwargs : dict, optional

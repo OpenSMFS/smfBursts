@@ -1326,11 +1326,15 @@ class DetDef:
     def __getattr__(self, attr):
         if attr.endswith('_stride'):
             array, attr_ = self.strides, attr.split('_stride')[0]
+        elif attr.endswith('_group'):
+            array, attr_ = chain((self.size, ), self.strides), attr.split('_group')[0]
+        elif attr.endswith('_stream_id_to_channel'):
+            return lambda stream_id: self._stream_id_to_channel_id(attr.split('_stream_id_to_channel')[0], stream_id)
         else:
             array, attr_ = self.shape, attr
-        for i, name in enumerate(self._params):
+        for name, val in zip(self._params, array):
             if name == attr_:
-                return array[i]
+                return val
         raise AttributeError(f"DetDef has no attribute {attr}")
 
     def __getitem__(self, key):
@@ -1470,12 +1474,20 @@ class DetDef:
             out = out.render_positive(self, convert_all=True)
         return out
 
+    def _stream_id_to_channel_id(self, attr:str, stream_id:int|np.ndarray[np.uint8])->int|np.ndarray[np.uint8]:
+        for name, group, stride in zip(self._params, 
+                                       chain((self.size, ), self.strides), 
+                                       self.strides):
+            if attr == name:
+                return (stream_id // group) % stride
+        raise AttributeError(f"DetDef has no attribute {attr}")
+
     def __str__(self):
         return 'DetDef' + ''.join(f'{n}{p}' for n, p in zip(self.shape, self._params) if n != 1)
 
     def __repr__(self):
         return str(self) + f" at 0x{id(self):x}"
-        
+
 
 def check_PhSel(val:PhSel, render_positive:bool=False, detdef:DetDef=None)->PhSel:
     """

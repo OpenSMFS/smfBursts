@@ -1,4 +1,23 @@
 TY  - JOUR
+TI  - The Phasor Approach to Fluorescence Lifetime Imaging Analysis
+AU  - Digman, Michelle A.
+AU  - Caiolfa, Valeria R.
+AU  - Zamai, Moreno
+AU  - Gratton, Enrico
+T2  - Biophysical Journal
+DA  - 2008/01//
+PY  - 2008
+DO  - 10.1529/biophysj.107.120154
+VL  - 94
+IS  - 2
+SP  - L14
+EP  - L16
+PB  - Elsevier
+SN  - 00063495
+UR  - http://dx.doi.org/10.1529/biophysj.107.120154
+L4  - https://linkinghub.elsevier.com/retrieve/pii/S0006349508707112
+ER  - 
+TY  - JOUR
 T1  - Monitoring conformational dynamics of a single molecule by selective fluorescence spectroscopy
 AU  - Eggeling, C.
 AU  - Fries, J. R.
@@ -188,6 +207,26 @@ PB  - American Chemical Society
 SN  - 0001-4842
 ER  - 
 TY  - JOUR
+TI  - Time-Dependent Fluorescence Depolarization Analysis in Three-Dimensional Microspectroscopy
+AU  - Koshioka, Masanori
+AU  - Sasaki, Keiji
+AU  - Masuhara, Hiroshi
+T2  - Applied Spectroscopy
+DA  - 1995/02//
+PY  - 1995
+DO  - 10.1366/0003702953963652
+DP  - DOI.org (Crossref)
+VL  - 49
+IS  - 2
+SP  - 224
+EP  - 228
+J2  - Appl Spectrosc
+LA  - en
+SN  - 0003-7028, 1943-3530
+UR  - https://journals.sagepub.com/doi/10.1366/0003702953963652
+Y2  - 2026/09/18/07:02:48
+ER  - 
+TY  - JOUR
 TI  - Probing structural heterogeneities and fluctuations of nucleic acids and denatured proteins
 AU  - Laurence, Ted A.
 AU  - Kong, Xiangxu
@@ -284,6 +323,27 @@ SN  - 15206106
 UR  - https://pubs.acs.org/doi/10.1021/jp063483n
 ER  - 
 TY  - JOUR
+TI  - Time-resolved burst variance analysis
+AU  - Terterov, Ivan
+AU  - Nettels, Daniel
+AU  - Makarov, Dmitrii E.
+AU  - Hofmann, Hagen
+T2  - Biophysical Reports
+DA  - 2023/09//
+PY  - 2023
+DO  - 10.1016/j.bpr.2023.100116
+DP  - DOI.org (Crossref)
+VL  - 3
+IS  - 3
+SP  - 100116
+J2  - Biophysical Reports
+LA  - en
+SN  - 26670747
+UR  - https://linkinghub.elsevier.com/retrieve/pii/S2667074723000174
+Y2  - 2026/09/28/21:14:34
+L1  - https://pmc.ncbi.nlm.nih.gov/articles/PMC10406964/pdf/main.pdf
+ER  - 
+TY  - JOUR
 T1  - Identifying Molecular Dynamics in Single-Molecule FRET Experiments with Burst Variance Analysis
 AU  - Torella, Joseph P.
 AU  - Holden, Seamus J.
@@ -349,6 +409,29 @@ L2  - https://journals.plos.org/plosone/article/file?id=10.1371/journal.pone.016
 U1  - 27532626 [PMID]
 U1  - PMC4988647 [PMCID]
 Y2  - 2025/10/21
+ER  - 
+TY  - JOUR
+TI  - Identification of Single Molecules in Aqueous Solution by Time-Resolved Fluorescence Anisotropy
+AU  - Schaffer, J.
+AU  - Volkmer, A.
+AU  - Eggeling, C.
+AU  - Subramaniam, V.
+AU  - Striker, G.
+AU  - Seidel, C. A. M.
+T2  - The Journal of Physical Chemistry A
+DA  - 1999/01/01/
+PY  - 1999
+DO  - 10.1021/jp9833597
+DP  - DOI.org (Crossref)
+VL  - 103
+IS  - 3
+SP  - 331
+EP  - 336
+J2  - J. Phys. Chem. A
+LA  - en
+SN  - 1089-5639, 1520-5215
+UR  - https://pubs.acs.org/doi/10.1021/jp9833597
+Y2  - 2026/09/27/13:23:47
 ER  - 
 TY  - JOUR
 TI  - Photon-by-Photon Determination of Emission Bursts from Diffusing Single Chromophores

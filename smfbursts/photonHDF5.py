@@ -4,6 +4,8 @@
 """
 Module for loading raw data from PhotonHDF5 files, and creating processed
 :class:`photondata.PhotonData` objects.
+
+This module can also be accessed using the alias ``smfbursts.hdf5``
 """
 
 import re

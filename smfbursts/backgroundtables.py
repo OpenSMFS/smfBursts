@@ -4,7 +4,10 @@
 # Author: Paul David Harris
 # email: harrip@gmail.com
 """
+This module can also be accessed with the alias ``smfbursts.bg``
+
 Module for assesment of background rates in data.
+
 
 Defines base and child tables :class:`Periods` and :class:`BG` respectively for
 division of data in to consecutive periods (for background assemsment) and 

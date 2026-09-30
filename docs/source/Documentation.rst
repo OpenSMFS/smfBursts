@@ -13,6 +13,7 @@ Documentation
     plottingdoc
     fretfactorydoc
     cfuncs
+    ColumnList
 
 .. toctree::
     :caption: Citations

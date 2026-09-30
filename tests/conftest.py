@@ -101,3 +101,8 @@ def default_bg(data)->smf.Param:
 @pytest.fixture
 def sper_bg(data)->smf.Param:
     return smf.fretfactory.make_bg(data, period=3600.0)['bg']
+
+
+@pytest.fixture(params=['thresh', 'mean', 'max'])
+def irfstyle(request):
+    return request.param

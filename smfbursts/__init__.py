@@ -42,6 +42,7 @@ from .datamodel.immutabledata import encode_msgpack, decode_msgpack
 from .datamodel.tables import Param, Column, Gate, MappedGate, GateGroup, GG_all, GG_none
 from .datamodel import gates
 from .datamodel import multifit
+mfit = multifit
 from .datamodel.gates import (
     make_geq_gate, make_lt_gate, make_range_gate, make_ellipsoid_gate, 
     make_inv_ellipsoid_inclusive_gate, make_isin_gate
@@ -58,14 +59,19 @@ from .datamodel import has_matplotlib, has_numba
 from ._citations import smfbursts_citations
 from .photondata import PhotonData, PhotonDataList
 from .backgroundtables import Periods, BG, make_bg_param
-from . import backgroundtables as bg
+from . import backgroundtables
+bg = backgroundtables
 from .bursttables import Bursts, BurstOvlp
-from .childphotontables import NphBG, Ratios, KDE
+from .childphotontables import NphBG, Ratios, KDE, Phasor
 from . import ph_sel
 from .ph_sel import PhSel, DetDef
 from .import photonHDF5
+hdf5 = photonHDF5
 from . import loadraw
+lr = loadraw
 from . import fretfactory
+ff = fretfactory
+
 
 if has_matplotlib:
     from . import plot

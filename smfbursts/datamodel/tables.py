@@ -1655,6 +1655,14 @@ def _column_sort(column:Column)->tuple:
     return column._sort_tuple
 
 
+class ColumnWarning(UserWarning):
+    """
+    Warning for creation of column that may technically be allowed, but is
+    likely to produce meaningless or otherwise problematic values.
+    """
+    pass
+
+
 ###############################################################################
 # Name overlap codes as distinct variables
 ###############################################################################

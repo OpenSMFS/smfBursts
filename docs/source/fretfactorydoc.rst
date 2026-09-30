@@ -1,5 +1,5 @@
-Factory Functions
-=================
+FRET Factory
+============
 
 .. automodule:: smfbursts.fretfactory
    :members:

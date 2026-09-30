@@ -4,6 +4,8 @@
 # Author: Paul David Harris
 # email: harrip@gmail.com
 r"""
+This module can also be accessed with the alias ``smfbursts.ff``
+
 The ``smfbursts.bursttables`` module defines |BasePhotonTable| classes for bursts.
 
 The :class:`Bursts` class defines bursts,
@@ -65,7 +67,7 @@ from .ph_sel import PhSel, PhStream, DetDef, TV_PhSel, sort_phsels, phsel_all
 import smfbursts.cfuncs as smc
 
 
-from smfbursts import rcParams
+from . import rcParams
 
 
 BurstSearchFunc = Callable[[PhotonData,dict[str,Any],dict[str,PhotonTable]],tuple[np.ndarray[np.int64],np.ndarray[np.int64]]]
@@ -520,12 +522,20 @@ class Bursts(BasePhotonTable):
     by the 'func' parameter. Additional params and parents are defined by the
     function.
     
-    smfBursts comes with 2 registered burst search functions\:
+    Note that this class is made a top-level class, ie can be accessed as
+    ``smfbursts.PhotonData``.
+    
+    smfBursts comes with 4 registered burst search functions\:
     
     #. :func:`burstsearch_mwindowF_bg` sets threshold as multiple of background 
        (encouraged).
     #. :func:`burstsearch_mwindowP_bg` sets threshodl by Poission probability 
        above background (discouraged.)
+    #. :func:`burstsearch_changepoint_maxrate` change-point burst search with
+       molecular brightness expectation set by the maximum photon rate
+    #. :func:`burstsearch_changepoint_constantsbr` change-point burst search with
+       molecular brightness expectation set to be proportional to the background
+       (constant singal to background ratio)
     
     Additional fucntions may be defined using the :func:`register_burstsearch_func`
     function.
@@ -572,6 +582,36 @@ class Bursts(BasePhotonTable):
             ie if burst ranges are separeted by less than fuse, output will join 
             them together. If 0.0 will only fuse bursts that have overlap, 
             if -1.0 no fuse will be performed. The default is 0.0.
+    
+    When func = :func:`burstsearch_changepoint_maxrate` it will have the
+    following params\:
+        
+        stream : |PhSel|
+            Photon selection over which to search for bursts.
+            The default is :code:`PhSel('all')`.
+        m : int
+            Size of sliding window. The default is 30.
+        alpha : float
+            Probability of false positive (type I) error.
+            The default is 0.0001
+        beta : float
+            Probability of false negative (type II) error.
+            The default is 0.01
+    
+    When func = :func:`burstsearch_changepoint_constantsbr` it will have the
+    following params\:
+        
+        stream : |PhSel|
+            Photon selection on which to perform the burst search.
+            The default is :code:`PhSel('all')`.
+        sbr : int
+            Signal to background ratio. The default is 20.
+        alpha : float
+            Probability of false positive (type I) error.
+            The default is 0.0001
+        beta : float
+            Probability of false negative (type II) error.
+            The default is 0.01
 
     
     Note that the 'stream', 'm' and 'fuse' params are common to both.
@@ -604,7 +644,6 @@ class Bursts(BasePhotonTable):
     parent_defs = tuple() #: :meta private:
     column_defs = make_base_column_defs() #: :meta private:
 
-    @cite('NirJPCB2006', purpose='Dual Channel Burst Search')
     def __init_columns__(self):
         starts, stops = self._compute_startstop
         istarts, istops = smc.index_ranges(self.origin.times, starts, stops)
@@ -746,6 +785,9 @@ class BurstOvlp(BasePhotonTable):
     But extends the "and" gate to any arbitrary number and logical operation
     using a truthtable.
     
+    Note that this class is made a top-level class, ie can be accessed as
+    ``smfbursts.BurstOvlp``.
+    
     Params
     ------
         fuse : float
@@ -811,6 +853,7 @@ class BurstOvlp(BasePhotonTable):
     #: :meta private:
     column_defs = make_base_column_defs()
 
+    @cite('NirJPCB2006', purpose='Dual Channel Burst Search')
     def __init_columns__(self):
         starts, stops = list(), list()
         for base in self.param.parents['bases']:

@@ -11,20 +11,29 @@ based |Param|
 
 
 .. |Param| replace:: :class:`Param <smfbursts.datamodel.tables.Param>`
-.. |Pbaseparam| replace:: :attr:`base_parent <smfbursts.datamodel.tables.Param.base_param`
+.. |paramproperty| replace:: :class:`smfbursts.datamodel.tables.paramproperty`
+.. |Pbaseparam| replace:: :attr:`base_parent <smfbursts.datamodel.tables.Param.base_param>`
 .. |BasePhotonTable| replace:: :class:`BasePhotonTable <smfbursts.photondata.BasePhotonTable>`
 .. |ChildPhotonTable| replace:: :class:`ChildPhotonTable <smfbursts.photondata.ChildPhotonTable>`
 .. |Bursts| replace:: :class:`Bursts <smfbursts.bursttables.Bursts>`
 .. |BurstOvlp| replace:: :class:`BurstOvlp <smfbursts.bursttables.BurstOvlp>`
+.. |PhSel| replace:: :class:`PhSel <smfbursts.ph_sel.PhSel>`
+.. |Koshioka| replace:: `Koshioka, Sasaki, Masuhara 1995. <https://doi.org/10.1366/0003702953963652>`__
+.. |Schaffer| replace:: `Schaffer et. al. 1999. <https://doi.org/10.1021/jp9833597>`__
+.. |Digman| replace:: `Digman et. al. 2008 <https://doi.org/10.1529/biophysj.107.120154>`__
+.. |Tomov| replace:: `Tomov et. al. 2012 <https://doi.org/10.1016/j.bpj.2011.11.4025>`__
 """
 from typing import Any, ClassVar, Literal
 from collections.abc import Iterator, Sequence, Callable
 from functools import partial
 from warnings import warn
+import warnings
 from itertools import chain, repeat, permutations
 from numbers import Real
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
+from scipy.optimize import minimize
 
 from .datamodel.utils import tupledict, arr_slc
 from .datamodel.immutabledata import (
@@ -32,21 +41,25 @@ from .datamodel.immutabledata import (
     TV_bool, TV_float, TV_int, TV_str, TV_ndarray, TV_PyCode, TV_tuple
                                       )
 from .datamodel.diskdict import DiskDict
-from .datamodel.tables import ParamDef, ParentDef, ColumnDef, Param, Column, as_paramdict, paramproperty
+from .datamodel.tables import (
+    ParamDef, ParentDef, ColumnDef, Param, Column, as_paramdict, 
+    paramproperty, parammethod
+    )
 from .cite import cite, add_citation
 from .photondata import (
-    PhSpec, PhotonData, PhotonTable, BasePhotonTable, ChildPhotonTable, BasePhotonTableLike, 
+    PhSpec, PhotonData, PhotonDataList, PhotonDataS, PhotonTable,
+    BasePhotonTable, ChildPhotonTable, BasePhotonTableLike, 
     _regularize_column_startstop, _regularize_ph_sel, 
-    _title_sels, _title_startstop_append, _title_unit_append, _pol_ps,
-    make_base_column_defs, ColKeyStart, ColKeyStop
+    _title_sels, _title_startstop_append, _title_unit_append, _pol_ps, 
+    _validate_anisotropy, _validate_lifetime, make_base_column_defs, 
+    ColKeyStart, ColKeyStop, get_phsel_ex_range, get_phsel_range_size
     )
 from .backgroundtables import BG
 from .ph_sel import PhSel, PhStream, DetDef, TV_PhSel, sort_phsels, phsel_all
 
 import smfbursts.cfuncs as smc
 
-
-_alloc_size:int = 512
+from . import rcParams
 
 
 def _get_nph_title(col:Column, name:str, include_unit:bool, origin:PhotonData)->str:
@@ -96,16 +109,17 @@ def _get_ratio_title(col:Column, name:str, include_unit:bool, origin:PhotonData)
 
 
 def _iter_anisotropy(table:PhotonTable, nph_name:str, phsel_p:PhSel, phsel_s:PhSel, 
-                     starttype:ColKeyStart, stoptype:ColKeyStop)->np.ndarray[np.double]:
+                     starttype:ColKeyStart, stoptype:ColKeyStop)->float:
     """General iterator function for anisotropy_[]"""
     for p, s in zip(table.iter_column(nph_name, phsel_p, starttype, stoptype),
                     table.iter_column(nph_name, phsel_p, starttype, stoptype)):
-        return (p-s)/(p+2*s)
+        dem = (p+2*s)
+        yield (p-s)/(p+2*s) if dem != 0.0 else np.nan
 
 
 def _calc_anisotropy(table:PhotonTable, nph_name:str, phsel_p:PhSel, phsel_s:PhSel, 
-                     starttype:ColKeyStart, stoptype:ColKeyStop):
-    """General igetter function for anisotropy_[]"""
+                     starttype:ColKeyStart, stoptype:ColKeyStop)->np.ndarray[np.double]:
+    """General getter function for anisotropy_[]"""
     p = table[nph_name, phsel_p, starttype, stoptype]
     s = table[nph_name, phsel_s, starttype, stoptype]
     with np.errstate(divide='ignore'):
@@ -132,21 +146,44 @@ def _get_anisotropy_title(col:Column, name:str, include_unit:bool=False, origin:
         title = rf'anis({par.tex_str(**kw)},\: {perp.tex_str(**kw)})'
     return _title_startstop_append(title, start, stop)
 
+_irf_styles = ('thresh', 'mean', 'max')
+IRFStyle = Literal[_irf_styles]
+TV_irfstyle = TV_str(isin=_irf_styles)
 
-def _get_nmunits(setup:PhSpec, sid:int, ex_stride:int, irf:DiskDict)->tuple[float,float,float]:
+
+def _get_nmstyle_info(origin:PhotonData, phsel:PhSel, style:IRFStyle)->tuple[int,float]:
+    ex_start, ex_stop = get_phsel_ex_range(origin.setup, phsel, force_contig=True)
+    sid = origin.detdef.get_stream_ids(phsel)[0]
+    tcspc_unit = origin.setup.tcspc_unit[sid % origin.detdef.ex_stride]
+    if style == 'thresh':
+        thresh =  origin.irf_thresh[phsel]
+    elif style == 'mean':
+        irf = origin.irf[phsel]
+        thresh = np.sum(np.arange(ex_stop - ex_start)*irf) / irf.sum() + ex_start
+    elif style == 'max':
+        irf = origin.irf[phsel]
+        thresh = np.argmax(irf) + ex_start
+    else:
+        raise ValueError(f"Invalid lifetime threshold {style}")
+    return ex_start, ex_stop, tcspc_unit, thresh
+
+
+def _get_nmunits(origin:PhotonData, phsel:PhSel, style:IRFStyle):
     """
     Compute the tcspc_unit, irf_mean, bg_mean of a given stream (sid)
 
     Parameters
     ----------
-    setup : PhSpec
-        Setup Spec of data.
-    sid : int
-        Single detector ID.
-    ex_stride : int
-        DetDef.ex_stride.
-    irf : DiskDict
-        IRF dict of choice (either thresh or irf).
+    origin : PhotonData
+        Data from which to extract nanomean units.
+    phsel : PhSel
+        Photon selection (must be single stream) for which to get the units.
+    style : {'thresh', 'mean', 'max'}
+        Method to determine threshold/center of IRF
+        
+        - 'thresh' use user set IRF threshold, set in origin.irf_tresh
+        - 'mean' use the mean of the IRF
+        - 'max' use the time of the maximum value in the IRF.
 
     Raises
     ------
@@ -165,21 +202,26 @@ def _get_nmunits(setup:PhSpec, sid:int, ex_stride:int, irf:DiskDict)->tuple[floa
         where start of excitation period is ``-irf_mean``.
 
     """
-    tcspc_unit = setup.tcspc_unit[sid%ex_stride]
-    ex_range = setup.ex_ranges[sid%ex_stride]
-    if ex_range.shape[0] != 1:
-        raise ValueError("can only compute nanomean of contiguous time range, split excitation ranges not allowed")
-    irf_c = irf[setup.detdef.stream_ids_to_PhSel(sid)]
-    if isinstance(irf_c, Real):
-        irf_mean = irf_c
-    else:
-        irf_mean = np.sum(np.arange(irf_c.size)*irf_c) / irf_c.sum() + ex_range[0,0]
-    bg_mean = np.diff(ex_range[0])[0] / 2 - irf_mean +  ex_range[0,0]
-    return tcspc_unit, irf_mean, bg_mean
+    ex_start, ex_stop, tcspc_unit, thresh = _get_nmstyle_info(origin, phsel, style)
+    bg_mean = (ex_stop - ex_stop) / 2 - thresh +  ex_start
+    return tcspc_unit, thresh, bg_mean
 
 
-def _extract_nmarrays(stream_ids:np.ndarray[np.uint8], setup:PhSpec, irf:DiskDict
-                      )->list[np.ndarray[np.float64],np.ndarray[np.float64],np.ndarray[np.float64]]:
+# def _get_nmunits(setup:PhSpec, sid:int, ex_stride:int, irf:DiskDict)->tuple[float,float,float]:
+#     ex_range = setup.ex_ranges[sid%ex_stride]
+#     if ex_range.shape[0] != 1:
+#         raise ValueError("can only compute nanomean of contiguous time range, split excitation ranges not allowed")
+#     irf_c = irf[setup.detdef.stream_ids_to_PhSel(sid)]
+#     if isinstance(irf_c, Real):
+#         irf_mean = irf_c
+#     else:
+#         irf_mean = np.sum(np.arange(irf_c.size)*irf_c) / irf_c.sum() + ex_range[0,0]
+#     bg_mean = np.diff(ex_range[0])[0] / 2 - irf_mean +  ex_range[0,0]
+#     tcspc_unit = setup.tcspc_unit[sid%ex_stride]
+#     return tcspc_unit, irf_mean, bg_mean
+
+
+def _extract_nmarrays(origin:PhotonData, phsel:PhSel, style:IRFStyle)->list[np.ndarray[np.float64],np.ndarray[np.float64],np.ndarray[np.float64]]:
     """
     Get the necessary nanomean bg arrays from stream ids.
 
@@ -202,14 +244,17 @@ def _extract_nmarrays(stream_ids:np.ndarray[np.uint8], setup:PhSpec, irf:DiskDic
         Expected mean of background (in TCSPC unit, shifted by irf_mean) fo 
         each detector id in stream_ids.
     """
-    ex_stride = setup.detdef.ex_stride
-    return list(map(np.array, zip(*(_get_nmunits(setup, sid, ex_stride, irf) for sid in stream_ids))))
+    sels = (origin.detdef.stream_ids_to_PhSel(i) for i in origin.detdef.get_stream_ids(phsel))
+    return list(map(np.array, zip(*(_get_nmunits(origin, sel, style) for sel in sels))))
 
 
 class NphBG(ChildPhotonTable):
     r"""
     Table for background corrected photon counts.
     No corrections for cross-talk and/or detection efficiencies.
+    
+    Note that this class is made a top-level class, ie can be accessed as
+    ``smfbursts.NphBG``.
     
     Params
     ------
@@ -237,23 +282,29 @@ class NphBG(ChildPhotonTable):
             counts per second in ph_sel, with background rate subtracted
         ratio_bg : float, (num_ph_sel:PhSel, dem_ph_sel:PhSel, starttype:{'istarttime', 'start'}, stoptype:{'istoptime', 'stop'})
             ratio of num_ph_sel to dem_ph_sel background adjusted counts.
-        nanomean_bg : float, (phsel:PhSel, mean:{'irf','thresh'}, starttype:str, stoptype:str)
-            Mean nanotime with correction for background counts. Uses the equation
+        nanomean_bg : float, (phsel:PhSel, irfstyle:{'thresh', 'mean', 'max'}, starttype:ColKeyStart, stoptype:ColKeyStop)
+            Mean nanotime with correction for background counts.Uses the equation
             
-            .. math:
+            .. math::
+            
+                \tau = \frac{ \left(\displaystyle\sum_{i=1}^{N}{t_{i}}\right) - n_{bg}\bar{t_{bg}}}{N-n_{bg}}
                 
-                \tau = \frac{\sum_{i=1}^{N}{t_{i}} - n_{bg}*\bar{t_{bg}}}{N-n_{bg}}
-        
-        
+                
             where :math:`N` is the total number of photons, :math:`t_{i}` is the
             nanotime of the :math:`i^{th}` photon in the burst, with time 0 set
-            by the choice of mean, if ``'irf'`` then set time 0 as mean of IRF,
-            if ``'thresh'``, set time 0 as ``irf_thresh``. :math:`n_{bg}` is the
+            by the choice of ``'irfstyle'``, 
+            if ``'thresh'``, set time 0 as ``irf_thresh``, 
+            if ``'mean'`` then set time 0 as mean of IRF,
+            if ``'max'`` then set time 0 as time of maximum value of IRF.
+            
+            :math:`n_{bg}` is the
             estimated number of photons in the burst 
             (using ``rangecounts`` column of :class:`BG <smfbursts.background.BG>`)
             and :math:`\bar{t_{bg}}` is the expected mean of the background, assuming
             background is equally likely across all TCSPC bins in the excitation range.
             This mean is set using the same time scale as :math:`t_{i}`.
+        nmdiff_bg : float, (phsel_a:PhSel, phsel_b:PhSel, mean:{'irf', 'thresh'}, starttype:ColKeyStart, stoptype:ColKeyStop)
+            Difference in nanomean_bg between ``phsel_a`` and ``phsel_b``.
     
     Remapped Columns
     ----------------
@@ -277,7 +328,7 @@ class NphBG(ChildPhotonTable):
                    )
     #: :meta private:
     column_defs = (
-        ColumnDef('nph_bg', (PhSel,TV_str, TV_str), 0, 'some', 
+        ColumnDef('nph_bg', (PhSel,TV_str, TV_str), 0, 'some',
                   get_func='_get_nph_bg', iter_func='_iter_nph_bg',
                   reg_func='_regularizecolumn_nph_bg_sbr', title_func='_get_nph_bg_title',
                   unit='cnts s^{-1}', index_unit='cnts s-1', title_is_tex=True),
@@ -297,9 +348,13 @@ class NphBG(ChildPhotonTable):
                   get_func='_get_anisotropy_bg', iter_func='_iter_anisotropy_bg',
                   reg_func='_regularizecolumn_ratio_bg', title_func='_get_anisotropy_bg_title',
                   title_is_tex=True),
-        ColumnDef('nanomean_bg', (PhSel, TV_str(isin=('irf', 'thresh')), TV_str, TV_str), 0, 'user', 
+        ColumnDef('nanomean_bg', (PhSel, TV_irfstyle, TV_str, TV_str), 0, 'user',
                   iter_func='_iter_nanomean_bg', reg_func='_regularizecolumn_nanomean_bg',
                   title_func='_get_nanomean_bg_title', unit='s'),
+        ColumnDef('nmdiff_bg', (PhSel, PhSel, TV_irfstyle, TV_str, TV_str), 0, 'user', 
+                  iter_func='_iter_nmdiff_bg', get_derived=True,
+                  dtype=np.dtype('<f8'), unit='s',
+                  title_func='_get_nmdiff_bg_title', reg_func="_regularizecolumn_nmdiff_bg",),
         ColumnDef('E_bg', (TV_str, TV_str), 0, remap='_replace_E_bg', reg_func='_regularizecolumn_ES_bg'),
         ColumnDef('S_bg', (TV_str, TV_str), 0, remap='_replace_S_bg', reg_func='_regularizecolumn_ES_bg'),
                    )
@@ -382,11 +437,18 @@ class NphBG(ChildPhotonTable):
 
     def _iter_anisotropy_bg(self, phsel_p:PhSel, phsel_s:PhSel, starttype:str, stoptype:str)->Iterator[float]:
         """Iter function for anisotropy_bg column"""
+        _validate_anisotropy(phsel_p, phsel_s, self.param.detdef, self.origin.setup)
         yield from _iter_anisotropy(self, 'nph_bg', phsel_p, phsel_s, starttype, stoptype)
 
     def _get_anisotropy_bg(self, phsel_p:PhSel, phsel_s:PhSel, starttype:str, stoptype:str)->np.ndarray[np.float64]:
         """Getter function for anisotropy_bg column"""
+        _validate_anisotropy(phsel_p, phsel_s, self.param.detdef, self.origin.setup)
         return _calc_anisotropy(self, 'nph_bg', phsel_p, phsel_s, starttype, stoptype)
+
+    @classmethod
+    def _check_anisotropy_bg(cls, col:Column):
+        sel_p, sel_s, _, _ = col.keytup
+        _validate_anisotropy(sel_p, sel_s, col.source_param.detdef)
 
     @classmethod
     def _get_anisotropy_bg_title(cls, col:Column, include_unit:Real=False, origin:PhotonData=None)->str:
@@ -444,13 +506,13 @@ class NphBG(ChildPhotonTable):
         title = _title_startstop_append(title, col.keytup[1], col.keytup[2])
         return f'${title}$'
     
-    def _iter_nanomean_bg(self, phsel:PhSel, mean:Literal['irf','thresh'], starttype:str, stoptype:str)->float:
+    def _iter_nanomean_bg(self, phsel:PhSel, irfstyle:IRFStyle, starttype:ColKeyStart, stoptype:ColKeyStop)->float:
         """Iter func for nanomean corrected for bg"""
+        _validate_lifetime(phsel, self.param.detdef)
         phsel = phsel.render_positive(self.origin.detdef)
         stream_ids = self.origin.detdef.get_stream_ids(phsel)
         phsels = tuple(self.origin.detdef.stream_ids_to_PhSel(sid) for sid in stream_ids)
-        irf = self.origin.irf_thresh if mean == 'thresh' else self.origin.irf
-        tcspc_units, irf_means, bg_means = _extract_nmarrays(stream_ids, self.origin.setup, irf)
+        tcspc_units, irf_means, bg_means = _extract_nmarrays(self.origin, phsel, irfstyle)
         base, bg = self.parents['base'], self.parents['bg']
         if stream_ids.size == 1:
             tcspc_unit = tcspc_units[0]
@@ -475,28 +537,62 @@ class NphBG(ChildPhotonTable):
                     nanosum += np.sum(nanos[mask], dtype=np.float64)-mask_size*irf_means[i] - bgcnt*bg_means[i]
                     nanocnts += mask_size - bgcnt
                 yield tcspc_unit*nanosum/nanocnts
+    
+    @classmethod
+    def _check_nanomean_bg(cls, col:Column):
+        _validate_lifetime(col.keytup[0], col.source_param.detdef)
 
     @classmethod
     def _get_nanomean_bg_title(cls, col:Column, include_unit:Real|bool=False, origin:PhotonData=None)->str:
         """Nanomean corrected for background title func"""
         title = _title_sels(r'\bar{_{bg}\tau}', origin, col.keytup[0])[0]
+        title = _title_startstop_append(title, col.keytup[2], col.keytup[3])
         title = _title_unit_append(title, 's', include_unit)
         return f'${title}$'
-    
+
     @classmethod
-    def _regularizecolumn_nanomean_bg(cls, source_param:Param, *args)->tuple[PhSel,Literal['irf','thresh'],str,str]:
+    def _regularizecolumn_nanomean_bg(cls, source_param:Param, *args)->tuple[PhSel,IRFStyle,ColKeyStart,ColKeyStop]:
         phsel = [arg for arg in args if isinstance(arg, (PhSel, PhStream))]
         if len(phsel) != 1:
             raise ValueError("Only 1 PhSel may be specified in nanomean_bg column")
         phsel = phsel[0] if isinstance(phsel[0], PhSel) else PhSel(phsel[0])
-        mean = [arg for arg in args if arg in ('irf', 'thresh')]
-        if len(mean) > 1:
-            raise ValueError("multiple definitions for mean type in nanomean_bg column")
-        mean = mean[0] if mean else 'irf'
-        startstop = tuple(arg for arg in args if not isinstance(arg, (PhSel, PhStream)) and arg not in ('irf', 'thresh'))
+        irfstyle = [arg for arg in args if arg in _irf_styles]
+        if len(irfstyle) > 1:
+            raise ValueError("multiple definitions for irfstyle type in nanomean_bg column")
+        irfstyle = irfstyle[0] if irfstyle else 'mean'
+        startstop = tuple(arg for arg in args if not isinstance(arg, (PhSel, PhStream)) and arg not in _irf_styles)
         starttype, stoptype = cls._regularize_column_startstop(source_param, *startstop)
-        return phsel, mean, starttype, stoptype
-        
+        return phsel, irfstyle, starttype, stoptype
+    
+    def _iter_nmdiff_bg(self, phsel_a:PhSel, phsel_b:PhSel, irfstyle:IRFStyle, starttype:ColKeyStart, stoptype:ColKeyStop)->Iterator[float]:
+        """Iterator for difference between nanomeans"""
+        for nma, nmb in zip(self.iter_column('nanomean_bg', phsel_a, irfstyle, starttype, stoptype),
+                            self.iter_column('nanomean_bg', phsel_b, irfstyle, starttype, stoptype)):
+            yield nma - nmb
+
+    @classmethod
+    def _regularizecolumn_nmdiff_bg(cls, source_param:Param, *args)->tuple[PhSel,PhSel,IRFStyle,ColKeyStart,ColKeyStop]:
+        phsel = [arg for arg in args if isinstance(arg, (PhSel, PhStream))]
+        if len(phsel) != 2:
+            raise ValueError(f"Must specify 2 PhSels in nmdiff_bg column, got {len(phsel)}")
+        phsel_a = phsel[0] if isinstance(phsel[0], PhSel) else PhSel(phsel[0])
+        phsel_b = phsel[1] if isinstance(phsel[1], PhSel) else PhSel(phsel[1])
+        irfstyle = [arg for arg in args if arg in _irf_styles]
+        if len(irfstyle) > 1:
+            raise ValueError("multiple definitions for irfstyle type in nanomean_bg column")
+        irfstyle = irfstyle[0] if irfstyle else 'mean'
+        startstop = tuple(arg for arg in args if not isinstance(arg, (PhSel, PhStream)) and arg not in _irf_styles)
+        starttype, stoptype = cls._regularize_column_startstop(source_param, *startstop)
+        return phsel_a, phsel_b, irfstyle, starttype, stoptype
+
+    @classmethod
+    def _get_nmdiff_bg_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """Title getter function for nanomean"""
+        ta, tb = _title_sels(r'\bar{_{bg}\tau}', origin, *col.keytup[:2])
+        title = _title_startstop_append(f'{ta}-{tb}', col.keytup[2], col.keytup[3])
+        title = _title_unit_append(title, 's', include_unit)
+        return f'${title}$'
+
 
 def _index_broadcast_2dto2d(ndim:int, nmat:int, i:int)->tuple[slice|np.newaxis,...]:
     """
@@ -550,9 +646,67 @@ def _broadcast_2dto2d(*args:np.ndarray)->np.ndarray:
     return out.reshape(tuple(np.prod([arg.shape[i] for arg in args]) for i in range(args[0].ndim)))
 
 
+def _extract_mixing_streams(detdef:DetDef, sel:PhSel)->tuple[list[PhSel],np.ndarray[np.uint8]]:
+    id_p = detdef.get_stream_ids(sel)
+    ils = id_p // detdef.em_stride
+    sels = [detdef.stream_ids_to_PhSel(d_id) for d_id in id_p]
+    return sels, ils
+
+
+def _iter_anisotropy_mixing(table:"Ratios", sel_p:PhSel, sel_s:PhSel, starttype:ColKeyStart, stoptype:ColKeyStop)->Iterator[np.double]:
+    detdef = table.detdef
+    sels_p, il2 = _extract_mixing_streams(detdef, sel_p)
+    sels_s, il1 = _extract_mixing_streams(detdef, sel_s)
+    l1, l2 = table.param.params['l1'], table.param.params['l2']
+    l1_f, l2_f = 1-3*l2[il2], 2-3*l1[il1]
+    inphs_p = zip(*(table.iter_column('nph_c', sel, starttype, stoptype) for sel in sels_p))
+    inphs_s = zip(*(table.iter_column('nph_c', sel, starttype, stoptype) for sel in sels_s))
+    for nph_p, nph_s in zip(inphs_p, inphs_s):
+        num = sum(nph_p) - sum(nph_s)
+        dem = sum(li2*p for p, li2 in zip(nph_p, l2_f)) + sum(li1*s for s, li1 in zip(nph_s, l1_f))
+        yield num / dem if dem != 0.0 else np.nan
+
+
+def _calc_anisotropy_mixing(table:"Ratios", sel_p:PhSel, sel_s:PhSel, starttype:ColKeyStart, stoptype:ColKeyStop)->np.ndarray[np.double]:
+    detdef = table.detdef
+    l1, l2 = table.param.params['l1'], table.param.params['l2']
+    sels_p, il2 = _extract_mixing_streams(detdef, sel_p)
+    sels_s, il1 = _extract_mixing_streams(detdef, sel_s)
+    nphs_p = [table['nph_c', sel, starttype, stoptype] for sel in sels_p]
+    nphs_s = [table['nph_c', sel, starttype, stoptype] for sel in sels_s]
+    numerator = sum(nphs_p) - sum(nphs_s)
+    dem_par = sum((1-3*l2[li])*sel for sel, li in zip(nphs_p, il2))
+    dem_perp = sum((2-3*l1[li])*sel for sel, li in zip(nphs_s, il1))
+    with np.errstate(divide='ignore'):
+        out = numerator / (dem_par - dem_perp)
+    return out
+
+
+def _get_rotational_corr_c_title(col:Column, name:str, include_unit:bool=False, origin:PhotonData=None)->str:
+    kw = {'name':name}
+    par, perp, mean, r0, start, stop = col.keytup
+    fuse = par | perp
+    overlap = par | perp
+    detdef = None
+    if origin is not None:
+        kw.update(detdef=origin.detdef, stream_names=origin.get_stream_names())
+        fuse = fuse.render_positive(origin.detdef, convert_all=True)
+        overlap = overlap.render_positive(origin.detdef, convert_all=True)
+        detdef = origin.detdef
+    if not overlap and _pol_ps(fuse, detdef, None if origin is None else origin.setup):
+        kw['name'] = r'{\rho}'
+        title = fuse.tex_str(kw)
+    else:
+        title = rf'rotational\:correlation({par.tex_str(**kw)},\: {perp.tex_str(**kw)})'
+    return _title_startstop_append(title, start, stop)
+        
+
 class Ratios(ChildPhotonTable):
     r"""
     Table for fully correct ratios between different photon streams.
+    
+    Note that this class is made a top-level class, ie can be accessed as
+    ``smfbursts.PhotonData``.
     
     Params
     ------
@@ -560,6 +714,16 @@ class Ratios(ChildPhotonTable):
             correction matrix used to compute corrected streams
             :math:`\mathbf{M}\vec{^{bg}n}` where :math:`\vec{^{bg}n}` is the
             background correcte intensity of each stream.
+        l1 : np.ndarray[np.double], optional, polarization only
+            :math:`l_{1}` correction factor as defined by
+            |Koshioka| and repeated in |Schaffer| 
+            (note that due to access issues, all equations taken from the latter).
+            Only present when ``detdef.pol = 2``
+        l2 : np.ndarray[np.double], optional, polarization only 
+            :math:`l_{2}` correction factor as defined by
+            |Koshioka| and repeated in |Schaffer| 
+            (note that due to access issues, all equations taken from the latter).
+            Only present when ``detdef.pol = 2``
 
     Remapped Params
     ---------------
@@ -587,13 +751,46 @@ class Ratios(ChildPhotonTable):
     
     Columns
     -------
-        nph_c : float, (ph_sel:PhSel, starttype:str, stoptype:str)
+        nph_c : float, (ph_sel:PhSel, starttype:{'istarttime', 'start'}, stoptype:{'istoptime', 'stop'})
             Corrected (according to correction factors and background) number of photons
             in ph_sel.
-        brightness_c : float, (ph_sel:PhSel, starttype:str, stoptype:str)
+        brightness_c : float, (ph_sel:PhSel, starttype:{'istarttime', 'start'}, stoptype:{'istoptime', 'stop'})
             counts per second in given stream, with all correction factors applied
-        ratio_c : float, (num_ph_sel:PhSel, dem_ph_sel:PhSel, starttype:str, stoptype:str)
+        ratio_c : float, (num_ph_sel:PhSel, dem_ph_sel:PhSel, starttype:{'istarttime', 'start'}, stoptype:{'istoptime', 'stop'})
             ratio of num_ph_sel to dem_ph_sel, with all correction factors applied
+        anisotropy_c : float, (phsel_p:PhSel, phsel_s:PhSel, starttype:{'istarttime', 'start'}, stoptype:{'istoptime', 'stop'})
+            Corrected anisotropy of the selected combination of 
+            parallel/perpendicular channels.
+            If :math:`l_{1}` and :math:`l_{2}` are present in the Param definition,
+            the anisotropy is calculated as
+            .. math::
+                
+                r = \frac{_{corr}n_{\parallel} - _{corr}n_{\perp}}{(1-3l_{2}) _{corr}n_{\parallel} - (2-3l_{1}) _{corr}n_{\perp}}
+            
+            
+            where :math:`_{corr}n_{\parallel}` and :math:`_{corr}n_{\parp}` are the
+            *corrected* photon counts of the parallel (``phsel_p``) 
+            and perpendicular (``phsel_s``) channels respectively, 
+            these are specified in the first and second keys of this column, 
+            for the column to return reasonable values, they
+            must therefore correspond to parallel and perpendicular channels of
+            the same excitation/emission wavelength single combination.
+            Also note that the :math:`G` factors reported in |Schaffer|, are
+            assumed to be specified in the ``corr_mat`` parameter.
+        rotational_corr_c : float (phsel_p:PhSel, phsel_s:PhSel, mean:{'irf','thresh'}, r0:float, starttype:{'istarttime', 'start'}, stoptype:{'istoptime', 'stop'})
+            The rotational correlation time (in seconds). Computed as
+            
+            .. math::
+                
+                \rho = \frac{r\bar{\tau}}{r_{\circ} - r}
+            
+            
+            Where :math:`r_{\circ}` is the anisotropy at zero, specified in the
+            r0 key, which defaults to :math:`0.4`, and :math:`\bar{\tau}` is the
+            fluoresence lifetime, specifically the ``nanomean_bg`` column of the 
+            union of ``phsel_p`` and ``phsel_s`` of the nph parent of the table, 
+            and :math:`r` is the observed
+            anisotropy, specifically the ``anisotropy_c`` column.
     
     Re-mapped Columns
     -----------------
@@ -609,6 +806,8 @@ class Ratios(ChildPhotonTable):
     #: :meta private:
     param_defs = (
         ParamDef('corr_mat', TV_ndarray(square=True, dims=arr_slc[:,:])),
+        ParamDef('l1', TV_ndarray(dims=arr_slc[:]), required=False),
+        ParamDef('l2', TV_ndarray(dims=arr_slc[:]), required=False)
                   )
     #: :meta private:
     parent_defs = (
@@ -625,8 +824,12 @@ class Ratios(ChildPhotonTable):
         ColumnDef('ratio_c', (PhSel, PhSel, TV_str, TV_str), 0, 'user', get_func='_get_ratio_c', 
                   reg_func='_regularizecolumn_ratio_c', title_func='_get_ratio_c_title'),
         ColumnDef('anisotropy_c', (PhSel, PhSel, TV_str, TV_str), 0, 'user', 
-                  get_func='_get_anisotropy_c', reg_func='_regularizecolumn_anisotropy_c',
+                  iter_func='_iter_anisotropy_c', get_func='_get_anisotropy_c', 
+                  reg_func='_regularizecolumn_anisotropy_c',
                   title_func='_get_anisotropy_c_title'),
+        ColumnDef('rotational_corr_c', (PhSel, PhSel, TV_irfstyle, TV_float, TV_str, TV_str), 0, 'user',
+                  get_func='_get_rotational_corr_c', title_func='_get_rotational_corr_c_title',
+                  reg_func='_regularizecolumn_rotational_corr_c'),
         ColumnDef('E', (TV_str, TV_str), 0, remap='_replace_E', reg_func='_regularizecolumn_ES'),
         ColumnDef('S', (TV_str, TV_str), 0, remap='_replace_S', reg_func='_regularizecolumn_ES'),
                    )
@@ -644,7 +847,8 @@ class Ratios(ChildPhotonTable):
     # to both DexAemPpol and DexAemSpol
     
     def __init_columns__(self):
-        pass
+        if 'l1' in self.param.params:
+            add_citation("AnisotropyCrossTalk", purpose=['Polarization/anisotropy correction factors'])
     
     @classmethod
     def param_preprocess(cls, param:Sequence[tuple[str,Any]]|tupledict, parents:dict[str:Param])->tuple[dict,dict]:
@@ -658,20 +862,26 @@ class Ratios(ChildPhotonTable):
             parents = {'nph':parents}
         elif isinstance(parents, tupledict):
             parents = parents.asdict
+        detdef = parents['nph'].detdef
+        pol = detdef.pol == 2
+        nspecchan = detdef.ex * detdef.em
+        nschan = detdef.pol*detdef.split
+        if pol and 'l1' in param.keys() and not isinstance(param['l1'], np.ndarray):
+            param['l1'] = np.ones(nspecchan, dtype=np.float64)*param['l1']
+        if pol and 'l2' in param.keys() and not isinstance(param['l2'], np.ndarray):
+            param['l2'] = np.ones(nspecchan, dtype=np.float64)*param['l2']
         if 'corr_mat' in param:
-            if len(param) != 1:
+            if any(p not in ('corr_mat', 'l1', 'l2') for p in param.keys()):
                 raise ValueError("Specifying corr_mat not compatible with building from other factors")
             return param, parents
         if any(cfactor in param for cfactor in ('alpha', 'delta', 'lk', 'dir_ex', 'gamma', 'beta')):
             add_citation('HellenkampNatMeth2018', purpose='Use of alpha/delta/gamma/beta formalism')
-        scheme = param.get('scheme', 'ALEX')
-        matchstreams = param.get('matchstreams', True) # match streams defines how split/pol leakage/direx/beta/gamma are broadcast
-        npol = param.get('npol', 1)
-        nsplit = param.get('nsplit', 1)
+        scheme = param.pop('scheme', 'ALEX')
+        matchstreams = param.pop('matchstreams', True) # match streams defines how split/pol leakage/direx/beta/gamma are broadcast
         corr_mat = np.eye(2 if scheme == '1ex' else 4)
-        lk = param.get('alpha', param.get('lk', 0.0))
-        dir_ex = param.get('delta', param.get('dir_ex', 0.0))
-        gamma, beta = param.get('gamma', 1.0), param.get('beta', 1.0)
+        lk = param.pop('alpha', param.pop('lk', 0.0))
+        dir_ex = param.pop('delta', param.pop('dir_ex', 0.0))
+        gamma, beta = param.pop('gamma', 1.0), param.pop('beta', 1.0)
         if scheme == 'ALEX':
             corr_mat[0,0] = gamma
             corr_mat[1,0] = -lk*gamma
@@ -691,9 +901,8 @@ class Ratios(ChildPhotonTable):
             corr_mat[1,3] = -dir_ex
         else:
             raise ValueError(f"scheme must be '1ex', 'ALEX' or 'PAX'. scheme of '{scheme}' is invalid")
-        if npol == 1 and nsplit == 1:
+        if detdef.pol == 1 and detdef.split == 1:
             return dict(corr_mat=corr_mat), parents
-        nschan = npol*nsplit
         if matchstreams:
             new_corr_mat = _broadcast_2dto2d(corr_mat, np.eye(nschan))
         else:
@@ -701,13 +910,30 @@ class Ratios(ChildPhotonTable):
             diag_mat = _broadcast_2dto2d(corr_mat, np.eye(nschan))
             new_corr_mat = _broadcast_2dto2d(corr_mat, np.ones((nschan, nschan))/nschan)
             new_corr_mat[mask] = diag_mat[mask]
-        return dict(corr_mat=new_corr_mat), parents
+        param['corr_mat'] = new_corr_mat
+        return param, parents
 
     @classmethod
     def validate_param(cls, param:Param):
         """Not usually called by user- validate a Ratios :class:`Param` :meta private:"""
         if param.detdef.size != param.params['corr_mat'].shape[0]:
             raise ValueError("corr_mat must have both dimensions of size equal to the number of streams in detdef")
+        if (param.detdef.pol == 2):
+            if 'l1' in param.params:
+                if 'l2' not in param.params:
+                    raise ValueError("Cannot specify l1 without specifying l2")
+                nspec = param.detdef.ex * param.detdef.em
+                if param.params['l1'].size != nspec:
+                    sz = param.params['l1'].size
+                    raise ValueError(f"l1 must have size of {nspec} for the given detdef, got {sz}")
+                if param.params['l2'].size != nspec:
+                    sz = param.params['l2'].size
+                    raise ValueError(f"l2 must have size of {nspec} for the given detdef, got {sz}")
+            elif 'l2' in param.params:
+                raise ValueError("Cannot specify l2 without specifying l1")
+        else:
+            if len(param.params) != 1:
+                raise ValueError("Parameters l1/l2 are invalid for setups which do not have 2 polarization channels")
 
     @classmethod
     def _regularizecolumn_nph_c(cls, source_param:Param, *args):
@@ -763,19 +989,74 @@ class Ratios(ChildPhotonTable):
         """Title getter function for ratio_c"""
         return _get_ratio_title(col, 'F', include_unit, origin)
 
+    def _iter_anisotropy_c(self, phsel_p:PhSel, phsel_s:PhSel, starttype:ColKeyStart, stoptype:ColKeyStop)->np.ndarray[np.float64]:
+        """Iter function for anisotropy_c column"""
+        if 'l1' in self.param.params:
+            yield from _iter_anisotropy_mixing(self, phsel_p, phsel_s, starttype, stoptype)
+        else:
+            yield from _iter_anisotropy(self, 'nph_c', phsel_p, phsel_s, starttype, stoptype)
+
+    def _get_anisotropy_c(self, phsel_p:PhSel, phsel_s:PhSel, starttype:ColKeyStart, stoptype:ColKeyStop)->np.ndarray[np.float64]:
+        """Getter function for anisotropy_c column"""
+        if 'l1' in self.param.params:
+            return _calc_anisotropy_mixing(self, phsel_p, phsel_s, starttype, stoptype)
+        return _calc_anisotropy(self, 'nph_c', phsel_p, phsel_s, starttype, stoptype)
+
     @classmethod
     def _regularizecolumn_anisotropy_c(cls, source_param:Param, *args):
         """Column regularization function for anisotropy_c column"""
+        _validate_anisotropy(args[0], args[1], detdef=source_param.detdef)
         return args[0:2] +  cls._regularize_column_startstop(source_param, *args[2:])
-
-    def _get_anisotropy_c(self, phsel_p:PhSel, phsel_s:PhSel, starttype:str, stoptype:str)->np.ndarray[np.float64]:
-        """Getter function for anisotropy_c column"""
-        return _calc_anisotropy(self, 'nph_c', phsel_p, phsel_s, starttype, stoptype)
 
     @classmethod
     def _get_anisotropy_c_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
         """Title getter function for anisotropy_c column"""
-        return _get_anisotropy_title(col, 'F', include_unit, origin)
+        title = _get_anisotropy_title(col, 'F', include_unit, origin)
+        return f'${title}$'
+
+    def _get_rotational_corr_c(self, sel_p:PhSel, sel_s:PhSel, irfstyle:IRFStyle, r0:float, starttype:ColKeyStart, stoptype:ColKeyStop)->np.ndarray[np.double]:
+        _validate_anisotropy(sel_p, sel_s, self.param.detdef, self.origin.setup)
+        n_p = self.parents['nph'].parents['base']['nph_raw', sel_p]
+        tau_p = self.parents['nph']['nanomean_bg', sel_p, irfstyle, starttype, stoptype]
+        n_s = self.parents['nph'].parents['base']['nph_raw', sel_s]
+        tau_s = self.parents['nph']['nanomean_bg', sel_s, irfstyle, starttype, stoptype]
+        with np.errstate(divide='ignore', invalid='ignore'):
+            tau = (n_p*tau_p + 2*n_s*tau_s) / (n_p + 2*n_s)
+        r = self['anisotropy_c', sel_p, sel_s, starttype, stoptype]
+        return r*tau / (r0 - r)
+
+    @classmethod
+    def _get_rotational_corr_c_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        title =  _get_rotational_corr_c_title(col, r'\rho', include_unit=include_unit, origin=origin)
+        return f'${title}$'
+
+    @classmethod
+    def _regularizecolumn_rotational_corr_c(cls, source_param:Param, *args):
+        sels = [arg if isinstance(arg, PhSel) else PhSel(arg) for arg in args if isinstance(arg, (PhSel, PhStream))]
+        if len(sels) != 2:
+            raise ValueError("Must specify 2 PhSel in rotational_corr_c column")
+        irfstyle = [arg for arg in args if arg in _irf_styles]
+        if len(irfstyle) > 1:
+            raise ValueError(f"Multiple definitions for mean type in nanomean_bg column, {irfstyle}")
+        r0 = [float(arg) for arg in args if isinstance(arg, Real)]
+        if len(r0) > 1:
+            raise ValueError(f"Multiple r0 specified {r0}")
+        start = [arg for arg in args if isinstance(arg, str) and arg in source_param._colstarttypes]
+        if len(start) > 1:
+            raise ValueError(f"Multiple start values specified {start}")
+        stop = [arg for arg in args if isinstance(arg, str) and arg in source_param._colstoptypes]
+        if len(stop) > 1:
+            raise ValueError(f"Multiple stop values specified {start}")
+        sel_p, sel_s = sels
+        if len(args) != len(comb:=sels + irfstyle + r0 + start + stop):
+            err = [arg for arg in args if arg not in comb]
+            raise ValueError(f"Unidentified arguments {err}")
+        irfstyle = irfstyle[0] if irfstyle else 'mean'
+        r0 = r0[0] if r0 else 0.4
+        start = start[0] if start else source_param._colstartdefaultstr
+        stop = stop[0] if stop else source_param._colstopdefaultstr
+        
+        return sel_p, sel_s, irfstyle, r0, start, stop
 
     @classmethod
     def _regularizecolumn_ES(cls, source_param:Param, *args:str)->tuple[str, str]:
@@ -931,7 +1212,10 @@ register_2cde_func(gaussian_kde_2cde, shortcut=1)
 
 class KDE(ChildPhotonTable):
     r"""
-    Implementation of FRET and ALEX 2CDE methods from Tomov_.
+    Implementation of FRET and ALEX 2CDE methods from |Tomov|.
+    
+    Note that this class is made a top-level class, ie can be accessed as
+    ``smfbursts.PhotonData``.
     
     This method estimates the probability that there is variance in the expected
     emission probabilities as a molecule transits the confocal value
@@ -947,7 +1231,7 @@ class KDE(ChildPhotonTable):
     
     
     where :math:`X are the points where the KDE is esimated, and :math:`Y` are
-    the points contributing to the KDE. Tomov_ set both of these to arrival times
+    the points contributing to the KDE. |Tomov| set both of these to arrival times
     of particular streams. When the streams of :math:`X` and :math:`Y` are the
     same, they introduced a modified KDE, which does not count the photon at
     the location 
@@ -959,7 +1243,7 @@ class KDE(ChildPhotonTable):
     
     .. note::
         
-        The main text of Tomov_ describes :math:`N_{CHX}` ambiguously as the 
+        The main text of |Tomov| describes :math:`N_{CHX}` ambiguously as the 
         number of photons in channel :math:`X`, but fails to define if this is
         with a burst, or fixed time range. Several interpretations are possible,
         and the paper actively admits that they arrived at the :math:`1+2/N_{CHX}`
@@ -1040,9 +1324,6 @@ class KDE(ChildPhotonTable):
             Evaluate :math:`ALEX-2CDE` where :math:`t_{CHD_{EX}}` is ``phsel_d``, and
             :math:`t_{CHA_{EX}}` is ``phsel_a``
     
-    
-    .. _Tomov: `Tomov 2012 <https://doi.org/10.1016/j.bpj.2011.11.4025>`__
-    
     """
     #: :meta private:
     param_defs = (
@@ -1054,10 +1335,10 @@ class KDE(ChildPhotonTable):
     parent_defs = (ParentDef('base', BasePhotonTableLike, is_base=True), )
     #: :meta private:
     column_defs = (
-        ColumnDef('fret', (PhSel, PhSel), 0, 'user', iter_func='_iter_fret', 
-                  reg_func='_regularizecolumn_fret', title_func='_get_fret_title'),
-        ColumnDef('alex', (PhSel, PhSel), 0, 'user', iter_func='_iter_alex', 
-                  reg_func='_regularizecolumn_alex', title_func='_get_alex_title')
+        ColumnDef('fret2cde', (PhSel, PhSel), 0, 'user', iter_func='_iter_fret2cde', 
+                  reg_func='_regularizecolumn_fret2cde', title_func='_get_fret2cde_title'),
+        ColumnDef('alex2cde', (PhSel, PhSel), 0, 'user', iter_func='_iter_alex2cde', 
+                  reg_func='_regularizecolumn_alex2cde', title_func='_get_alex2cde_title')
         )
     
     def __init_columns__(self):
@@ -1085,11 +1366,40 @@ class KDE(ChildPhotonTable):
 
     @paramproperty
     def kde_func(cls, param:Param)->Callable[[np.ndarray[np.int64],float,np.ndarray[np.float64]],np.ndarray[np.float64]]:
+        """
+        |paramproperty| returning the function which is used to compute the 
+        KDE per photon.
+        """
         func = get_pycode_subval('KDE_func', param.params['kernel'], param.params['kernel'])
         return partial(smc.kde_photons, func=func)
 
     def _index_iter(self, phsel_a:PhSel, phsel_b:PhSel, drop_self:bool
                     )->tuple[np.ndarray[np.float64],np.ndarray[np.float64],np.ndarray[np.float64],np.ndarray[np.float64]]:
+        """
+        Iterate over each burst, returing the KDE values of each combination of
+        
+
+        Parameters
+        ----------
+        phsel_a : PhSel
+            First photon selection.
+        phsel_b : PhSel
+            Second phootn selection.
+        drop_self : bool
+            Remove the .
+
+        Yields
+        ------
+        kde_aa : np.ndarray[np.float64]
+            kde of channel a photons evaluated at time of channel a photons.
+        kde_ab : np.ndarray[np.float64]
+            kde of channel a photons evaluated at time of channel b photons.
+        kde_ba : np.ndarray[np.float64]
+            kde of channel b photons evaluated at time of channel a photons.
+        kde_bb : np.ndarray[np.float64]
+            kde of channel b photons evaluated at time of channel b photons.
+
+        """
         sela = self.origin.detdef.get_stream_ids(phsel_a)
         selb = self.origin.detdef.get_stream_ids(phsel_b)
         mask_a = np.isin(self.origin.dets, sela)
@@ -1112,6 +1422,7 @@ class KDE(ChildPhotonTable):
 
     @classmethod    
     def _get_kde_title(cls, title:str, col:Column, origin:PhotonData=None):
+        """General title generator func for kde columns"""
         if hasattr(col.param.params['kernel'], 'name'):
             title += '_{%s}' % col.param.params['kernel'].name
         else:
@@ -1119,20 +1430,9 @@ class KDE(ChildPhotonTable):
         title = '%s(%s/%s)' % ((title, ) + _title_sels('t', origin, *col.keytup))
         return f'${title}$'
     
-    @classmethod
-    def _get_fret_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
-        return cls._get_kde_title('FRET-2CDE', col, origin=origin)
-
-    @classmethod
-    def _regularizecolumn_fret(cls, source_param:Param, *args):
-        phsel_d, phsel_a, = args[0:1], args[1:2]
-        phsel_d = PhSel('0ex0em') if len(phsel_d) == 0 else phsel_d[0]
-        phsel_a = PhSel('0ex1em') if len(phsel_a) == 0 else phsel_a[0]
-        phsel_d, phsel_a = sort_phsels((phsel_d, phsel_a))
-        return phsel_d, phsel_a
-    
     @cite('TomovBioPhysJ2012', purpose='FRET 2CDE')
-    def _iter_fret(self, phsel_d:PhSel, phsel_a:PhSel)->float:
+    def _iter_fret2cde(self, phsel_d:PhSel, phsel_a:PhSel)->float:
+        """Iterator func for fret 2cde column"""
         for kde_dd, kde_da, kde_ad, kde_aa in self._index_iter(phsel_d, phsel_a, True):
             if kde_dd.size + kde_aa.size == 0:
                 yield np.nan
@@ -1149,20 +1449,21 @@ class KDE(ChildPhotonTable):
             yield 110.0 - 100.0*(e_d+e_a)
     
     @classmethod
-    def _regularizecolumn_alex(cls, source_param:Param, *args):
-        phsel_a, phsel_d, = args[0:1], args[1:2]
-        phsel_a = PhSel('1ex1em') if len(phsel_a) == 0 else phsel_a[0]
-        phsel_d = PhSel('0ex') if len(phsel_d) == 0 else phsel_d[0]
-        phsel_a, phsel_d = sort_phsels((phsel_a, phsel_d))
-        return phsel_a, phsel_d
+    def _get_fret2cde_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """Title func for fret 2cde column"""
+        return cls._get_kde_title('FRET-2CDE', col, origin=origin)
 
     @classmethod
-    def _get_alex_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
-        return cls._get_kde_title('ALEX-2CDE', col, origin=origin)
-
-
+    def _regularizecolumn_fret2cde(cls, source_param:Param, *args):
+        """Reg func for fret 2cde column"""
+        phsel_d, phsel_a, = args[0:1], args[1:2]
+        phsel_d = PhSel('0ex0em') if len(phsel_d) == 0 else phsel_d[0]
+        phsel_a = PhSel('0ex1em') if len(phsel_a) == 0 else phsel_a[0]
+        phsel_d, phsel_a = sort_phsels((phsel_d, phsel_a))
+        return phsel_d, phsel_a
+    
     @cite('TomovBioPhysJ2012', purpose='ALEX 2CDE')
-    def _iter_alex(self, phsel_d:PhSel, phsel_a:PhSel)->float:
+    def _iter_alex2cde(self, phsel_d:PhSel, phsel_a:PhSel)->float:
         for kde_dd, kde_da, kde_ad, kde_aa in self._index_iter(phsel_d, phsel_a, False):
             if kde_dd.size == 0 or kde_aa.size == 0:
                 yield np.nan
@@ -1172,3 +1473,264 @@ class KDE(ChildPhotonTable):
                 br_a = kde_da / kde_aa / kde_dd.size
             yield 100.0 - 50.0*(br_d+br_a)
 
+    @classmethod
+    def _regularizecolumn_alex2cde(cls, source_param:Param, *args):
+        """Reg func for alex 2cde column"""
+        phsel_a, phsel_d, = args[0:1], args[1:2]
+        phsel_a = PhSel('1ex1em') if len(phsel_a) == 0 else phsel_a[0]
+        phsel_d = PhSel('0ex') if len(phsel_d) == 0 else phsel_d[0]
+        phsel_a, phsel_d = sort_phsels((phsel_a, phsel_d))
+        return phsel_a, phsel_d
+    
+    @classmethod
+    def _get_alex2cde_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        return cls._get_kde_title('ALEX-2CDE', col, origin=origin)
+
+
+def _phasor_trig(origin:PhotonData, phsel:PhSel, style:IRFStyle, omega:float, 
+                 func:Callable[[np.ndarray[np.float64]],np.ndarray[np.float64]]
+                 )->tuple[int,int,np.ndarray[np.float64]]:
+    ex_start, ex_stop, tcspc_unit, thresh = _get_nmstyle_info(origin, phsel, style)
+    trig = func((np.arange(ex_start, ex_stop,1)-thresh)*tcspc_unit*omega)
+    thresh = np.ceil(thresh, casting='unsafe', dtype=np.int64)
+    return ex_start, thresh, trig
+
+
+def _phasor_trigs(origin:PhotonData, phsel:PhSel, style:IRFStyle, omegas:np.ndarray[np.float64], func):
+    stream_ids = origin.detdef.get_stream_ids(phsel)
+    sels = tuple(origin.detdef.stream_ids_to_PhSel(i) for i in stream_ids)
+    ex_starts, threshs, trigs = zip(*(_phasor_trig(origin, sel, style, omega, func) 
+                                      for sel, omega in zip(sels, omegas)))
+    return sels, ex_starts, threshs, trigs
+
+
+def _phasor_prod_exclude(trigs, nhs, threshs, ex_starts):
+    nhs_ = [nh[nh >= thresh] - ex_start for nh, thresh, ex_start in zip(nhs, threshs, ex_starts)]
+    return sum(trig[nh].sum() for trig, nh in zip(trigs, nhs_)) / sum(nh.size for nh in nhs_)
+
+
+def _phasor_prod_all(trigs, nhs, threshs, ex_starts):
+    return sum(trig[nh-ex_start].sum() for trig, nh, ex_start in zip(trigs, nhs, ex_starts)) / sum(nh.size for nh in nhs)
+
+
+class Phasor(ChildPhotonTable):
+    r"""
+    Phasor representation for pulsed excitation data (|Digman|).
+    
+    Note that this class is made a top-level class, ie can be accessed as
+    ``smfbursts.PhotonData``.
+    
+    Computes the phasor of the nanotimes in each time period (usually burst).
+    
+    .. math::
+        
+        g = \displaystyle\int_{t_{start}}^{t_{end}}{I(t)\cos(\omega t)dt} \equiv \sum_{i=1}^{N}{t_{i}\cos(\omega t_{i})} \
+        
+        s = \displaystyle\int_{t_{start}}^{t_{end}}{I(t)\sin(\omega t)dt} \equiv \sum_{i=1}^{N}{t_{i}\sin(\omega t_{i})}
+        
+    Where :math:`\omega` is the anglar frequency, this can be specifed aribrarily
+    in the param, or using the laser repetition rate 
+    (as originally proposed in |Digman|), and :math:`t_{start}` is
+    either the start of the excitation period, or time 0, 
+    depending on option in ``exclude`` parameter,
+    and :math`t_{end}` is the end of the excitation window.
+    
+    All times shifted by the option in the parameter ``start``, which sets the
+    time in the excitation window which is treated as time 0.
+    
+    
+    Params
+    ------
+        omega : np.ndarray[np.float64]
+            angular frequence to use in computation of :math:`g` and :math:`s`
+            factors, 1 element per excitation channel. If specified as single
+            value, will automatically be exanded to use same value for each
+            excitation channel. Values of :math:`0` and :math:`-1` reserved for
+            automatic computation based on alternation periods, according to
+            :math:`\omega = 2\pi / T` where if :math:`-1`, :math:`T` is the 
+            duration of the excitation window of the given excitation,
+            (difference between start and stop times of the given excitation window). 
+            While if :math:`0`, then :math:`T` is the laser repetition rate
+            (full cycle of PIE).
+            
+            The default is 0
+        
+        start : {'thresh', 'mean', 'max'}
+            How to set :math:`t_{0}` of nanotimes
+            
+            - 'thresh' : use the irf threshold
+            - 'mean' : use the mean of the irf distribution
+            - 'max' : use the time of the maximum of the irf distribution
+            
+            The defaul is 'mean'
+        
+        exclude : bool
+            If :code:`True` then exclude all nanotimes before start value, thus
+            :math:`t_{start} = 0`.
+            if :code:`False` then include photons from entire excitation windown,
+            thus :math:`t_{start} < 0`.
+            
+            The default is True
+    
+    Parents
+    -------
+        base : BasePhotonTable
+            The table from which to get the bursts, this is the |Pbaseparam| of
+            the table.
+    
+    Columns
+    -------
+        phasor_g : float (phsel:PhSel irfstyle:{'thresh', 'mean', 'max'})
+            The :math:`g` phasor value of the given photon stream. 
+            irfstyle key defaults to 'mean'.
+        phasor_g : float (phsel:PhSel irfstyle:{'thresh', 'mean', 'max'})
+            The :math:`s` phasor value of the given photon stream. 
+            irfstyle key defaults to 'mean'.
+            
+    """
+    _irf_style_map = {'thresh':'t', 'mean':'c', 'max':'m'}
+    #: :meta private:
+    param_defs = (
+        ParamDef('omega', TV_ndarray(dtype='f8', dims=arr_slc[:]), unit='rad s^{-1}'),
+        ParamDef('start', TV_irfstyle, default='mean'),
+        ParamDef('exclude', TV_bool, default=True)
+        )
+    #: :meta private:
+    parent_defs = (ParentDef('base', BasePhotonTable, is_base=True), )
+    #: :meta private:
+    column_defs = (
+        ColumnDef('phasor_g', (PhSel, TV_irfstyle), 0, 'user', 
+                  iter_func='_iter_phasor_g', title_func='_get_phasor_g_title',
+                  reg_func='_regularizecolumn_phasor_g'), 
+        ColumnDef('phasor_s', (PhSel, TV_irfstyle), 0, 'user', 
+                  iter_func='_iter_phasor_s', title_func='_get_phasor_s_title',
+                  reg_func='_regularizecolumn_phasor_s')
+        )
+
+    @cite("DigmanBiophysJ2008", purpose="Phasor analysis")
+    def __init_columns__(self):
+        pass
+    
+    @classmethod
+    def param_preprocess(cls, param:Sequence[tuple[str,Any]]|tupledict, parents:dict[str:Param])->tuple[dict,dict]:
+        """:meta private: preprocess converts period input to angular frequency"""
+        param = as_paramdict(param, tuple(pdef.name for pdef in cls.param_defs) + ('period',))
+        parents = as_paramdict(parents, tuple(pdef.name for pdef in cls.parent_defs))
+        if 'period' in param.keys():
+            if 'omega' in param.keys():
+                raise ValueError("Cannot specify time constant as both period and omega")
+            param['omega'] = 2*np.pi/param.pop('period')
+        param.setdefault('omega', 0.0)
+        if np.size(param['omega']) == 1:
+            param['omega'] = np.repeat(param['omega'], parents['base'].detdef.ex).astype(np.float64)
+        return param, parents
+    
+    @classmethod
+    def validate_param(cls, param:Param):
+        """:meta private: Validate a Phasor parameter"""
+        if param.detdef.ex != param.params['omega'].size:
+            raise ValueError(f"Omega must be same size as number of excitations, got {param.params['omega'].size}, expected {param.detdef.ex}")
+
+    @parammethod(origin_as_kw=True)
+    def omega_vals(cls, param:Param, phsel:PhSel, origin:PhotonDataS=None)->np.ndarray[np.float64]:
+        """
+        Parammethod which gets the values of omega (angular frequency) for a given
+        |PhSel|, supply the origin when the parameter uses automatic determination
+        of values of omega.
+
+        Parameters
+        ----------
+        param : Param
+            Phasor based parameter.
+        phsel : PhSel
+            Desired stream(s) to retrieve omega values.
+        origin : PhotonDataS, optional
+            Source of data, needed when paramter uses automatic computation of
+            omega values. The default is None.
+
+        Raises
+        ------
+        ValueError
+            Cannot determine omega values because origin not supplyed.
+
+        Returns
+        -------
+        np.ndarray[np.float64]
+            omega values (rad per second) for phasor in each stream id in the
+            input phsel.
+
+        """
+        if isinstance(origin, PhotonDataList):
+            return (cls.omega_vals(param, phsel, origin=data) for data in origin.datas)
+        stream_ids = param.detdef.get_stream_ids(phsel)
+        omega = np.empty(stream_ids.size)
+        for i, sid in enumerate(stream_ids):
+            ex = sid // param.detdef.ex_stride
+            if param.params['omega'][ex] > 0.0:
+                omega[i] = param.params['omega'][stream_ids]
+                continue
+            if origin is None:
+                raise ValueError("Determination of automatic omega requires suppyling origin")
+            if param.params['omega'][sid//param.detdef.ex_stride] == 0.0:
+                omega[i] = 2*np.pi/origin.setup.tcspc_range
+                print("omega i")
+                continue
+            tcspc_unit = origin.setup.tcspc_unit[ex]
+            ex_range_size = np.diff(origin.setup.ex_ranges[ex][0,:])[0]
+            omega[i] = 2*np.pi/ ex_range_size / tcspc_unit
+        return omega
+    
+    @classmethod
+    def _get_phasor_title(cls, title:str, col:Column, origin:PhotonData=None):
+        """Function creates title for any phasor column"""
+        sub = cls._irf_style_map[col.keytup[1]]
+        sub += '' if col.source_param.params['exclude'] else r'\:full'
+        ttl = r'_{%s}%s' % (sub, title)
+        title = _title_sels(ttl, origin, col.keytup[0])[0]
+        return f'${title}$'
+
+    def _iter_phasor_any(self, phsel:PhSel, irfstyle:IRFStyle, func:Callable[[float],float]):
+        """Iterator base for phasor, func should be sin or cos function"""
+        _validate_lifetime(phsel, self.detdef)
+        omegas = self.omega_vals(phsel)
+        sels, ex_starts, threshs, trigs = _phasor_trigs(self.origin, phsel, irfstyle, omegas, func)
+        prod_func = _phasor_prod_exclude if self.param.params['exclude'] else _phasor_prod_all
+        for nhs in zip(*(self.parents['base'].iter_column('ph_nanos', sel) for sel in sels)):
+            yield prod_func(trigs, nhs, threshs, ex_starts)
+
+    @classmethod
+    def _regularize_phasor(cls, *args):
+        """General reg func for any phasor column"""
+        if len(args) > 2:
+            raise ValueError(f"Too many keys for phasor, maximum of 2, got {len(args)}")
+        if len(args) == 1:
+            return args[0], 'mean'
+        return args
+
+    def _iter_phasor_g(self, phsel:PhSel, irfstyle:IRFStyle)->np.ndarray[np.float64]:
+        """Iter func for g phasor"""
+        yield from self._iter_phasor_any(phsel, irfstyle, np.cos)
+        
+    @classmethod
+    def _get_phasor_g_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """title func for g"""
+        return cls._get_phasor_title('g', col, origin)
+
+    @classmethod
+    def _regularizecolumn_phasor_g(cls, source_param:Param, *args)->tuple[PhSel, IRFStyle]:
+        """Reg func for g column"""
+        return cls._regularize_phasor(*args)
+
+    def _iter_phasor_s(self, phsel:PhSel, irfstyle:IRFStyle)->np.ndarray[np.float64]:
+        """iter func for s phasor"""
+        yield from self._iter_phasor_any(phsel, irfstyle, np.sin)
+        
+    @classmethod
+    def _get_phasor_s_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        """title func for s column"""
+        return cls._get_phasor_title('s', col, origin)
+
+    @classmethod
+    def _regularizecolumn_phasor_s(cls, source_param:Param, *args)->tuple[PhSel, IRFStyle]:
+        """reg func for s column"""
+        return cls._regularize_phasor(*args)
