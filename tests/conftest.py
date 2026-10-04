@@ -2,7 +2,7 @@
 # Created on Sun Mar 16 09:08:06 2025
 # author: paul
 # Coppied from https://docs.pytest.org/en/latest/example/simple.html#incremental-testing-test-steps
-
+import numpy as np
 
 import pytest
 
@@ -85,11 +85,27 @@ def colstart(request):
 def colstop(request):
     return request.param
 
+@pytest.fixture(params=['thresh', 'mean', 'max'])
+def irfstyle(request):
+    return request.param
+
 
 @pytest.fixture
 def data()->smf.PhotonData:
-    raw = smf.photonHDF5.load('data/HP3_TE300_SPC630.hdf5')
-    data = smf.photonHDF5.regularize_dets(raw)
+    raw = smf.hdf5.load('data/HP3_TE300_SPC630.hdf5')
+    data = smf.hdf5.regularize_dets(raw)
+    bg = smf.ff.make_bg(data.detdef, auto_threshold=True)
+    burst = smf.Param(smf.Bursts, m=10, F=6.0, stream=smf.PhSel('0ex_1em'), bg=bg['bg'])
+    nph = smf.Column(burst, 'nph_raw', smf.PhSel('0ex_1em'))
+    gate = smf.make_geq_gate(nph, 70)
+    burst = burst.regate(gate)
+    bs_irfex = smf.Param(smf.Bursts, m=10, F=1.01, stream=smf.PhSel('0ex_1em'), bg=bg['bg'])
+    irf_p = smf.Param(smf.BurstOvlp, truthtable='inv', bases=bs_irfex)
+    for sel in (smf.PhSel('0ex0em'), smf.PhSel('0ex1em'), smf.PhSel('1ex1em')):
+        data.irf_thresh[sel] = np.argmax(data.get_column(smf.Column(burst, 'nanohist', (sel, True))).sum(axis=0))
+        irf = data.get_column(smf.Column(irf_p, 'nanohist', sel)).sum(axis=0)
+        irf[irf < 0.5*irf.max()] = 0.0
+        data.irf[sel] = irf
     return data
 
 
@@ -103,6 +119,66 @@ def sper_bg(data)->smf.Param:
     return smf.fretfactory.make_bg(data, period=3600.0)['bg']
 
 
-@pytest.fixture(params=['thresh', 'mean', 'max'])
-def irfstyle(request):
-    return request.param
+@pytest.fixture
+def data1ex():
+    raw = smf.hdf5.load('data/0023uLRpitc_NTP_20dT_0.5GndCl.hdf5')
+    data = smf.hdf5.regularize_dets(raw)
+    return data
+
+
+@pytest.fixture
+def datapolgroup():
+    def process(file:str):
+        raw = smf.lr.load_ptu(file)
+        raw.setup['num_spectral_ch'] = 2
+        raw.setup['num_polarization_ch'] = 2
+        raw.setup['num_split_ch'] = 1
+        raw.setup['excitation_wavelengths'] = np.array([532e-9, 642e-9])
+        raw.setup['detection_wavelengths'] = np.array([585e-9, 698e-9])
+        raw.setup['excitation_cw'] = np.array([False, False])
+        raw.setup['excitation_alternated'] = np.array([False, False])
+        raw.setup['detectors']['label'] = np.array(['ATTO 488', 'ATTO 643'])
+    
+        # remove the spectral_ploarization_split because it is there to identify detectors, but is not part of HDF5 spec
+        raw.photon_data[0].meas_specs['detectors_specs'].pop('spectral_polarization_split_chN', None)
+        # 
+        raw.photon_data[0].meas_specs['detectors_specs']['spectral_ch1'] = np.array([2,3], dtype=np.uint8)
+        raw.photon_data[0].meas_specs['detectors_specs']['spectral_ch2'] = np.array([4,5], dtype=np.uint8)
+        raw.photon_data[0].meas_specs['detectors_specs']['polarization_ch1'] = np.array([2,4], dtype=np.uint8)
+        raw.photon_data[0].meas_specs['detectors_specs']['polarization_ch2'] = np.array([3,5], dtype=np.uint8)
+        raw.photon_data[0].meas_specs['alex_excitation_period1'] = np.array([1850,3000])
+        raw.photon_data[0].meas_specs['alex_excitation_period2'] = np.array([70,1500])
+        return smf.hdf5.regularize_dets(raw)
+    
+    def get_irf(d:smf.PhotonData):
+        sels = ( d.detdef.stream_ids_to_PhSel(i) for i in range(d.detdef.size))
+        irf_thresh = dict()
+        irf = dict()
+        for sel in sels:
+            ex = list(sel.ex.elements)[0]
+            start, stop = d.setup.ex_ranges[ex][0,:]
+            nanohist = np.bincount(d.get_nanos(sel), minlength=stop)
+            irf_thresh[sel] = np.argmax(nanohist)
+            nanohist = nanohist[start:stop]
+            nanohist -= np.mean(nanohist[:10], dtype=nanohist.dtype)
+            nanohist[nanohist < nanohist.max()*0.1] = 0
+            irf[sel] = nanohist
+        return irf_thresh, irf
+    
+    files = ('data/Lab8_U2AF2/mystery_protein_2_holo_ulm_1.ptu', 
+             'data/Lab8_U2AF2/mystery_protein_2_holo_ulm_4.ptu', 
+             'data/Lab8_U2AF2/mystery_protein_2_holo_ulm_5.ptu',
+             'data/Lab8_U2AF2/mystery_protein_2_holo_ulm_6.ptu',
+             'data/Lab8_U2AF2/mystery_protein_2_holo_ulm_7.ptu',
+             'data/Lab8_U2AF2/mystery_protein_2_holo_ulm_8.ptu',
+             'data/Lab8_U2AF2/mystery_protein_2_holo_ulm_8.ptu',
+             'data/Lab8_U2AF2/mystery_protein_2_holo_ulm_9.ptu',
+             'data/Lab8_U2AF2/mystery_protein_2_holo_ulm_10.ptu',
+             )
+    datas = [process(file) for file in files]
+    data_irf = process('data/Lab8_U2AF2/BSA+buffer.ptu')
+    irf_thresh, irf = get_irf(data_irf)
+    for d in datas:
+        d.irf = irf
+        d.irf_thresh = irf_thresh
+    return smf.PhotonDataList(datas)

@@ -105,13 +105,13 @@ def test_bg_bg_column(data, p_bg):
 @pytest.mark.dependency(depends=['backgroundparam'])
 def test_KS_column(data, p_bg):
     # smoke tests for error
-    bg00err_KS = smf.Column(p_bg, 'err_KS', smf.PhSel('0ex0em'))
+    bg00err_KS = smf.Column(p_bg, 'bg_err_KS', smf.PhSel('0ex0em'))
     data.get_column(bg00err_KS)
     data.clear_memory()
 
 @pytest.mark.dependency(depends=['backgroundparam'])
 def test_CM_column(data, p_bg):
-    bg00err_CM = smf.Column(p_bg, 'err_CM', smf.PhSel('0ex0em'))
+    bg00err_CM = smf.Column(p_bg, 'bg_err_CM', smf.PhSel('0ex0em'))
     data.get_column(bg00err_CM)
     data.clear_memory()
 

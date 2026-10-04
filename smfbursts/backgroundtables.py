@@ -758,10 +758,10 @@ class BG(ChildPhotonTable):
         ColumnDef('bg', (PhSel,), 0, 'some',  get_func='_get_bg', dtype=np.float64,
                   title_func='_get_bg_title',
                   unit=r'(cnts\:s^{-1})', index_unit='cnts s^-1', title_is_tex=True),
-        ColumnDef('err_KS', (PhSel, ), 0, 'some', get_func='_get_err_KS', dtype=np.float64, 
-                  title_func='_err_KS_title', index_func='_err_KS_index'),
-        ColumnDef('err_CM', (PhSel, ), 0, 'some', get_func='_get_err_CM', dtype=np.float64, 
-                  title_func='_err_CM_title', index_func='_err_CM_index'),
+        ColumnDef('bg_err_KS', (PhSel, ), 0, 'some', get_func='_get_bg_err_KS', dtype=np.float64, 
+                  title_func='_get_bg_err_KS_title', index_func='_get_bg_err_KS_index'),
+        ColumnDef('bg_err_CM', (PhSel, ), 0, 'some', get_func='_get_bg_err_CM', dtype=np.float64, 
+                  title_func='_get_bg_err_CM_title', index_func='_get_bg_err_CM_index'),
         ColumnDef('tail_min', (PhSel, ), 0, 'never', get_func='_get_tail_min', 
                   dtype=np.float64, check_func='_check_tail_min', title='tail min', unit='(s)'),
         ColumnDef('rangecounts', (PhSel, TV_str, TV_str), 0, iter_func='_iter_rangecounts',
@@ -863,7 +863,7 @@ class BG(ChildPhotonTable):
             out[i] = func(ph_times, self.origin.clk_p, **params)
         return out
 
-    def _get_err_KS(self, phsel):
+    def _get_bg_err_KS(self, phsel):
         """Getter function for err_KS column (Kolmogrov-Smirnov error)"""
         phsel = phsel.render_positive(self.origin.detdef, convert_all=True) # ensures consistent representation in DiskDict
         if self._compute_stream(phsel):
@@ -875,13 +875,13 @@ class BG(ChildPhotonTable):
         return out
 
     @classmethod
-    def _err_KS_title(cls, col:Column, include_unit:bool=False, origin:DataSet=None)->str:
+    def _get_bg_err_KS_title(cls, col:Column, include_unit:bool=False, origin:DataSet=None)->str:
         """Title getter function for err_KS column"""
         title = _title_sels('bg', origin, col.keytup[0])[0]
         return fr'$KS error:\: D({title})$'
 
     @classmethod
-    def _err_KS_index(cls, col:Column, include_unit:bool=False, origin:DataSet=None)->str:
+    def _get_bg_err_KS_index(cls, col:Column, include_unit:bool=False, origin:DataSet=None)->str:
         """Index name getter function for err_KS column"""
         return f'KS err BG {str(col.keytup[0])}'
 
@@ -899,17 +899,17 @@ class BG(ChildPhotonTable):
         return out
 
     @classmethod
-    def _err_CM_title(cls, col:Column, include_unit:bool=False, origin:DataSet=None)->str:
+    def _get_bg_err_CM_title(cls, col:Column, include_unit:bool=False, origin:DataSet=None)->str:
         """Title getter function for err_CM column"""
         title = _title_sels('bg', origin, col.keytup[0])[0]
         return fr'$CM error:\: T({title})$'
 
     @classmethod
-    def _err_CM_index(cls, col:Column, include_unit:bool=False, origin:DataSet=None)->str:
+    def _get_bg_err_CM_index(cls, col:Column, include_unit:bool=False, origin:DataSet=None)->str:
         """Index name getter function for err_CM column"""
         return f'CM err BG {str(col.keytup[0])}'
 
-    def _get_err_CM(self, phsel:PhSel):
+    def _get_bg_err_CM(self, phsel:PhSel):
         """TGetter function for err_CM column (Cramer von Misses error)"""
         phsel = phsel.render_positive(self.origin.detdef, convert_all=True) # ensures consistent representation in DiskDict
         if self._compute_stream(phsel):

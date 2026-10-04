@@ -3,6 +3,7 @@
 # Purpose: Download files from Zenodo repository
 
 import pooch
+import zipfile
 
 DATASET_DIR = u'data'
 
@@ -17,3 +18,14 @@ files = ('HP3_TE300_SPC630.hdf5', 'dsdna_d7_d17_50_50_1.hdf5',
 
 for file in files:
     repo.fetch(file)
+
+afrt = pooch.create(path=DATASET_DIR, base_url='doi:10.5281/zenodo.6977331')
+afrt.load_registry_from_doi()
+
+files = ('Lab8_U2AF2.zip', )
+for file in files:
+    fl = afrt.fetch(file)
+    with zipfile.ZipFile(fl) as z:
+        z.extractall(DATASET_DIR+'/Lab8_U2AF2/')
+    
+    

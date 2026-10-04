@@ -11,12 +11,6 @@ Installation from PyPi is simple:
     pip install smfbursts
 
 
-The repository is still under review for CondaForge, so the following hopefully will work in the future, but not now
-
-.. code-block:: bash
-
-    conda install smfbursts -c conda-forge
-
 You can also install from source:
 
 .. code-block:: bash

@@ -62,7 +62,10 @@ from .backgroundtables import Periods, BG, make_bg_param
 from . import backgroundtables
 bg = backgroundtables
 from .bursttables import Bursts, BurstOvlp
-from .childphotontables import NphBG, Ratios, KDE, Phasor
+from .childphotontables import NphBG, Ratios, KDE
+from .lifetimetables import Phasor
+from . import lifetimetables 
+lt = lifetimetables
 from . import ph_sel
 from .ph_sel import PhSel, DetDef
 from .import photonHDF5

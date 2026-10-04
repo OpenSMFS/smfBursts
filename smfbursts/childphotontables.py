@@ -346,7 +346,7 @@ class NphBG(ChildPhotonTable):
                   title_is_tex=True),
         ColumnDef('anisotropy_bg', (PhSel, PhSel, TV_str, TV_str), 0, 'never', 
                   get_func='_get_anisotropy_bg', iter_func='_iter_anisotropy_bg',
-                  reg_func='_regularizecolumn_ratio_bg', title_func='_get_anisotropy_bg_title',
+                  reg_func='_regularizecolumn_anisotropy_bg', title_func='_get_anisotropy_bg_title',
                   title_is_tex=True),
         ColumnDef('nanomean_bg', (PhSel, TV_irfstyle, TV_str, TV_str), 0, 'user',
                   iter_func='_iter_nanomean_bg', reg_func='_regularizecolumn_nanomean_bg',
@@ -444,11 +444,11 @@ class NphBG(ChildPhotonTable):
         """Getter function for anisotropy_bg column"""
         _validate_anisotropy(phsel_p, phsel_s, self.param.detdef, self.origin.setup)
         return _calc_anisotropy(self, 'nph_bg', phsel_p, phsel_s, starttype, stoptype)
-
+    
     @classmethod
-    def _check_anisotropy_bg(cls, col:Column):
-        sel_p, sel_s, _, _ = col.keytup
-        _validate_anisotropy(sel_p, sel_s, col.source_param.detdef)
+    def _regularizecolumn_anisotropy_bg(cls, source_param:Param, *args)->tuple[PhSel,PhSel,ColKeyStart,ColKeyStop]:
+        _validate_anisotropy(args[0], args[1], detdef=source_param.detdef)
+        return args[0:2] +  cls._regularize_column_startstop(source_param, *args[2:])
 
     @classmethod
     def _get_anisotropy_bg_title(cls, col:Column, include_unit:Real=False, origin:PhotonData=None)->str:
@@ -468,7 +468,7 @@ class NphBG(ChildPhotonTable):
             title = fuse.tex_str(kw)
         else:
             title = rf'anis({par.tex_str(**kw)},\: {perp.tex_str(**kw)})'
-        return title
+        return f'${title}$'
 
     @classmethod
     def _replace_E_bg(cls, col:str, keytup:tuple[str,str])->tuple:
@@ -698,7 +698,8 @@ def _get_rotational_corr_c_title(col:Column, name:str, include_unit:bool=False, 
         title = fuse.tex_str(kw)
     else:
         title = rf'rotational\:correlation({par.tex_str(**kw)},\: {perp.tex_str(**kw)})'
-    return _title_startstop_append(title, start, stop)
+    title = _title_startstop_append(title, start, stop)
+    return f'${title}$'
         
 
 class Ratios(ChildPhotonTable):
@@ -1027,8 +1028,7 @@ class Ratios(ChildPhotonTable):
 
     @classmethod
     def _get_rotational_corr_c_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
-        title =  _get_rotational_corr_c_title(col, r'\rho', include_unit=include_unit, origin=origin)
-        return f'${title}$'
+        return  _get_rotational_corr_c_title(col, r'\rho', include_unit=include_unit, origin=origin)
 
     @classmethod
     def _regularizecolumn_rotational_corr_c(cls, source_param:Param, *args):
@@ -1485,252 +1485,3 @@ class KDE(ChildPhotonTable):
     @classmethod
     def _get_alex2cde_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
         return cls._get_kde_title('ALEX-2CDE', col, origin=origin)
-
-
-def _phasor_trig(origin:PhotonData, phsel:PhSel, style:IRFStyle, omega:float, 
-                 func:Callable[[np.ndarray[np.float64]],np.ndarray[np.float64]]
-                 )->tuple[int,int,np.ndarray[np.float64]]:
-    ex_start, ex_stop, tcspc_unit, thresh = _get_nmstyle_info(origin, phsel, style)
-    trig = func((np.arange(ex_start, ex_stop,1)-thresh)*tcspc_unit*omega)
-    thresh = np.ceil(thresh, casting='unsafe', dtype=np.int64)
-    return ex_start, thresh, trig
-
-
-def _phasor_trigs(origin:PhotonData, phsel:PhSel, style:IRFStyle, omegas:np.ndarray[np.float64], func):
-    stream_ids = origin.detdef.get_stream_ids(phsel)
-    sels = tuple(origin.detdef.stream_ids_to_PhSel(i) for i in stream_ids)
-    ex_starts, threshs, trigs = zip(*(_phasor_trig(origin, sel, style, omega, func) 
-                                      for sel, omega in zip(sels, omegas)))
-    return sels, ex_starts, threshs, trigs
-
-
-def _phasor_prod_exclude(trigs, nhs, threshs, ex_starts):
-    nhs_ = [nh[nh >= thresh] - ex_start for nh, thresh, ex_start in zip(nhs, threshs, ex_starts)]
-    return sum(trig[nh].sum() for trig, nh in zip(trigs, nhs_)) / sum(nh.size for nh in nhs_)
-
-
-def _phasor_prod_all(trigs, nhs, threshs, ex_starts):
-    return sum(trig[nh-ex_start].sum() for trig, nh, ex_start in zip(trigs, nhs, ex_starts)) / sum(nh.size for nh in nhs)
-
-
-class Phasor(ChildPhotonTable):
-    r"""
-    Phasor representation for pulsed excitation data (|Digman|).
-    
-    Note that this class is made a top-level class, ie can be accessed as
-    ``smfbursts.PhotonData``.
-    
-    Computes the phasor of the nanotimes in each time period (usually burst).
-    
-    .. math::
-        
-        g = \displaystyle\int_{t_{start}}^{t_{end}}{I(t)\cos(\omega t)dt} \equiv \sum_{i=1}^{N}{t_{i}\cos(\omega t_{i})} \
-        
-        s = \displaystyle\int_{t_{start}}^{t_{end}}{I(t)\sin(\omega t)dt} \equiv \sum_{i=1}^{N}{t_{i}\sin(\omega t_{i})}
-        
-    Where :math:`\omega` is the anglar frequency, this can be specifed aribrarily
-    in the param, or using the laser repetition rate 
-    (as originally proposed in |Digman|), and :math:`t_{start}` is
-    either the start of the excitation period, or time 0, 
-    depending on option in ``exclude`` parameter,
-    and :math`t_{end}` is the end of the excitation window.
-    
-    All times shifted by the option in the parameter ``start``, which sets the
-    time in the excitation window which is treated as time 0.
-    
-    
-    Params
-    ------
-        omega : np.ndarray[np.float64]
-            angular frequence to use in computation of :math:`g` and :math:`s`
-            factors, 1 element per excitation channel. If specified as single
-            value, will automatically be exanded to use same value for each
-            excitation channel. Values of :math:`0` and :math:`-1` reserved for
-            automatic computation based on alternation periods, according to
-            :math:`\omega = 2\pi / T` where if :math:`-1`, :math:`T` is the 
-            duration of the excitation window of the given excitation,
-            (difference between start and stop times of the given excitation window). 
-            While if :math:`0`, then :math:`T` is the laser repetition rate
-            (full cycle of PIE).
-            
-            The default is 0
-        
-        start : {'thresh', 'mean', 'max'}
-            How to set :math:`t_{0}` of nanotimes
-            
-            - 'thresh' : use the irf threshold
-            - 'mean' : use the mean of the irf distribution
-            - 'max' : use the time of the maximum of the irf distribution
-            
-            The defaul is 'mean'
-        
-        exclude : bool
-            If :code:`True` then exclude all nanotimes before start value, thus
-            :math:`t_{start} = 0`.
-            if :code:`False` then include photons from entire excitation windown,
-            thus :math:`t_{start} < 0`.
-            
-            The default is True
-    
-    Parents
-    -------
-        base : BasePhotonTable
-            The table from which to get the bursts, this is the |Pbaseparam| of
-            the table.
-    
-    Columns
-    -------
-        phasor_g : float (phsel:PhSel irfstyle:{'thresh', 'mean', 'max'})
-            The :math:`g` phasor value of the given photon stream. 
-            irfstyle key defaults to 'mean'.
-        phasor_g : float (phsel:PhSel irfstyle:{'thresh', 'mean', 'max'})
-            The :math:`s` phasor value of the given photon stream. 
-            irfstyle key defaults to 'mean'.
-            
-    """
-    _irf_style_map = {'thresh':'t', 'mean':'c', 'max':'m'}
-    #: :meta private:
-    param_defs = (
-        ParamDef('omega', TV_ndarray(dtype='f8', dims=arr_slc[:]), unit='rad s^{-1}'),
-        ParamDef('start', TV_irfstyle, default='mean'),
-        ParamDef('exclude', TV_bool, default=True)
-        )
-    #: :meta private:
-    parent_defs = (ParentDef('base', BasePhotonTable, is_base=True), )
-    #: :meta private:
-    column_defs = (
-        ColumnDef('phasor_g', (PhSel, TV_irfstyle), 0, 'user', 
-                  iter_func='_iter_phasor_g', title_func='_get_phasor_g_title',
-                  reg_func='_regularizecolumn_phasor_g'), 
-        ColumnDef('phasor_s', (PhSel, TV_irfstyle), 0, 'user', 
-                  iter_func='_iter_phasor_s', title_func='_get_phasor_s_title',
-                  reg_func='_regularizecolumn_phasor_s')
-        )
-
-    @cite("DigmanBiophysJ2008", purpose="Phasor analysis")
-    def __init_columns__(self):
-        pass
-    
-    @classmethod
-    def param_preprocess(cls, param:Sequence[tuple[str,Any]]|tupledict, parents:dict[str:Param])->tuple[dict,dict]:
-        """:meta private: preprocess converts period input to angular frequency"""
-        param = as_paramdict(param, tuple(pdef.name for pdef in cls.param_defs) + ('period',))
-        parents = as_paramdict(parents, tuple(pdef.name for pdef in cls.parent_defs))
-        if 'period' in param.keys():
-            if 'omega' in param.keys():
-                raise ValueError("Cannot specify time constant as both period and omega")
-            param['omega'] = 2*np.pi/param.pop('period')
-        param.setdefault('omega', 0.0)
-        if np.size(param['omega']) == 1:
-            param['omega'] = np.repeat(param['omega'], parents['base'].detdef.ex).astype(np.float64)
-        return param, parents
-    
-    @classmethod
-    def validate_param(cls, param:Param):
-        """:meta private: Validate a Phasor parameter"""
-        if param.detdef.ex != param.params['omega'].size:
-            raise ValueError(f"Omega must be same size as number of excitations, got {param.params['omega'].size}, expected {param.detdef.ex}")
-
-    @parammethod(origin_as_kw=True)
-    def omega_vals(cls, param:Param, phsel:PhSel, origin:PhotonDataS=None)->np.ndarray[np.float64]:
-        """
-        Parammethod which gets the values of omega (angular frequency) for a given
-        |PhSel|, supply the origin when the parameter uses automatic determination
-        of values of omega.
-
-        Parameters
-        ----------
-        param : Param
-            Phasor based parameter.
-        phsel : PhSel
-            Desired stream(s) to retrieve omega values.
-        origin : PhotonDataS, optional
-            Source of data, needed when paramter uses automatic computation of
-            omega values. The default is None.
-
-        Raises
-        ------
-        ValueError
-            Cannot determine omega values because origin not supplyed.
-
-        Returns
-        -------
-        np.ndarray[np.float64]
-            omega values (rad per second) for phasor in each stream id in the
-            input phsel.
-
-        """
-        if isinstance(origin, PhotonDataList):
-            return (cls.omega_vals(param, phsel, origin=data) for data in origin.datas)
-        stream_ids = param.detdef.get_stream_ids(phsel)
-        omega = np.empty(stream_ids.size)
-        for i, sid in enumerate(stream_ids):
-            ex = sid // param.detdef.ex_stride
-            if param.params['omega'][ex] > 0.0:
-                omega[i] = param.params['omega'][stream_ids]
-                continue
-            if origin is None:
-                raise ValueError("Determination of automatic omega requires suppyling origin")
-            if param.params['omega'][sid//param.detdef.ex_stride] == 0.0:
-                omega[i] = 2*np.pi/origin.setup.tcspc_range
-                print("omega i")
-                continue
-            tcspc_unit = origin.setup.tcspc_unit[ex]
-            ex_range_size = np.diff(origin.setup.ex_ranges[ex][0,:])[0]
-            omega[i] = 2*np.pi/ ex_range_size / tcspc_unit
-        return omega
-    
-    @classmethod
-    def _get_phasor_title(cls, title:str, col:Column, origin:PhotonData=None):
-        """Function creates title for any phasor column"""
-        sub = cls._irf_style_map[col.keytup[1]]
-        sub += '' if col.source_param.params['exclude'] else r'\:full'
-        ttl = r'_{%s}%s' % (sub, title)
-        title = _title_sels(ttl, origin, col.keytup[0])[0]
-        return f'${title}$'
-
-    def _iter_phasor_any(self, phsel:PhSel, irfstyle:IRFStyle, func:Callable[[float],float]):
-        """Iterator base for phasor, func should be sin or cos function"""
-        _validate_lifetime(phsel, self.detdef)
-        omegas = self.omega_vals(phsel)
-        sels, ex_starts, threshs, trigs = _phasor_trigs(self.origin, phsel, irfstyle, omegas, func)
-        prod_func = _phasor_prod_exclude if self.param.params['exclude'] else _phasor_prod_all
-        for nhs in zip(*(self.parents['base'].iter_column('ph_nanos', sel) for sel in sels)):
-            yield prod_func(trigs, nhs, threshs, ex_starts)
-
-    @classmethod
-    def _regularize_phasor(cls, *args):
-        """General reg func for any phasor column"""
-        if len(args) > 2:
-            raise ValueError(f"Too many keys for phasor, maximum of 2, got {len(args)}")
-        if len(args) == 1:
-            return args[0], 'mean'
-        return args
-
-    def _iter_phasor_g(self, phsel:PhSel, irfstyle:IRFStyle)->np.ndarray[np.float64]:
-        """Iter func for g phasor"""
-        yield from self._iter_phasor_any(phsel, irfstyle, np.cos)
-        
-    @classmethod
-    def _get_phasor_g_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
-        """title func for g"""
-        return cls._get_phasor_title('g', col, origin)
-
-    @classmethod
-    def _regularizecolumn_phasor_g(cls, source_param:Param, *args)->tuple[PhSel, IRFStyle]:
-        """Reg func for g column"""
-        return cls._regularize_phasor(*args)
-
-    def _iter_phasor_s(self, phsel:PhSel, irfstyle:IRFStyle)->np.ndarray[np.float64]:
-        """iter func for s phasor"""
-        yield from self._iter_phasor_any(phsel, irfstyle, np.sin)
-        
-    @classmethod
-    def _get_phasor_s_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
-        """title func for s column"""
-        return cls._get_phasor_title('s', col, origin)
-
-    @classmethod
-    def _regularizecolumn_phasor_s(cls, source_param:Param, *args)->tuple[PhSel, IRFStyle]:
-        """reg func for s column"""
-        return cls._regularize_phasor(*args)

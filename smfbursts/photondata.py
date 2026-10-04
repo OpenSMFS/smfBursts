@@ -155,7 +155,7 @@ class PhSpec(_ImData):
                                                      dims=arr_slc[:]), 
                               detdef=TV_DetDef(data_proc=_proc_detdef))
     _defaults = ImDict(detdef=None, alex_type='none')
-    
+
     alex_type : Literal['none','macro','nano']
     clk_p: float
     tcspc_unit: np.ndarray[np.float64]
@@ -268,7 +268,7 @@ class PhArray(AttrDD, TypedValueDD):
     def detdef(self)->DetDef:
         """:class:`smfbursts.ph_sel.DetDef` defining :attr:`PhArray.dets` indexes"""
         return self['setup'].detdef
-        
+
 
 # Functions for converting raw data dets to processed
 # NOTE: these are split into many functions so that numba can be optimized
@@ -620,11 +620,11 @@ class PhotonData(DataSet):
           values are checked, if they are not identical, raise an error
         - 'error' raise an error automatically if key is present in both HDF5
           group an input dictionary
-        
+    
         The default is 'pass'.
     """
     _group_name = 'photon_data'
-    
+
     # : dictionary of codes for (relatitive GateGroup, Gate) : map
     _gates: dict[Gate:tuple[GateGroup, np.ndarray[np.bool_]]]
     # : nested dictionary of masks {requested:{relative:mask}} for gategroups
@@ -741,11 +741,11 @@ class PhotonData(DataSet):
         if isinstance(self._reference, weakref.ReferenceType):
             return self._reference()
         return self._reference
-    
+
     @property
     def source_filename(self):
         return self._meta['filename']
-    
+
     def _get_from_pharray(self, name:str, phsel:PhSel)->np.ndarray:
         """Get masked photon data array"""
         if phsel == phsel_all:
@@ -1304,7 +1304,7 @@ class PhotonDataList(DataSetList):
             if close:
                 file.close()
         return file
-                                                        
+
 
 PhotonDataS = PhotonData|PhotonDataList
 
@@ -1535,6 +1535,8 @@ def _valid_anisotropy(sel_p:PhSel, sel_s:PhSel, detdef:DetDef=None, setup:PhSpec
     p_id, s_id = detdef.get_stream_ids(sel_p), detdef.get_stream_ids(sel_s)
     if p_id.size != s_id.size:
         return f"Mismatched number of streams between parallel and perpendicular channels {sel_p} vs {sel_s}"
+    if np.all(p_id == s_id):
+        raise ValueError("Anisotropy PhSel keys must not be identical- column will be all 0")
     # shows "allignment" of par/perp streams
     if np.any(np.diff(s_id.astype(np.int16) - p_id.astype(np.int16)) != 0):
         return f"Channels are not symetric across polarization, {sel_p} vs {sel_s}"
@@ -1561,6 +1563,37 @@ def _valid_anisotropy(sel_p:PhSel, sel_s:PhSel, detdef:DetDef=None, setup:PhSpec
 
 
 def _validate_anisotropy(sel_p:PhSel, sel_s:PhSel, detdef:DetDef=None, setup:PhSpec=None, single:bool=True)->str|None:
+    """
+    Function for regularizecolumn/get/iter column methods to ensure anisotropy
+    values are valid.
+    
+    This is responsible for raising appropriate errors/warnings.
+    
+    Repsonse is dependant on state of rcParams
+
+    Parameters
+    ----------
+    sel_p : PhSel
+        parallel channel
+    sel_s : PhSel
+        perpendicular channel.
+    detdef : DetDef, optional
+        Detdef of param. The default is None.
+    setup : PhSpec, optional
+        setup spec of data (if using get/iter column methods). The default is None.
+    single : bool, optional
+        Whether or not to worry about multiple ex/em streams. The default is True.
+
+    Raises
+    ------
+    ValueError
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    """
     if rcParams['warn.anisotropy'] == 'ignore':
         return
     msg = _valid_anisotropy(sel_p, sel_s, detdef, setup, single)
@@ -1689,7 +1722,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
             be treated collectively (single stream, or at least same excitation and
             emission).
             .. note::
-                
+    
                 It is encouraged to use the ``nanomean_bg`` column of the table
                 :class:`smfbursts.childphotontables.NphBG` instead of this column.
                 This is because mean nanotimes are affected by background photons,
@@ -1697,8 +1730,8 @@ class BasePhotonTable(PhotonTable, BaseTable):
                 The ``nanomean_bg`` column has a correction for this, making its
                 performance more or less equivalent to burst integrated 
                 fluoresence lifetimes.
-                
-                
+    
+    
         nmdiff : float : (phsel_a:PhSel, phsel_b:PhSel)
             Difference in nanomean between ``phsel_a`` and ``phsel_b`` .
             .. note::
@@ -1707,7 +1740,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
                 :class:`smfbursts.childphotontables.NphBG` instead of this column.
                 This is for the same reason as noted for the ``nanomean``
                 column.
-        
+    
     Remapped Columns
     ----------------
         E_raw : float ()
@@ -1717,9 +1750,8 @@ class BasePhotonTable(PhotonTable, BaseTable):
     
     """
     _parent_ph_subrange:ClassVar[str] = False
-    
     _origin: PhotonData
-    
+
     #: |TypeValidator| for start-type column value options for time range columns
     _colstarttype:ClassVar[TypeValidator] = TV_str_start
     #: |TypeValidator| for stop-type column value options for time range columns
@@ -1728,15 +1760,15 @@ class BasePhotonTable(PhotonTable, BaseTable):
     _colstartdefault:ClassVar[str] = 'istarttime'
     #: Default value for stop-type of time range columns
     _colstopdefault:ClassVar[str] = 'istoptime'
-    
+
     @paramproperty
     def _colstarttypes(cls, param:Param)->tuple[str,...]:
         return cls._colstarttype.ckwargs['isin']
-    
+
     @paramproperty
     def _colstoptypes(cls, param:Param)->tuple[str,...]:
         return cls._colstoptype.ckwargs['isin']
-    
+
     @paramproperty
     def _colstartdefaultstr(cls, param:Param)->str:
         return cls._colstartdefault
@@ -1744,7 +1776,6 @@ class BasePhotonTable(PhotonTable, BaseTable):
     @paramproperty
     def _colstopdefaultstr(cls, param:Param)->str:
         return cls._colstopdefault
-
 
     def _init_new_(self):
         if self.param.detdef != self.origin.detdef:
@@ -1777,7 +1808,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
         defining the |DetDef| of the |Param|.
         """
         raise NotImplementedError("subclasses of BasePhotonTable must implement detdef method")
-    
+
     def _get_istarttime(self)->np.ndarray[np.int64]:
         """Getter function, time of first photon in each row, in clk_p units"""
         return self.origin.times[self['istart']]
@@ -1914,7 +1945,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
 
     def _get_anisotropy_raw(self, phsel_p:PhSel, phsel_s:PhSel)->np.ndarray[np.float64]:
         """Getter function for anisotropy_raw column"""
-        _valid_anisotropy(phsel_p, phsel_s, self.param.detdef, self.origin.setup)
+        _validate_anisotropy(phsel_p, phsel_s, self.param.detdef, self.origin.setup)
         p, s = self['nph_raw', phsel_p], self['nph_raw', phsel_s]
         with np.errstate(divide='ignore', invalid='ignore'):
             out = (p-s)/(p+2*s)

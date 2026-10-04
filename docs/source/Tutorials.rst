@@ -1,6 +1,10 @@
 Tutorials
 =========
 
+Most of the code in the following tutorials can be downloaded as
+jupyter notebooks from
+https://github.com/OpenSMFS/smfBursts/tree/main/docs/source/notebooks
+
 Long Form Tutorials
 -------------------
 

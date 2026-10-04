@@ -259,7 +259,6 @@ def test_nanohist(data, burstAll):
 def test_nanomean(data, burstAll):
     # set irf_thresh
     for sel in (smf.PhSel('0ex0em'), smf.PhSel('0ex1em'), smf.PhSel('1ex1em')):
-        data.irf_thresh[sel] = np.argmax(data.get_column(smf.Column(burstAll, 'nanohist', (sel, True))).sum(axis=0))
         data.get_column(smf.Column(burstAll, 'nanomean', sel))
 
 
@@ -298,13 +297,15 @@ def test_ratio_bg(data, nph, colstart, colstop):
     assert np.allclose(s, d / daa, equal_nan=True), "ratio of s calculated incorrectly"
 
 
-def test_anisotropy_bg(data, nph, colstart, colstop):
+def test_bad_anisotropy_bg(data, nph, colstart, colstop):
     nphDD = smf.Column(nph, 'nph_bg', (smf.PhSel('0ex0em'), colstart, colstop))
     nphDA = smf.Column(nph, 'nph_bg', (smf.PhSel('0ex1em'), colstart, colstop))
-    Ani = smf.Column(nph, 'anisotropy_bg', (smf.PhSel('0ex0em'), smf.PhSel('0ex1em'), colstart, colstop))
+    with pytest.warns():
+        Ani = smf.Column(nph, 'anisotropy_bg', (smf.PhSel('0ex0em'), smf.PhSel('0ex1em'), colstart, colstop))
     dd = data.get_column(nphDD)
     da = data.get_column(nphDA)
-    ani = data.get_column(Ani)
+    with pytest.warns():
+        ani = data.get_column(Ani)
     rani = (dd-da)/(dd+2*da)
     assert np.allclose(ani, rani, equal_nan=True), "incorrect anisotropy calculation"
 
@@ -322,6 +323,12 @@ def test_brightness_bg(data, nph, colstart, colstop):
     br = smf.Column(nph, 'brightness_bg', (smf.PhSel('0ex'), colstart, colstop))
     durs, ns, brs = data.get_column(dur), data.get_column(n), data.get_column(br)
     assert np.allclose(brs, ns/durs, equal_nan=True), "Incorrect calculation of brightness"
+
+
+def test_nanomean_bg(data, nph, irfstyle, colstart, colstop):
+    phsel = data.detdef.stream_ids_to_PhSel(0)
+    nm = smf.Column(nph, 'nanomean_bg', (phsel, irfstyle, colstart, colstop))
+    data.get_column(nm)
 
 
 def test_ratio(nph):
@@ -369,17 +376,16 @@ def test_ratio_c(data, ratio, colstart, colstop):
     assert np.allclose(s, d/daa, equal_nan=True), "ratio s calculated incorrectly"
 
 
-def test_anisotropy_c(data, ratio, irfstyle, colstart, colstop):
+def test_bad_anisotropy_c(data, ratio, colstart, colstop):
     nphDD = smf.Column(ratio, 'nph_c', (smf.PhSel('0ex0em'), colstart, colstop))
     nphDA = smf.Column(ratio, 'nph_c', (smf.PhSel('0ex1em'), colstart, colstop))
-    with pytest.warns():
-        Ani = smf.Column(ratio, 'anisotropy_c', (smf.PhSel('0ex0em'), smf.PhSel('0ex1em'), irfstyle, colstart, colstop))
     dd = data.get_column(nphDD)
     da = data.get_column(nphDA)
-    if irfstyle == 'thresh':
-        with pytest.warns():
-            ani = data.get_column(Ani)
-        assert np.allclose(ani, (dd-da)/(dd+2*da), equal_nan=True), "incorrect anisotropy calculation"
+    with pytest.warns():
+        Ani = smf.Column(ratio, 'anisotropy_c', (smf.PhSel('0ex0em'), smf.PhSel('0ex1em'), colstart, colstop))
+    with pytest.warns():
+        ani = data.get_column(Ani)
+    assert np.allclose(ani, (dd-da)/(dd+2*da), equal_nan=True), "incorrect anisotropy calculation"
 
 
 def test_ES(data, nph, colstart, colstop):
@@ -389,3 +395,33 @@ def test_ES(data, nph, colstart, colstop):
     data.get_column(S)
     assert E == smf.Column(nph, 'ratio_bg', (smf.PhSel('0ex1em'), smf.PhSel('0ex'), colstart, colstop))
     assert S == smf.Column(nph, 'ratio_bg', (smf.PhSel('0ex'), smf.PhSel('0ex_1ex1em'), colstart, colstop))
+
+
+def test_anisotropy(datapolgroup:smf.PhotonDataList):
+    bg = smf.ff.make_bg(datapolgroup, auto_threshold=True, F_bg=1.7)
+    bursts = smf.ff.make_burst_search(bg['bg'], m=10, F=6.0, streams=smf.PhSel('0ex_1em'))
+    ani_r = smf.Column(bursts['bursts'], 'anisotropy_raw', (smf.PhSel('0ex0em0pol'), smf.PhSel('0ex0em1pol')))
+    datapolgroup.get_column(ani_r)
+    ani_b = smf.Column(bursts['nphbg'], 'anisotropy_bg', (smf.PhSel('0ex0em0pol'), smf.PhSel('0ex0em1pol')))
+    an_b = datapolgroup.get_column(ani_b)
+    assert isinstance(an_b, tuple)
+    rat = smf.Param(smf.Ratios, corr_mat=2.0*np.eye(8), nph=bursts['nphbg'])
+    ani_c = smf.Column(rat, 'anisotropy_c', (smf.PhSel('0ex0em0pol'), smf.PhSel('0ex0em1pol')))
+    an_c = datapolgroup.get_column(ani_c)
+    assert all(np.allclose(b, c, equal_nan=True) for b, c in zip(an_b, an_c))
+
+
+def test_rotational_corr_c(datapolgroup, irfstyle):
+    bg = smf.ff.make_bg(datapolgroup, auto_threshold=True, F_bg=1.7)
+    bursts = smf.ff.make_burst_search(bg['bg'], m=10, F=6.0, streams=smf.PhSel('0ex_1em'))
+    rat = smf.Param(smf.Ratios, corr_mat=2.0*np.eye(8), nph=bursts['nphbg'])
+    rcor = smf.Column(rat, 'rotational_corr_c', (smf.PhSel('0ex0em0pol'), smf.PhSel('0ex0em1pol'), irfstyle))
+    datapolgroup.concatenate_column(rcor)
+
+
+def test_single_ex(data1ex):
+    bg = smf.ff.make_bg(data1ex, auto_threshold=True)
+    bursts = smf.ff.make_burst_search(bg['bg'], m=10, F=6.0)
+    gate = smf.make_geq_gate(bursts['NphDD_bg'], 50)
+    smf.ff.make_correction_factors(bursts['nphbg'], update=bursts, alpha=0.1, gamma=0.95)
+    data1ex.get_frame(*smf.ff.get_columns(bursts, gate))

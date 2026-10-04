@@ -1058,6 +1058,8 @@ ALEXdefaults = SequenceDefaults(
     stream_colors=_base_ALEX_kwargs, 
     )
 
+#: Alias of ALEXdefaults
+AD = ALEXdefaults
 
 #: Default PhSel sequences for single excitation measurements
 #: 
@@ -1079,3 +1081,6 @@ MonoExdefaults = SequenceDefaults(
     stream_colors=_base_ALEX_kwargs[:-1], 
     stream_labels=('All', 'Dem', 'Aem',),
     )
+
+#: Alias of MonExdefaults
+MD = MonoExdefaults
