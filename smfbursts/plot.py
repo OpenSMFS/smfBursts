@@ -1254,7 +1254,7 @@ def hist_interphoton(data:PhotonData, bg:Param=None, n:int=0, ax:plt.Axes=None,
                 cps, tail_min = _get_nth(data, n, Column(bg, 'bg', stream), 
                                          Column(bg, 'tail_min', stream))
             else:
-                tail_min = stream_proc(bg.params.asdict,
+                tail_min = stream_proc(bg.params,
                                        data.detdef.get_stream_ids(stream))['tail_min']
                 cps = _get_nth(data, n, Column(bg, 'bg', stream))[0]
             i_th = np.searchsorted(bns, tail_min)

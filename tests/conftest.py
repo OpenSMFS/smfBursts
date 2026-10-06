@@ -118,6 +118,11 @@ def default_bg(data)->smf.Param:
 
 
 @pytest.fixture
+def default_burst(default_bg):
+    return smf.Param(smf.Bursts, bg=default_bg, m=10, F=6.0)
+
+
+@pytest.fixture
 def sper_bg(data)->smf.Param:
     return smf.fretfactory.make_bg(data, period=3600.0)['bg']
 
