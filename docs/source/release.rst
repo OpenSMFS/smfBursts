@@ -5,6 +5,7 @@ Release Notes
 -------------
 
 Additions
+
 - ``rotational_corr_c`` column added to 
   :class:`smf.Ratios <smfbursts.childphotontables.Ratios>`
 - ``l1`` and ``l2`` optional parameters added to 
@@ -12,6 +13,7 @@ Additions
   to support correction for mixing between polarizations in high NA setups
 - :class:Phasor <smfbursts.lifetimetables.Phasor>` added for phasor analysis of bursts
 - add functions for fitting fluoresence decays
+
 
 Changes
 
@@ -24,10 +26,12 @@ Changes
 
 0.1.3
 -----
+
 Internal alterations only
 
 - fix docstrings in cfuncs
 - Rewrite some utils functions to ensure concsistency across platforms
+
 
 0.1.2
 -----

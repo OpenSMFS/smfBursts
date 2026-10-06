@@ -1460,7 +1460,10 @@ class DetDef:
         Parameters
         ----------
         stream_ids : np.ndarray[np.uint8]
-            Sequence of stream ids 
+            Sequence of stream ids
+        convert_all : bool, optional
+            If True, convert channels that span detdef to all channels.
+            The default is True.
 
         Returns
         -------
@@ -1480,14 +1483,34 @@ class DetDef:
                                        self.strides):
             if attr == name:
                 return (stream_id // group) % stride
-        raise AttributeError(f"DetDef has no attribute {attr}")
+        raise AttributeError(f"DetDef has no attribute {attr}")    
+
+    def iter_streams(self, convert_all:bool=True)->Iterator[PhSel]:
+        """
+        Iterator over all single streams in detdef.
+
+        Parameters
+        ----------
+        convert_all : bool, optional
+            If True, convert channels that span detdef to all channels.
+            The default is True.
+
+        Yields
+        ------
+        Iterator[PhSel]
+            PhSel of each individual stream in detdef.
+
+        """
+        for i in range(self.size):
+            yield self.stream_ids_to_PhSel(i, convert_all=convert_all)
 
     def __str__(self):
         return 'DetDef' + ''.join(f'{n}{p}' for n, p in zip(self.shape, self._params) if n != 1)
 
     def __repr__(self):
         return str(self) + f" at 0x{id(self):x}"
-
+    
+    
 
 def check_PhSel(val:PhSel, render_positive:bool=False, detdef:DetDef=None)->PhSel:
     """

@@ -506,7 +506,7 @@ def in_ph_range(thresh:int, setup:PhSpec, phsel:PhSel)->bool:
     setup : PhSpec
         Setup dictionary of reference photon data.
     phsel : PhSel
-        DESCRIPTION.
+        Photon selection to compare.
 
     Raises
     ------
@@ -858,6 +858,42 @@ class PhotonData(DataSet):
 
         """
         return self._get_from_pharray('particles', phsel)
+    
+    def get_tcspc_decay(self, phsel:PhSel, gate:Param|GateGroup=None, 
+                        full:bool=False)->tuple[np.ndarray[np.float64],np.ndarray[np.int64]]:
+        """
+        Retrieve the TCSPC times and histogram of the given photon selection.
+        If supplied, a gate can be used to get the TCSPC histogram of 
+
+        Parameters
+        ----------
+        phsel : PhSel
+            Photon selection for which to derive the .
+        gate : Param|GateGroup, optional
+            Param or Gate from which to derive the TCSPC decay. The default is None.
+        full : bool, optional
+            Whether or not to return the entire TCSPC range (True), or just the
+            excitation range (False). The default is False.
+
+        Returns
+        -------
+        np.ndarray[np.float64]
+            Times (in seconds) of TCSPC bins.
+        np.ndarray[np.int64]
+            Photon counts of each TCSPC bin.
+
+        """
+        ex = list(phsel.ex.elements)[0]
+        tcspc_unit = self.setup.tcspc_unit[ex]
+        ex_start, ex_stop = get_phsel_ex_range(self.setup, phsel)
+        if gate is None:
+            hst = np.bincount(self.get_nanos(phsel), minlength=self.setup.tcspc_num_bins[ex])
+            if full:
+                return np.arange(hst.size)*tcspc_unit, hst
+            return np.arange(ex_stop-ex_start)*tcspc_unit, hst[ex_start:ex_stop]
+        param = gate.base_param
+        hst = self.get_column(Column(param, 'nanohist', (phsel, full))).sum(axis=0)
+        return np.arange(ex_stop-ex_start)*tcspc_unit, hst
 
     @property
     def simulated(self)->bool:
@@ -1206,6 +1242,35 @@ class PhotonDataList(DataSetList):
     def particles(self)->np.ndarray[np.ndarray[np.int64]]:
         """All particle indexes in each PhotonData group"""
         return np.array(list(self.iter_particles()), dtype=np.object_)
+    
+    def get_tcspc_decay(self, phsel:PhSel, gate:Param|GateGroup=None, 
+                        full:bool=False)->tuple[np.ndarray[np.float64],np.ndarray[np.int64]]:
+        """
+        Retrieve the TCSPC times and histogram of the given photon selection.
+        If supplied, a gate can be used to get the TCSPC histogram of 
+
+        Parameters
+        ----------
+        phsel : PhSel
+            Photon selection for which to derive the .
+        gate : Param|GateGroup, optional
+            Param or Gate from which to derive the TCSPC decay. The default is None.
+        full : bool, optional
+            Whether or not to return the entire TCSPC range (True), or just the
+            excitation range (False). The default is False.
+
+        Returns
+        -------
+        np.ndarray[np.float64]
+            Times (in seconds) of TCSPC bins.
+        np.ndarray[np.int64]
+            Photon counts of each TCSPC bin.
+
+        """
+        t, hst = self.datas[0].get_tcspc_decay(phsel, gate=gate, full=full)
+        for data in self.datas[1:]:
+            hst += data.get_tcspc_decay(phsel, gate=gate, full=full)[1]
+        return t, hst
 
     def save(self, *args:Param, group:tb.Group=None, name:Callable[[int],str]=None, 
              save_sorted:bool=None)->list[tb.Group]:
@@ -1448,6 +1513,9 @@ class PhotonTable:
 
 ColKeyStart = Literal['istarttime', 'start']
 ColKeyStop = Literal['istoptime', 'stop']
+_irf_styles = ('thresh', 'mean', 'max')
+IRFStyle = Literal[_irf_styles]
+TV_irfstyle = TV_str(isin=_irf_styles)
 
 
 def _title_startstop_append(name:str, start:ColKeyStart, stop:ColKeyStop)->str:
@@ -1587,7 +1655,7 @@ def _validate_anisotropy(sel_p:PhSel, sel_s:PhSel, detdef:DetDef=None, setup:PhS
     Raises
     ------
     ValueError
-        DESCRIPTION.
+        Invalid phsels for anisotropy.
 
     Returns
     -------
@@ -1602,6 +1670,76 @@ def _validate_anisotropy(sel_p:PhSel, sel_s:PhSel, detdef:DetDef=None, setup:PhS
             raise ValueError(msg)
         elif rcParams['warn.anisotropy'] == 'warn':
             warnings.warn(msg, ColumnWarning)
+
+
+def _calc_nmstyle_thresh_thresh(origin:PhotonData, phsel:PhSel)->tuple[int,int,np.int32]:
+    start, stop = get_phsel_ex_range(origin.setup, phsel, force_contig=True)
+    thresh = origin.irf_thresh[phsel]
+    return start, stop, np.int32(thresh)
+
+
+def _calc_nmstyle_thresh_max(origin:PhotonData, phsel:PhSel)->tuple[int,int,np.int32]:
+    start, stop = get_phsel_ex_range(origin.setup, phsel, force_contig=True)
+    return start, stop, np.int32(np.argmax(origin.irf[phsel]) + start)
+
+
+def _calc_nmstyle_thresh_mean(origin:PhotonData, sel:PhSel)->tuple[int,int,np.int32]:
+    start, stop = origin.setup.ex_ranges[list(sel.ex.elements)[0]][0,:]
+    irf = origin.irf[sel]
+    mean = np.sum(np.arange(irf.size)*irf) / irf.sum()
+    return start, stop, np.floor(mean, dtype=np.int32, casting='unsafe') + start
+
+
+_irfstyle_func = {'thresh':_calc_nmstyle_thresh_thresh, 
+                  'max':_calc_nmstyle_thresh_max,
+                  'mean':_calc_nmstyle_thresh_mean}
+
+
+def _get_irfstyle_func(irfstyle:IRFStyle)->Callable[[PhotonData,PhSel],np.uint16]:
+    func = _irfstyle_func.get(irfstyle, None)
+    if func is None:
+        raise ValueError(f"Invalid IRF style {irfstyle}, must be one of {list(_irfstyle_func.keys())}")
+    return func
+
+def _get_nmstyle_info(origin:PhotonData, phsel:PhSel, irfstyle:IRFStyle)->tuple[int,int,float,int]:
+    sid = origin.detdef.get_stream_ids(phsel)[0]
+    tcspc_unit = origin.setup.tcspc_unit[sid % origin.detdef.ex_stride]
+    ex_start, ex_stop, thresh = _get_irfstyle_func(irfstyle)(origin, phsel)
+    return ex_start, ex_stop, tcspc_unit, thresh
+
+
+def _extract_nmarrays(origin:PhotonData, phsel:PhSel, irfstyle:IRFStyle)->list[np.ndarray[np.float64],np.ndarray[np.int32],np.ndarray[np.float64]]:
+    """
+    Get the necessary nanomean bg arrays from stream ids.
+
+    Parameters
+    ----------
+    stream_ids : np.ndarray[np.uint8]
+        Array of stream_ids of PhSel.
+    setup : PhSpec
+        Setup spec of origin.
+    irfstyle : IRFStyle
+        The style of IRF to extract.
+
+    Returns
+    -------
+    tcspc_units : np.ndarray[np.float64]
+        TCSPC unit of each detector id in stream_ids
+    irf_means : np.ndarray[np.float64]
+        Expeceted mean of IRF (in TCSPC units) of each detector id in stream_ids.
+    bg_means : np.ndarray[np.float64]
+        Expected mean of background (in TCSPC unit, shifted by irf_mean) fo 
+        each detector id in stream_ids.
+    """
+    tcspc_units = np.empty(origin.detdef.size, dtype=np.float64)
+    irf_means = np.empty(origin.detdef.size, dtype=np.uint16)
+    bg_means = np.empty(origin.detdef.size, dtype=np.float64)
+    irf_func = _get_irfstyle_func(irfstyle)
+    for sid in origin.detdef.get_stream_ids(phsel):
+        tcspc_units[sid] = origin.setup.tcspc_unit[sid%origin.detdef.ex_stride]
+        ex_start, ex_stop, irf_means[sid] = irf_func(origin, origin.detdef.stream_ids_to_PhSel(sid))
+        bg_means[sid] = (ex_stop - ex_start)/2 - irf_means[sid] + ex_start
+    return tcspc_units, irf_means, bg_means
 
 
 def _validate_lifetime(sel:PhSel, detdef:DetDef=None):
@@ -2143,55 +2281,50 @@ class BasePhotonTable(PhotonTable, BaseTable):
         num, dem = _title_sels('n', origin, *col.keytup[:2])
         return r'$_{%d,\:excess\:\sigma}\S^{2}_{%s/%s}$' % (col.keytup[2], num, dem)
 
-    def _iter_nanomean(self, phsel:PhSel)->Iterator[float]:
+    def _iter_nanomean(self, phsel:PhSel, irfstyle:IRFStyle)->Iterator[float]:
         """Iter function for nanomean column"""
         phsel = phsel.render_positive(self.origin.detdef, convert_all=True)
-        stream_ids = self.origin.detdef.get_stream_ids(phsel)
-        if stream_ids.size == 1:
-            tcspc_unit = self.origin.setup['tcspc_unit'][stream_ids[0] % self.origin.detdef.ex_stride]
-            thresh = self.origin.irf_thresh[phsel]
-            for nanos in self.iter_column('ph_nanos', phsel):
-                mask = nanos>=thresh
-                yield np.mean((nanos[mask]-thresh)*tcspc_unit) if np.any(mask) else np.nan
-        else:
-            thresh_dict = {i:self.origin.irf_thresh[self.origin.detdef.stream_ids_to_PhSel(i)] for i in stream_ids}
-            threshs = np.array([thresh_dict.get(i, 0) for i in range(self.origin.detdef.size)])
-            exstride = self.origin.detdef.ex_stride
-            tcspc_unit_ref = self.origin.setup['tcspc_unit']
-            for nanos, dets in zip(self.iter_column('ph_nanos', phsel), self.iter_column('ph_dets', phsel)):
-                offset = threshs[dets]
-                mask = nanos >= offset
-                tcspc_unit = tcspc_unit_ref[dets % exstride]
-                nano_off = nanos[mask] - offset[mask]
-                yield np.mean((nano_off)*tcspc_unit) if nano_off.size else np.nan
+        tcspc_units, threshs, bg_means = _extract_nmarrays(self.origin, phsel, irfstyle)
+        for nanos, dets in zip(self.iter_column('ph_nanos', phsel), self.iter_column('ph_dets', phsel)):
+            thresh = threshs[dets].astype(np.int32)
+            nano = nanos.astype(np.int32) - thresh.astype(np.int32)
+            mask = nano >= 0
+            yield np.mean(nano[mask]*tcspc_units[dets[mask]]) if np.any(mask) else np.nan
 
     @classmethod
-    def _check_nanomean(cls, col:Column):
-        _validate_lifetime(col.keytup[0], col.source_param.detdef)
+    def _regularizecolumn_nanomean(self, source_param:Param, *args)->tuple[PhSel,IRFStyle]:
+        _validate_lifetime(args[0], source_param.detdef)
+        if len(args) == 1:
+            args += ('thresh', )
+        return args    
 
     @classmethod
     def _get_nanomean_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
         """Title getter function for nanomean"""
-        title = _title_sels(r'\bar \tau', origin, col.keytup[0])[0]
+        superscript = '' if col.keytup[1] == 'thresh' else f',{col.keytup[1]}'
+        title = _title_sels(r'{_{raw%s}\bar{\tau}}' % superscript, origin, col.keytup[0])[0]
         title = _title_unit_append(title, 's', include_unit)
         return f'${title}$'
 
-    def _iter_nmdiff(self, phsel_a:PhSel, phsel_b:PhSel)->Iterator[float]:
+    def _iter_nmdiff(self, phsel_a:PhSel, phsel_b:PhSel, irfstyle:IRFStyle)->Iterator[float]:
         """Iterator for difference between nanomeans"""
-        for nma, nmb in zip(self.iter_column('nanomean', phsel_a),
-                            self.iter_column('nanomean', phsel_b)):
+        for nma, nmb in zip(self.iter_column('nanomean', phsel_a, irfstyle),
+                            self.iter_column('nanomean', phsel_b, irfstyle)):
             yield nma - nmb
 
     @classmethod
-    def _check_nmdiff(cls, col:Column):
-        detdef = col.source_param.detdef
-        _validate_lifetime(col.keytup[0], detdef)
-        _validate_lifetime(col.keytup[1], detdef)
+    def _regularizecolumn_nmdiff(self, source_param:Param, *args)->tuple[PhSel,IRFStyle]:
+        _validate_lifetime(args[0], source_param.detdef)
+        _validate_lifetime(args[1], source_param.detdef)
+        if len(args) == 2:
+            args += ('thresh', )
+        return args    
 
     @classmethod
     def _get_nmdiff_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
         """Title getter function for nanomean"""
-        ta, tb = _title_sels(r'\bar \tau', origin, *col.keytup[:2])
+        superscript = '' if col.keytup[2] == 'thresh' else f',{col.keytup[2]}'
+        ta, tb = _title_sels(r'{%s\bar{\tau}}' % superscript, origin, *col.keytup[:2])
         title = _title_unit_append(f'{ta}-{tb}', 's', include_unit)
         return f'${title}$'
 
@@ -2264,12 +2397,12 @@ _basetimecolumndefs = (
     ColumnDef('nanohist', (PhSel, bool), 0, 'never', iter_func='_iter_nanohist',
               reg_func='_regularizecolumn_nanohist',
               get_derived=True, dtype='<i8', ndim=2),
-    ColumnDef('nanomean', (PhSel, ), 0, 'user', iter_func='_iter_nanomean', get_derived=True,
-              dtype='<f8', unit='s',
-              title_func='_get_nanomean_title', check_func="_check_nanomean"),
-    ColumnDef('nmdiff', (PhSel, PhSel), 0, 'user', iter_func='_iter_nmdiff', get_derived=True,
-              dtype='<f8', unit='s',
-              title_func='_get_nmdiff_title', check_func="_check_nmdiff",),
+    ColumnDef('nanomean', (PhSel, TV_irfstyle), 0, 'user', get_derived=True,
+              iter_func='_iter_nanomean', reg_func='_regularizecolumn_nanomean',
+              dtype='<f8', unit='s', title_func='_get_nanomean_title'),
+    ColumnDef('nmdiff', (PhSel, PhSel, TV_irfstyle), 0, 'user', get_derived=True,
+              iter_func='_iter_nmdiff', reg_func='_regularizecolumn_nmdiff',
+              dtype='<f8', unit='s', title_func='_get_nmdiff_title'),
     ColumnDef('E_raw', tuple(), 0, remap='_replace_E_raw'),
     ColumnDef('S_raw', tuple(), 0, remap='_replace_S_raw'),
                   )

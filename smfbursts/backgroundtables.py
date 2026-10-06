@@ -868,10 +868,10 @@ class BG(ChildPhotonTable):
         phsel = phsel.render_positive(self.origin.detdef, convert_all=True) # ensures consistent representation in DiskDict
         if self._compute_stream(phsel):
             out = self._calc_err_KS(phsel)
-            self._add_column('err_KS', (phsel, ), out)
+            self._add_column('bg_err_KS', (phsel, ), out)
         else:
             stream_id = self.origin.detdef.get_stream_ids(phsel)
-            out = sum(self['err_KS', self.origin.detdef.stream_ids_to_Ph_sel(st_id)] for st_id in stream_id)
+            out = sum(self['bg_err_KS', self.origin.detdef.stream_ids_to_Ph_sel(st_id)] for st_id in stream_id)
         return out
 
     @classmethod
@@ -914,10 +914,10 @@ class BG(ChildPhotonTable):
         phsel = phsel.render_positive(self.origin.detdef, convert_all=True) # ensures consistent representation in DiskDict
         if self._compute_stream(phsel):
             out = self._calc_err_CM(phsel)
-            self._add_column('err_CM', (phsel, ), out)
+            self._add_column('bg_err_CM', (phsel, ), out)
         else:
             stream_id = self.origin.setup.detdef.get_stream_ids(phsel)
-            out = sum(self['err_CM', self.origin.setup.detdef.stream_ids_to_Ph_sel(st_id)] for st_id in stream_id)
+            out = sum(self['bg_err_CM', self.origin.setup.detdef.stream_ids_to_Ph_sel(st_id)] for st_id in stream_id)
         return out
 
     def _calc_err_CM(self, phsel:PhSel)->np.ndarray[np.float64]:

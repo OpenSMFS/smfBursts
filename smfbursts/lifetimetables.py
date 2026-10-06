@@ -3,8 +3,12 @@
 """
 Module for evaluation of parameters related to fluoresence lifetime decays.
 
+This module is also accessible as ``smf.lt``.
+
 
 .. |minimize| replace:: `scipy.optimize.minimize <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.minimize.html>`__
+.. |optimizeresult| replace:: `OptimizeResult <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.OptimizeResult.html>`__
+.. |Digman| replace:: `Digman et. al. 2008 <https://doi.org/10.1529/biophysj.107.120154>`__
 """
 from typing import Any, TypedDict, NotRequired
 from collections.abc import Callable, Sequence
@@ -23,9 +27,8 @@ from .cite import cite
 
 from .photondata import (
     PhotonData, PhotonDataList, PhotonDataS, BasePhotonTable, ChildPhotonTable,
-    _title_sels, _validate_lifetime
+    _title_sels, _validate_lifetime, TV_irfstyle, IRFStyle, _get_nmstyle_info
     )
-from .childphotontables import TV_irfstyle, IRFStyle, _get_nmstyle_info
 from .ph_sel import PhSel
 
 
@@ -38,7 +41,8 @@ def _phasor_trig(origin:PhotonData, phsel:PhSel, style:IRFStyle, omega:float,
     return ex_start, thresh, trig
 
 
-def _phasor_trigs(origin:PhotonData, phsel:PhSel, style:IRFStyle, omegas:np.ndarray[np.float64], func):
+def _phasor_trigs(origin:PhotonData, phsel:PhSel, style:IRFStyle, omegas:np.ndarray[np.float64], 
+                  func:Callable[[np.ndarray[np.float64]],np.ndarray[np.float64]])->tuple[tuple[PhSel,...],tuple[int,...],tuple[int,...],tuple[float,...]]:
     stream_ids = origin.detdef.get_stream_ids(phsel)
     sels = tuple(origin.detdef.stream_ids_to_PhSel(i) for i in stream_ids)
     ex_starts, threshs, trigs = zip(*(_phasor_trig(origin, sel, style, omega, func) 
@@ -46,13 +50,19 @@ def _phasor_trigs(origin:PhotonData, phsel:PhSel, style:IRFStyle, omegas:np.ndar
     return sels, ex_starts, threshs, trigs
 
 
-def _phasor_prod_exclude(trigs, nhs, threshs, ex_starts):
+def _phasor_prod_exclude(trigs:np.ndarray[np.float64], nhs:np.ndarray[np.int64], 
+                         threshs:np.ndarray[np.int64], ex_starts:np.ndarray[np.int64])->np.float64:
     nhs_ = [nh[nh >= thresh] - ex_start for nh, thresh, ex_start in zip(nhs, threshs, ex_starts)]
-    return sum(trig[nh].sum() for trig, nh in zip(trigs, nhs_)) / sum(nh.size for nh in nhs_)
+    num = sum(trig[nh].sum() if np.size else 0.0 for trig, nh in zip(trigs, nhs_))
+    dem = sum(nh.size for nh in nhs_)
+    return num / dem if dem else np.nan
 
 
-def _phasor_prod_all(trigs, nhs, threshs, ex_starts):
-    return sum(trig[nh-ex_start].sum() for trig, nh, ex_start in zip(trigs, nhs, ex_starts)) / sum(nh.size for nh in nhs)
+def _phasor_prod_all(trigs:np.ndarray[np.float64], nhs:np.ndarray[np.int64], 
+                     threshs:np.ndarray[np.int64], ex_starts:np.ndarray[np.int64])->np.float64:
+    num = sum(trig[nh-ex_start].sum() if nh.size else 0.0 for trig, nh, ex_start in zip(trigs, nhs, ex_starts)) 
+    dem = sum(nh.size for nh in nhs)
+    return num / dem if dem else np.nan
 
 
 class Phasor(ChildPhotonTable):
@@ -141,12 +151,10 @@ class Phasor(ChildPhotonTable):
     parent_defs = (ParentDef('base', BasePhotonTable, is_base=True), )
     #: :meta private:
     column_defs = (
-        ColumnDef('phasor_g', (PhSel, TV_irfstyle), 0, 'user', 
-                  iter_func='_iter_phasor_g', title_func='_get_phasor_g_title',
-                  reg_func='_regularizecolumn_phasor_g'), 
-        ColumnDef('phasor_s', (PhSel, TV_irfstyle), 0, 'user', 
-                  iter_func='_iter_phasor_s', title_func='_get_phasor_s_title',
-                  reg_func='_regularizecolumn_phasor_s')
+        ColumnDef('phasor_g', (PhSel, ), 0, 'user', 
+                  iter_func='_iter_phasor_g', title_func='_get_phasor_g_title'), 
+        ColumnDef('phasor_s', (PhSel, ), 0, 'user', 
+                  iter_func='_iter_phasor_s', title_func='_get_phasor_s_title')
         )
 
     @cite("DigmanBiophysJ2008", purpose="Phasor analysis")
@@ -209,11 +217,11 @@ class Phasor(ChildPhotonTable):
         for i, sid in enumerate(stream_ids):
             ex = sid // param.detdef.ex_stride
             if param.params['omega'][ex] > 0.0:
-                omega[i] = param.params['omega'][stream_ids]
+                omega[i] = param.params['omega'][ex]
                 continue
             if origin is None:
                 raise ValueError("Determination of automatic omega requires suppyling origin")
-            if param.params['omega'][sid//param.detdef.ex_stride] == 0.0:
+            if param.params['omega'][ex] == 0.0:
                 omega[i] = 2*np.pi/origin.setup.tcspc_range
                 continue
             tcspc_unit = origin.setup.tcspc_unit[ex]
@@ -224,57 +232,39 @@ class Phasor(ChildPhotonTable):
     @classmethod
     def _get_phasor_title(cls, title:str, col:Column, origin:PhotonData=None):
         """Function creates title for any phasor column"""
-        sub = cls._irf_style_map[col.keytup[1]]
-        sub += '' if col.base_param.params['exclude'] else r'\:full'
+        sub = cls._irf_style_map[col.param.params['start']]
+        sub = '' if sub == 'mean' else sub
+        sub += '' if col.param.params['exclude'] else r'\:full'
         ttl = r'_{%s}%s' % (sub, title)
         title = _title_sels(ttl, origin, col.keytup[0])[0]
         return f'${title}$'
 
-    def _iter_phasor_any(self, phsel:PhSel, irfstyle:IRFStyle, func:Callable[[float],float]):
+    def _iter_phasor_any(self, phsel:PhSel, func:Callable[[float],float]):
         """Iterator base for phasor, func should be sin or cos function"""
         _validate_lifetime(phsel, self.detdef)
         omegas = self.omega_vals(phsel)
-        sels, ex_starts, threshs, trigs = _phasor_trigs(self.origin, phsel, irfstyle, omegas, func)
+        sels, ex_starts, threshs, trigs = _phasor_trigs(self.origin, phsel, self.param.params['start'], omegas, func)
         prod_func = _phasor_prod_exclude if self.param.params['exclude'] else _phasor_prod_all
         for nhs in zip(*(self.parents['base'].iter_column('ph_nanos', sel) for sel in sels)):
             yield prod_func(trigs, nhs, threshs, ex_starts)
 
-    @classmethod
-    def _regularize_phasor(cls, *args):
-        """General reg func for any phasor column"""
-        if len(args) > 2:
-            raise ValueError(f"Too many keys for phasor, maximum of 2, got {len(args)}")
-        if len(args) == 1:
-            return args[0], 'mean'
-        return args
-
-    def _iter_phasor_g(self, phsel:PhSel, irfstyle:IRFStyle)->np.ndarray[np.float64]:
+    def _iter_phasor_g(self, phsel:PhSel)->np.ndarray[np.float64]:
         """Iter func for g phasor"""
-        yield from self._iter_phasor_any(phsel, irfstyle, np.cos)
+        yield from self._iter_phasor_any(phsel, np.cos)
         
     @classmethod
     def _get_phasor_g_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
         """title func for g"""
         return cls._get_phasor_title('g', col, origin)
 
-    @classmethod
-    def _regularizecolumn_phasor_g(cls, source_param:Param, *args)->tuple[PhSel, IRFStyle]:
-        """Reg func for g column"""
-        return cls._regularize_phasor(*args)
-
-    def _iter_phasor_s(self, phsel:PhSel, irfstyle:IRFStyle)->np.ndarray[np.float64]:
+    def _iter_phasor_s(self, phsel:PhSel)->np.ndarray[np.float64]:
         """iter func for s phasor"""
-        yield from self._iter_phasor_any(phsel, irfstyle, np.sin)
+        yield from self._iter_phasor_any(phsel, np.sin)
         
     @classmethod
     def _get_phasor_s_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
         """title func for s column"""
         return cls._get_phasor_title('s', col, origin)
-
-    @classmethod
-    def _regularizecolumn_phasor_s(cls, source_param:Param, *args)->tuple[PhSel, IRFStyle]:
-        """reg func for s column"""
-        return cls._regularize_phasor(*args)
 
 
 def _norm_amp(amps:np.ndarray)->np.ndarray:
@@ -404,7 +394,7 @@ def fldecay_pmf(taus:np.ndarray, amps:np.ndarray, t:np.ndarray, irf:np.ndarray)-
     return decay / decay.sum()
 
 
-def fldecay_bg(taus:np.ndarray, amps:np.ndarray, bg:float, t:np.ndarray, irf:np.ndarray):
+def fldecay_bg(taus:np.ndarray, amps:np.ndarray, bg:float, t:np.ndarray, irf:np.ndarray, **kwargs)->np.ndarray:
     """
     Compute probability mass function of a fluoresence decay with background
     fraction.
@@ -436,7 +426,7 @@ def fldecay_bg(taus:np.ndarray, amps:np.ndarray, bg:float, t:np.ndarray, irf:np.
     return (1-bg)*decay + bg/decay.size
 
 
-def fldecay_bg_norm(taus:np.ndarray, amps:np.ndarray, bg:float, t:np.ndarray, irf:np.ndarray):
+def fldecay_bg_norm(taus:np.ndarray, amps:np.ndarray, bg:float, t:np.ndarray, irf:np.ndarray, **kwargs)->np.ndarray:
     """
     Compute probability mass function of a fluoresence decay with background
     fraction.
@@ -472,7 +462,7 @@ def fldecay_bg_norm(taus:np.ndarray, amps:np.ndarray, bg:float, t:np.ndarray, ir
 IRFFunc = Callable[[np.ndarray,float,...],np.ndarray]
 
 
-def fldecay_firf_bg(taus:np.ndarray, amps:np.ndarray, bg:float, t:np.ndarray, irf_func:IRFFunc, irf_params:np.ndarray)->np.ndarray:
+def fldecay_firf_bg(taus:np.ndarray, amps:np.ndarray, bg:float, t:np.ndarray, irf_func:IRFFunc, irf_params:np.ndarray, **kwargs)->np.ndarray:
     """
     Compute probability mass function of a fluoresence decay with background
     fraction, IRF computed based on function and parameters (simulated IRF).
@@ -507,7 +497,7 @@ def fldecay_firf_bg(taus:np.ndarray, amps:np.ndarray, bg:float, t:np.ndarray, ir
     return fldecay_bg(taus, amps, bg, t, irf)
 
 
-def fldecay_firf_bg_norm(taus:np.ndarray, amps:np.ndarray, bg:float, t:np.ndarray, irf_func:IRFFunc, irf_params:np.ndarray)->np.ndarray:
+def fldecay_firf_bg_norm(taus:np.ndarray, amps:np.ndarray, bg:float, t:np.ndarray, irf_func:IRFFunc, irf_params:np.ndarray, **kwargs)->np.ndarray:
     """
     Compute probability mass function of a fluoresence decay with background
     fraction.
@@ -522,7 +512,8 @@ def fldecay_firf_bg_norm(taus:np.ndarray, amps:np.ndarray, bg:float, t:np.ndarra
     taus : np.ndarray
         Lifetimes of exponential decays.
     amps : np.ndarray
-        Amplitudes fo exponential decays, should have same size as taus.
+        Amplitudes fo exponential decays, should have 1 fewer elements as taus.
+        Evaluates assuming final amplitude is such that sum of amplitudes is 1.
     bg : float
         Fraction of Decay arising from flat background.
     t : np.ndarray
@@ -614,16 +605,16 @@ def mle_fldecay_firf_bg(params:np.ndarray, t:np.ndarray, counts:np.ndarray, irf_
     return -np.sum(np.log(fldecay_firf_bg_norm(taus, amps, bg, t, irf_func, irf_params))*counts)
 
 
-class FLDecParams(TypedDict):
-    """
-    Return value of :func:`unpack_fldecay_params` and :func:`fit_fldecay`
-    """
-    taus:np.ndarray[np.float64]
-    amps:np.ndarray[np.float64]
-    bg:np.float64|float
-    irf_func:NotRequired[IRFFunc]
-    irf_params:NotRequired[np.ndarray[np.float64]]
-    result:NotRequired[OptimizeResult]
+# class FLDecParams(TypedDict):
+#     """
+#     Return value of :func:`unpack_fldecay_params` and :func:`fit_fldecay`
+#     """
+#     taus:np.ndarray[np.float64]
+#     amps:np.ndarray[np.float64]
+#     bg:np.float64|float
+#     irf_func:NotRequired[IRFFunc]
+#     irf_params:NotRequired[np.ndarray[np.float64]]
+#     result:NotRequired[OptimizeResult]
 
 
 def pack_fldecay_params(taus:np.ndarray, amps:np.ndarray, bg:float, irf_params:np.ndarray=None, 
@@ -761,7 +752,7 @@ def _est_bg_tau(nhist:np.ndarray, t:np.ndarray)->tuple[float,float,float]:
     return t_center, bg / nhst.size, np.sum(nhst*times) / nhst.sum()
     
 
-def unpack_fldecay_params(params:np.ndarray[np.float64], nirf_params:None|int=None)->FLDecParams:
+def unpack_fldecay_params(params:np.ndarray[np.float64], nirf_params:None|int=None)->dict[str:float|np.ndarray]:
     """
     Unpack params array of fldecay-type funciton into dictionary of lifetimes,
     amplitudes and background fraction ("taus", "amps", "bg" respectively), 
@@ -777,26 +768,33 @@ def unpack_fldecay_params(params:np.ndarray[np.float64], nirf_params:None|int=No
 
     Returns
     -------
-    FLDecParams
+    dict
         Dictionary of parameter arrays of decay.
+        Contains the following keys:
+        
+            - "taus" 1d numpy array of lifetimes
+            - "amps" 1d numpy array 1 smaller than taus, normalized amplitudes of
+              each lifetime.
+            - "bg" float background fraction
+            - "irf_params" 1d numpy array, parameterd defined by irf
 
     """
     nirf = int(nirf_params) if nirf_params else 0
     flpdict = dict(taus=params[:-1-nirf:2], amps=params[1:-2-nirf:2], bg=params[-1-nirf])
-    if nirf_params is not None:
+    if nirf_params:
         flpdict['irf_params'] = params[-nirf:]
     return flpdict
 
 
-def fit_fldecay(data:PhotonDataS, param:Param, phsel:PhSel, gate:None|GateGroup=None, 
+def fit_fldecay(data:PhotonDataS, phsel:PhSel, gate:None|Param|GateGroup=None,
                 ndec:int=None, decay_range:None|slice|tuple[int,int]=None, 
-                irf:None|np.ndarray=None, 
+                irf:bool|np.ndarray=None, 
                 tau_init:None|np.ndarray=None, amp_init:None|np.ndarray=None, bg_init:None|float=None,
                 irf_func:IRFFunc=norm.pdf, irf_init:None|np.ndarray=None, 
                 nparams_irf:None|int=2, irf_pos_idx:None|int=0, irf_width_idx:None|int=1,
                 tau_bounds:None|np.ndarray=None, amp_bounds:None|np.ndarray=None, 
                 bg_bound:None|float=None, irf_param_bounds:None|np.ndarray=None,
-                auto_tau_bounds:bool=True, **kwargs)->FLDecParams:
+                auto_tau_bounds:bool=True, **kwargs)->dict[str:float|np.ndarray|OptimizeResult|IRFFunc]:
     """
     Fit the fluoresence decay extracted from ``data``, using only photons in
     the time ranges in ``param`` and of the stream defined by ``phsel`` to a
@@ -809,20 +807,22 @@ def fit_fldecay(data:PhotonDataS, param:Param, phsel:PhSel, gate:None|GateGroup=
     ----------
     data : PhotonDataS
         Data object form which to extract the decay.
-    param : Param
-        |Param| defining time ranges over which to extract photons.
     phsel : PhSel
         Photon stream of desired decay.
-    gate : None|GateGroup, optional
-        Gate to apply to ``param``. The default is None.
+    gate : None | Param | GateGroup, optonal
+        |GateGroup| or |Param| defining time ranges over which to derive
+        TCSPC decay. If None, use all photons in data. The default is None.
     ndec : int, optional
         Number of exponential decays, use only if tau_init is not specified. 
         The default is None.
     decay_range : None|slice|tuple[int,int], optional
         Range of TCSPC bins in excitation range over which to fit the dacay. 
         The default is None.
-    irf : None|np.ndarray, optional
-        Experimentally measured IRF, if not specified, assume using simulated IRF. 
+    irf : None|bool|np.ndarray, optional
+        If a numpy array, this is used directly as the IRF, if False, then 
+        use a simulated IRF (function can be supplied with the `irf_func`` argument),
+        if True, the take IRF from ``data.irf[phsel]``, if None, the use IRF in
+        ``data.irf[phsel]`` if it exists, otherwise use a simulated IRF.
         The default is None.
     tau_init : None|np.ndarray, optional
         Initial guess for lifetimes. The default is None.
@@ -868,21 +868,27 @@ def fit_fldecay(data:PhotonDataS, param:Param, phsel:PhSel, gate:None|GateGroup=
 
     Returns
     -------
-    FLDecParams
+    dict
         Dictionary of decay parameter arrays.
+        Contains the following keys:
+        
+            - "taus" 1d numpy array of lifetimes
+            - "amps" 1d numpy array 1 smaller than taus, normalized amplitudes of
+              each lifetime.
+            - "bg" float background fraction
+            - "irf_params" (conditional) 1d numpy array, parameterd defined by irf 
+            - "result" |optimizeresult| of the fitting, the preceeding params
+              are all extracted from the ``x`` attribute of this object using
+              the :func:`unpack_fldecay_params`
+            - "irf_func" (conditional) function used to compute simulated IRF
 
     """
-    phsel = phsel.render_positive(data.detdef)
+    phsel = phsel.render_positive(data.detdef, convert_all=True)
     if len(phsel.ex.elements) != 1:
         raise ValueError("can only compute lifetime of single excitation ")
-    param = param.base_param
-    param = param if gate is None else param.regate(gate)
-    nhcol = Column(param, 'nanohist', phsel)
-    get_col = data.get_column if isinstance(data, PhotonData) else data.concatenate_column
-    setup = data.setup if isinstance(data, PhotonData) else data.datas[0].setup
-    nhist = get_col(nhcol).sum(axis=0)
-    t = np.arange(nhist.size) * setup.tcspc_unit[list(phsel.ex.elements)[0]]
+    t, nhist = data.get_tcspc_decay(phsel, gate)
     t_center, bg_est, tau_est = _est_bg_tau(nhist, t)
+    dt = t[-1] - t[0]
     if decay_range is not None and not isinstance(decay_range, slice):
         decay_range = decay_range if isinstance(decay_range, (np.ndarray, Sequence)) else (decay_range, )
         decay_range = slice(*decay_range)
@@ -899,18 +905,21 @@ def fit_fldecay(data:PhotonDataS, param:Param, phsel:PhSel, gate:None|GateGroup=
         if amp_init is not None:
             if tau_init.size - amp_init.size == 0:
                 amp_init = amp_init[:-1] / amp_init.sum()
-            elif tau_init.size - amp_init.size != 0:
+            elif tau_init.size - amp_init.size != 1:
                 raise ValueError("Inconsistent number of decays between tau_int " + 
                                  f"({tau_init.size}) and amps ({amp_init.size}), " +
                                  "amps may be either the same size as taus, or 1 fewer (prefered)")
     else:
-        ndec = amp_init.size
+        ndec = amp_init.size + 1
     if tau_init is None:
-        tau_init = np.logspace(-1, 1, num=ndec, base=tau_est) if ndec != 1 else np.array([tau_est])
+        tau_init = np.logspace(np.log(tau_est/1.5), np.log(min(tau_est*1.5, dt*0.5)), ndec, base=np.e) if ndec != 1 else np.array([tau_est])
     if amp_init is None:
         amp_init = np.ones(ndec - 1) / ndec
     bg_init = bg_est if bg_init is None else bg_init
     if irf is None:
+        d = data if isinstance(data, PhotonData) else data.datas[0]
+        irf = phsel in d.irf
+    if irf is False:
         irf_init = np.zeros(nparams_irf) if irf_init is None else np.asarray(irf_init)
         if irf_pos_idx is not None and irf_pos_idx is not False:
             irf_init[irf_pos_idx] = t_center
@@ -918,8 +927,10 @@ def fit_fldecay(data:PhotonDataS, param:Param, phsel:PhSel, gate:None|GateGroup=
             irf_init[irf_width_idx] = tau_est / 10
     else:
         irf_init = np.array([])
+        if irf is True:
+            irf = data.irf[phsel] if isinstance(data, PhotonData) else data.datas[0].irf[phsel]
     if auto_tau_bounds and tau_bounds is None:
-        tau_bounds = t[-1] - t[0]
+        tau_bounds = dt
     ################################
     ### build inputs to minimize ###
     ################################
@@ -928,15 +939,15 @@ def fit_fldecay(data:PhotonDataS, param:Param, phsel:PhSel, gate:None|GateGroup=
         amp_bounds=amp_bounds, bg_bound=bg_bound, irf_param_bounds=irf_param_bounds)
     if any(b is not None for b in (tau_bounds, amp_bounds, bg_bound, irf_param_bounds)):
         kwargs.setdefault('bounds', bounds)
-    func = mle_fldecay_firf_bg if irf is None else mle_fldecay_bg
+    func = mle_fldecay_firf_bg if irf is False else mle_fldecay_bg
     args = (t, nhist)
-    args += (irf_func, irf_init.size) if irf is None else (irf, )
+    args += (irf_func, irf_init.size) if irf is False else (irf, )
     ###########################################################################
     ########################## Perform Optimization  ##########################
     ###########################################################################
     res = minimize(func, params, args=args, **kwargs)
     out = unpack_fldecay_params(res.x, nirf_params=irf_init.size)
     out['result'] = res
-    if irf is None:
+    if irf is False:
         out['irf_func'] = norm.pdf
     return out

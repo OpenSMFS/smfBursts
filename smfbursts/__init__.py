@@ -57,7 +57,7 @@ from .datamodel import has_matplotlib, has_numba
 
 # smfbursts imports
 from ._citations import smfbursts_citations
-from .photondata import PhotonData, PhotonDataList
+from .photondata import PhotonData, PhotonDataList, as_irf
 from .backgroundtables import Periods, BG, make_bg_param
 from . import backgroundtables
 bg = backgroundtables

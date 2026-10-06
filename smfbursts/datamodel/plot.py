@@ -1018,7 +1018,7 @@ def colorcategory(*args:np.ndarray, cmap:str|mpl.colors.Colormap=None, ncat:int|
     Parameters
     ----------
     *args : np.ndarray
-        Column values os catter plot, function uses last column to assign category
+        Column values of scatter plot, function uses last column to assign category
         colors.
     cmap : str|mpl.colors.Colormap, optional
         Colormap to use to recolor column. If specified, uses the create a
@@ -1027,6 +1027,8 @@ def colorcategory(*args:np.ndarray, cmap:str|mpl.colors.Colormap=None, ncat:int|
     ncat : int, optional
         Number of exected categories
     reduce: bool, optional
+        Generally only for integer columns, if True, sort as unique values.
+        The default is False.
         
     Returns
     -------

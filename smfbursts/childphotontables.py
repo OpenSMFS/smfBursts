@@ -20,7 +20,6 @@ based |Param|
 .. |PhSel| replace:: :class:`PhSel <smfbursts.ph_sel.PhSel>`
 .. |Koshioka| replace:: `Koshioka, Sasaki, Masuhara 1995. <https://doi.org/10.1366/0003702953963652>`__
 .. |Schaffer| replace:: `Schaffer et. al. 1999. <https://doi.org/10.1021/jp9833597>`__
-.. |Digman| replace:: `Digman et. al. 2008 <https://doi.org/10.1529/biophysj.107.120154>`__
 .. |Tomov| replace:: `Tomov et. al. 2012 <https://doi.org/10.1016/j.bpj.2011.11.4025>`__
 """
 from typing import Any, ClassVar, Literal
@@ -52,7 +51,8 @@ from .photondata import (
     _regularize_column_startstop, _regularize_ph_sel, 
     _title_sels, _title_startstop_append, _title_unit_append, _pol_ps, 
     _validate_anisotropy, _validate_lifetime, make_base_column_defs, 
-    ColKeyStart, ColKeyStop, get_phsel_ex_range, get_phsel_range_size
+    ColKeyStart, ColKeyStop, get_phsel_ex_range, get_phsel_range_size,
+    _irf_styles, IRFStyle, TV_irfstyle, _extract_nmarrays
     )
 from .backgroundtables import BG
 from .ph_sel import PhSel, PhStream, DetDef, TV_PhSel, sort_phsels, phsel_all
@@ -146,65 +146,61 @@ def _get_anisotropy_title(col:Column, name:str, include_unit:bool=False, origin:
         title = rf'anis({par.tex_str(**kw)},\: {perp.tex_str(**kw)})'
     return _title_startstop_append(title, start, stop)
 
-_irf_styles = ('thresh', 'mean', 'max')
-IRFStyle = Literal[_irf_styles]
-TV_irfstyle = TV_str(isin=_irf_styles)
+
+# def _get_nmstyle_info(origin:PhotonData, phsel:PhSel, style:IRFStyle)->tuple[int,float]:
+#     ex_start, ex_stop = get_phsel_ex_range(origin.setup, phsel, force_contig=True)
+#     sid = origin.detdef.get_stream_ids(phsel)[0]
+#     tcspc_unit = origin.setup.tcspc_unit[sid % origin.detdef.ex_stride]
+#     if style == 'thresh':
+#         thresh =  origin.irf_thresh[phsel]
+#     elif style == 'mean':
+#         irf = origin.irf[phsel]
+#         thresh = np.sum(np.arange(ex_stop - ex_start)*irf) / irf.sum() + ex_start
+#     elif style == 'max':
+#         irf = origin.irf[phsel]
+#         thresh = np.argmax(irf) + ex_start
+#     else:
+#         raise ValueError(f"Invalid lifetime threshold {style}")
+#     return ex_start, ex_stop, tcspc_unit, thresh
 
 
-def _get_nmstyle_info(origin:PhotonData, phsel:PhSel, style:IRFStyle)->tuple[int,float]:
-    ex_start, ex_stop = get_phsel_ex_range(origin.setup, phsel, force_contig=True)
-    sid = origin.detdef.get_stream_ids(phsel)[0]
-    tcspc_unit = origin.setup.tcspc_unit[sid % origin.detdef.ex_stride]
-    if style == 'thresh':
-        thresh =  origin.irf_thresh[phsel]
-    elif style == 'mean':
-        irf = origin.irf[phsel]
-        thresh = np.sum(np.arange(ex_stop - ex_start)*irf) / irf.sum() + ex_start
-    elif style == 'max':
-        irf = origin.irf[phsel]
-        thresh = np.argmax(irf) + ex_start
-    else:
-        raise ValueError(f"Invalid lifetime threshold {style}")
-    return ex_start, ex_stop, tcspc_unit, thresh
+# def _get_nmunits(origin:PhotonData, phsel:PhSel, style:IRFStyle)->tuple[float,float,float]:
+#     """
+#     Compute the tcspc_unit, irf_mean, bg_mean of a given stream (sid)
 
-
-def _get_nmunits(origin:PhotonData, phsel:PhSel, style:IRFStyle):
-    """
-    Compute the tcspc_unit, irf_mean, bg_mean of a given stream (sid)
-
-    Parameters
-    ----------
-    origin : PhotonData
-        Data from which to extract nanomean units.
-    phsel : PhSel
-        Photon selection (must be single stream) for which to get the units.
-    style : {'thresh', 'mean', 'max'}
-        Method to determine threshold/center of IRF
+#     Parameters
+#     ----------
+#     origin : PhotonData
+#         Data from which to extract nanomean units.
+#     phsel : PhSel
+#         Photon selection (must be single stream) for which to get the units.
+#     style : {'thresh', 'mean', 'max'}
+#         Method to determine threshold/center of IRF
         
-        - 'thresh' use user set IRF threshold, set in origin.irf_tresh
-        - 'mean' use the mean of the IRF
-        - 'max' use the time of the maximum value in the IRF.
+#         - 'thresh' use user set IRF threshold, set in origin.irf_tresh
+#         - 'mean' use the mean of the IRF
+#         - 'max' use the time of the maximum value in the IRF.
 
-    Raises
-    ------
-    ValueError
-        ex ranges specifies broken excitation range.
+#     Raises
+#     ------
+#     ValueError
+#         ex ranges specifies broken excitation range.
 
-    Returns
-    -------
-    tcspc_unit : float
-        TCSPC unit of channel sid.
-    irf_mean : float
-        Mean time of IRF for given channel, this is the value to shift each nanotime
-        so that nanomean computes correctly.
-    bg_mean : float
-        Expected nanomean of background, 
-        where start of excitation period is ``-irf_mean``.
+#     Returns
+#     -------
+#     tcspc_unit : float
+#         TCSPC unit of channel sid.
+#     irf_mean : float
+#         Mean time of IRF for given channel, this is the value to shift each nanotime
+#         so that nanomean computes correctly.
+#     bg_mean : float
+#         Expected nanomean of background, 
+#         where start of excitation period is ``-irf_mean``.
 
-    """
-    ex_start, ex_stop, tcspc_unit, thresh = _get_nmstyle_info(origin, phsel, style)
-    bg_mean = (ex_stop - ex_stop) / 2 - thresh +  ex_start
-    return tcspc_unit, thresh, bg_mean
+#     """
+#     ex_start, ex_stop, tcspc_unit, thresh = _get_nmstyle_info(origin, phsel, style)
+#     bg_mean = (ex_stop - ex_stop) / 2 - thresh +  ex_start
+#     return tcspc_unit, thresh, bg_mean
 
 
 # def _get_nmunits(setup:PhSpec, sid:int, ex_stride:int, irf:DiskDict)->tuple[float,float,float]:
@@ -221,31 +217,31 @@ def _get_nmunits(origin:PhotonData, phsel:PhSel, style:IRFStyle):
 #     return tcspc_unit, irf_mean, bg_mean
 
 
-def _extract_nmarrays(origin:PhotonData, phsel:PhSel, style:IRFStyle)->list[np.ndarray[np.float64],np.ndarray[np.float64],np.ndarray[np.float64]]:
-    """
-    Get the necessary nanomean bg arrays from stream ids.
+# def _extract_nmarrays(origin:PhotonData, phsel:PhSel, style:IRFStyle)->list[np.ndarray[np.float64],np.ndarray[np.float64],np.ndarray[np.float64]]:
+#     """
+#     Get the necessary nanomean bg arrays from stream ids.
 
-    Parameters
-    ----------
-    stream_ids : np.ndarray[np.uint8]
-        Array of stream_ids of PhSel.
-    setup : PhSpec
-        Setup spec of origin.
-    irf : DiskDict
-        Choose IRF type, either .
+#     Parameters
+#     ----------
+#     stream_ids : np.ndarray[np.uint8]
+#         Array of stream_ids of PhSel.
+#     setup : PhSpec
+#         Setup spec of origin.
+#     irf : DiskDict
+#         Choose IRF type, either .
 
-    Returns
-    -------
-    tcspc_unit : np.ndarray[np.float64]
-        TCSPC unit of each detector id in stream_ids
-    irf_mean : np.ndarray[np.float64]
-        Expeceted mean of IRF (in TCSPC units) of each detector id in stream_ids.
-    bg_mean : np.ndarray[np.float64]
-        Expected mean of background (in TCSPC unit, shifted by irf_mean) fo 
-        each detector id in stream_ids.
-    """
-    sels = (origin.detdef.stream_ids_to_PhSel(i) for i in origin.detdef.get_stream_ids(phsel))
-    return list(map(np.array, zip(*(_get_nmunits(origin, sel, style) for sel in sels))))
+#     Returns
+#     -------
+#     tcspc_unit : np.ndarray[np.float64]
+#         TCSPC unit of each detector id in stream_ids
+#     irf_mean : np.ndarray[np.float64]
+#         Expeceted mean of IRF (in TCSPC units) of each detector id in stream_ids.
+#     bg_mean : np.ndarray[np.float64]
+#         Expected mean of background (in TCSPC unit, shifted by irf_mean) fo 
+#         each detector id in stream_ids.
+#     """
+#     sels = (origin.detdef.stream_ids_to_PhSel(i) for i in origin.detdef.get_stream_ids(phsel))
+#     return list(map(np.array, zip(*(_get_nmunits(origin, sel, style) for sel in sels))))
 
 
 class NphBG(ChildPhotonTable):
@@ -513,31 +509,20 @@ class NphBG(ChildPhotonTable):
         stream_ids = self.origin.detdef.get_stream_ids(phsel)
         phsels = tuple(self.origin.detdef.stream_ids_to_PhSel(sid) for sid in stream_ids)
         tcspc_units, irf_means, bg_means = _extract_nmarrays(self.origin, phsel, irfstyle)
+        irf_means = irf_means.astype(np.int32)
         base, bg = self.parents['base'], self.parents['bg']
-        if stream_ids.size == 1:
-            tcspc_unit = tcspc_units[0]
-            irf_mean = irf_means[0]
-            bg_mean = bg_means[0]
-            for nanos, bgcnt in zip(base.iter_column('ph_nanos', phsel), 
-                                    bg.iter_column('rangecounts', base.param, 
-                                                   phsel, starttype, stoptype)):
-                nanosum = np.sum(nanos, dtype=np.float64)-nanos.size*irf_mean - bgcnt*bg_mean
-                nanocnts = nanos.size - bgcnt
-                yield tcspc_unit*nanosum/nanocnts
-        else:
-            for nanos, dets, *bgcnts in zip(base.iter_column('ph_nanos', phsel), 
-                                            base.iter_column('ph_dets', phsel),
-                                            *(bg.iter_column('rangecounts', base.param, 
-                                                             sel, starttype, stoptype) 
-                                              for sel in phsels)):
-                nanosum, nanocnts = 0.0, 0.0
-                for i, bgcnt in enumerate(bgcnts):
-                    mask = dets == stream_ids[i]
-                    mask_size = mask.sum()
-                    nanosum += np.sum(nanos[mask], dtype=np.float64)-mask_size*irf_means[i] - bgcnt*bg_means[i]
-                    nanocnts += mask_size - bgcnt
-                yield tcspc_unit*nanosum/nanocnts
-    
+        bg_means = bg_means[stream_ids]
+        tcspc_units_sid = tcspc_units[stream_ids]
+        for nanos, dets, *bgcnts in zip(base.iter_column('ph_nanos', phsel), 
+                                        base.iter_column('ph_dets', phsel),
+                                        *(bg.iter_column('rangecounts', base.param, sel) 
+                                          for sel in phsels)):
+            bgcnts = np.array(bgcnts)
+            nph = nanos.size - bgcnts.sum()
+            nanosum = np.sum((nanos.astype(np.int32) - irf_means[dets])*tcspc_units[dets])
+            bgmean = np.sum(bgcnts*bg_means*tcspc_units_sid)
+            yield (nanosum-bgmean) / nph
+
     @classmethod
     def _check_nanomean_bg(cls, col:Column):
         _validate_lifetime(col.keytup[0], col.source_param.detdef)
@@ -545,7 +530,8 @@ class NphBG(ChildPhotonTable):
     @classmethod
     def _get_nanomean_bg_title(cls, col:Column, include_unit:Real|bool=False, origin:PhotonData=None)->str:
         """Nanomean corrected for background title func"""
-        title = _title_sels(r'\bar{_{bg}\tau}', origin, col.keytup[0])[0]
+        superscript = '' if col.keytup[1] == 'mean' else '^{%s}' % col.keytup[1]
+        title = _title_sels(r'\bar{_{bg}%s\tau}' % superscript, origin, col.keytup[0])[0]
         title = _title_startstop_append(title, col.keytup[2], col.keytup[3])
         title = _title_unit_append(title, 's', include_unit)
         return f'${title}$'
@@ -588,7 +574,8 @@ class NphBG(ChildPhotonTable):
     @classmethod
     def _get_nmdiff_bg_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
         """Title getter function for nanomean"""
-        ta, tb = _title_sels(r'\bar{_{bg}\tau}', origin, *col.keytup[:2])
+        superscript = '' if col.keytup[2] == 'mean' else '^{%s}' % col.keytup[2]
+        ta, tb = _title_sels(r'\bar{_{bg}%s\tau}' % superscript, origin, *col.keytup[:2])
         title = _title_startstop_append(f'{ta}-{tb}', col.keytup[2], col.keytup[3])
         title = _title_unit_append(title, 's', include_unit)
         return f'${title}$'

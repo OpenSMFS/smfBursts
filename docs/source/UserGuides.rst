@@ -9,13 +9,14 @@ https://github.com/OpenSMFS/smfBursts/tree/main/docs/source/notebooks
     :caption: Core Concepts
     :maxdepth: 1
 
-    notebooks/GatesTutorial
-    notebooks/PhSelTutorial
     notebooks/BurstSearchTutorial
-    notebooks/photonHDF5Tutorial
-    notebooks/PlottingTutorial
-    notebooks/MultiFitTutorial
     notebooks/FCStutorial
+    notebooks/GatesTutorial
+    notebooks/LifetimeTutorial
+    notebooks/MultiFitTutorial
+    notebooks/photonHDF5Tutorial
+    notebooks/PhSelTutorial
+    notebooks/PlottingTutorial
 
 
 
