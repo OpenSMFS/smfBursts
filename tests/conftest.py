@@ -4,6 +4,9 @@
 # Coppied from https://docs.pytest.org/en/latest/example/simple.html#incremental-testing-test-steps
 import numpy as np
 
+from pathlib import Path
+import zipfile
+
 import pytest
 
 # store history of failures per test class name and per index in parametrize (if parametrize used)
@@ -129,6 +132,9 @@ def data1ex():
 @pytest.fixture
 def datapolgroup():
     def process(file:str):
+        if not Path(file).exists():
+            with zipfile.ZipFile("data/Lab8_U2AF2.zip") as z:
+                z.extractall('data/')
         raw = smf.lr.load_ptu(file)
         raw.setup['num_spectral_ch'] = 2
         raw.setup['num_polarization_ch'] = 2
