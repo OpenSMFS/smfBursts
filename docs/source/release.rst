@@ -1,8 +1,8 @@
 Release Notes
 -------------
 
-0.1.4 (draft)
--------------
+0.2.0
+-----
 
 Additions
 
