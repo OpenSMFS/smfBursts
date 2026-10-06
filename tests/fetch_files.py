@@ -23,6 +23,6 @@ files = ('Lab8_U2AF2.zip', )
 for file in files:
     fl = afrt.fetch(file)
     with zipfile.ZipFile(fl) as z:
-        z.extractall(DATASET_DIR+'/Lab8_U2AF2/')
+        z.extractall(DATASET_DIR)
     
     

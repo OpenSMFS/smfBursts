@@ -533,8 +533,38 @@ Background count rate of photons in stream ``phsel``.
 Units of :math:`photons\:s^{-1}`.
 
 
+bg_err_CM
+*********
+
+    |Param| : |BG|
+
+    Type : :code:`np.float64`
+
+    Keys : (``ph_sel`` : |PhSel|, )
+
+
+Crames-von Mises error metric.
+Computes :math:`\int_{-\infty}^{\infty} \left[] L_{n} - L_{*} \right]^{2}`.
+Using trapezoid rule for numerical integration.
+
+
+bg_err_KS
+*********
+
+    |Param| : |BG|
+
+    Type : :code:`np.float64`
+
+    Keys : (``ph_sel`` : |PhSel|, )
+
+
+Kolmogorov-Smirnov error metric, computes the error as the max of deviation of
+the empirical CDF from the fitted CDF.
+
+
 range_counts
 ************
+
 **mapping from one table to another**
 
     Source |Param| : |BG|
@@ -639,6 +669,7 @@ if ``'max'`` then set time 0 as time of maximum value of IRF.
 
 nmdiff
 ******
+
 *Discouraged, use nmdiff_bg_ instead.*
 
     |Param| : |BasePhotonTable|, typically |Bursts| or |BurstOvlp|
