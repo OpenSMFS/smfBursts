@@ -10,7 +10,7 @@ This module is also accessible as ``smf.lt``.
 .. |optimizeresult| replace:: `OptimizeResult <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.OptimizeResult.html>`__
 .. |Digman| replace:: `Digman et. al. 2008 <https://doi.org/10.1529/biophysj.107.120154>`__
 """
-from typing import Any, TypedDict, NotRequired
+from typing import Any, TypedDict
 from collections.abc import Callable, Sequence
 from numbers import Real
 
@@ -605,16 +605,16 @@ def mle_fldecay_firf_bg(params:np.ndarray, t:np.ndarray, counts:np.ndarray, irf_
     return -np.sum(np.log(fldecay_firf_bg_norm(taus, amps, bg, t, irf_func, irf_params))*counts)
 
 
-# class FLDecParams(TypedDict):
-#     """
-#     Return value of :func:`unpack_fldecay_params` and :func:`fit_fldecay`
-#     """
-#     taus:np.ndarray[np.float64]
-#     amps:np.ndarray[np.float64]
-#     bg:np.float64|float
-#     irf_func:NotRequired[IRFFunc]
-#     irf_params:NotRequired[np.ndarray[np.float64]]
-#     result:NotRequired[OptimizeResult]
+class FLDecParams(TypedDict):
+    """
+    Return value of :func:`unpack_fldecay_params` and :func:`fit_fldecay`
+    """
+    taus:np.ndarray[np.float64]
+    amps:np.ndarray[np.float64]
+    bg:np.float64|float
+    irf_func:IRFFunc
+    irf_params:np.ndarray[np.float64]
+    result:OptimizeResult
 
 
 def pack_fldecay_params(taus:np.ndarray, amps:np.ndarray, bg:float, irf_params:np.ndarray=None, 
@@ -752,7 +752,7 @@ def _est_bg_tau(nhist:np.ndarray, t:np.ndarray)->tuple[float,float,float]:
     return t_center, bg / nhst.size, np.sum(nhst*times) / nhst.sum()
     
 
-def unpack_fldecay_params(params:np.ndarray[np.float64], nirf_params:None|int=None)->dict[str:float|np.ndarray]:
+def unpack_fldecay_params(params:np.ndarray[np.float64], nirf_params:None|int=None)->FLDecParams:
     """
     Unpack params array of fldecay-type funciton into dictionary of lifetimes,
     amplitudes and background fraction ("taus", "amps", "bg" respectively), 
@@ -768,7 +768,7 @@ def unpack_fldecay_params(params:np.ndarray[np.float64], nirf_params:None|int=No
 
     Returns
     -------
-    dict
+    FLDecParams (dict)
         Dictionary of parameter arrays of decay.
         Contains the following keys:
         
@@ -794,7 +794,7 @@ def fit_fldecay(data:PhotonDataS, phsel:PhSel, gate:None|Param|GateGroup=None,
                 nparams_irf:None|int=2, irf_pos_idx:None|int=0, irf_width_idx:None|int=1,
                 tau_bounds:None|np.ndarray=None, amp_bounds:None|np.ndarray=None, 
                 bg_bound:None|float=None, irf_param_bounds:None|np.ndarray=None,
-                auto_tau_bounds:bool=True, **kwargs)->dict[str:float|np.ndarray|OptimizeResult|IRFFunc]:
+                auto_tau_bounds:bool=True, **kwargs)->FLDecParams:
     """
     Fit the fluoresence decay extracted from ``data``, using only photons in
     the time ranges in ``param`` and of the stream defined by ``phsel`` to a
@@ -868,7 +868,7 @@ def fit_fldecay(data:PhotonDataS, phsel:PhSel, gate:None|Param|GateGroup=None,
 
     Returns
     -------
-    dict
+    FLDecParams (dict)
         Dictionary of decay parameter arrays.
         Contains the following keys:
         
