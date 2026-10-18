@@ -1,8 +1,9 @@
 Release Notes
 -------------
 
-0.2.1 (under development)
--------------------------
+0.2.1
+-----
+
 Additions
 
 - ``rcParams`` has ``"analysis.lifetime`` key to speficy if fretfactory should

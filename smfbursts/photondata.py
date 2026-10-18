@@ -10,6 +10,7 @@ This incldudes the primary class definitions for the handling of
 stream sorted photon data, 
 and the various attributes and tables that can be defined thereof.
 
+.. |ColumnDef| replace:: :class:`ColumnDef <smfbursts.datamodel.tables.ColumnDef>`
 .. |TypeValidator| replace:: :class:`TypeValidator <smfbursts.datamodel.immutabledata.TypeValidator>`
 .. |DiskDict| replace:: :class:`smfbursts.datamodel.diskdict.DiskDict`
 .. |DataSet| replace:: :class:`smfbursts.datamodel.tables.DataSet`
@@ -1819,8 +1820,8 @@ class BasePhotonTable(PhotonTable, BaseTable):
     the ranges of indexes corresponding to all photons in the :attr:`PhotonData.times`
     are defined by the ``istart`` and ``istop`` columns. *The definition and computation
     of ``start``, ``stop``, ``istart`` and ``istop`` columns is the primary role
-    of subclasses of this class* **subclasses of this ``BasePhotonTable`` must
-    implement these columns**
+    of subclasses of this class* **subclasses of this** ``BasePhotonTable`` 
+    **must implement these columns**
     
     It is also necessary to define a ``detdef`` paramproperty which can extract
     the :class:`smfbursts.ph_sel.DetDef` from either the params or parents of
@@ -1828,7 +1829,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
     
     
     The :attr:`BasePhotonTable.column_defs` class attribute should be set to a
-    tuple of :class:`smfbursts.datamodel.tables.ColumnDef` objects defining
+    tuple of |ColumnDef| objects defining
     ``start``, ``stop``, ``istart``, ``istop`` columns concatenated with the
     convenience function :func:`make_base_column_defs` to create tuple of column
     defs, any additional user-defined columns can be added by adding to returned
@@ -2440,7 +2441,32 @@ _basetimecolumndefs = (
                   )
 
 
-def make_base_column_defs(startV:TypeValidator=TV_str_start, stopV:TypeValidator=TV_str_stop, skip:Sequence[str]=None):
+def make_base_column_defs(startV:TypeValidator=TV_str_start, stopV:TypeValidator=TV_str_stop, 
+                          skip:Sequence[str]=None)->tuple[ColumnDef,...]:
+    """
+    Create a tuple of |ColumnDef| objects for the "default" columns in a new
+    :class:`BasePhotonTable` subclass. Typcially this fucntion is called
+    as part of constructing the :attr:`BasePhotonTable.column_defs` class attribute.
+    
+
+    Parameters
+    ----------
+    startV : TypeValidator, optional
+        The type validator for valid starttime values. The default is TV_str_start.
+    stopV : TypeValidator, optional
+        The type validator for valid stoptime values. The default is TV_str_stop.
+    skip : Sequence[str], optional
+        Sequence of names of columns to skip. Use to remove columns that are not
+        valid or implemented differently for the subclass.
+        The default is None.
+
+    Returns
+    -------
+    tuple[ColumnDef,...]
+        Tuple of |ColumnDef| giving the "default" columns for a 
+        :class:`BasePhotonTable`.
+
+    """
     skip = tuple() if skip is None else skip
     out = _basetimecolumndefs + (
         ColumnDef('midtime', (startV, stopV), 0, 'never', get_func='_get_midtime', 
