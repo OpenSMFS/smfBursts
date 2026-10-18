@@ -29,7 +29,7 @@ excitation-donor emission.
 .. |Ratios| replace:: :class:`Ratios <smfbursts.bursttables.Ratios>`
 .. |DetDef| replace:: :class:`DetDef <smfbursts.ph_sel.DetDef>`
 .. |leastsquare| replace:: `scipy.optimize.least_squares <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html>`__
-.. |minimize| replace:: `scipy.optimize.minimize <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.minimize.html>`__
+.. |minimize| replace:: `scipy.optimize.minimize <https://docs.scipy.org/doc/scipy/reference/ngenerated/scipy.optimize.minimize.html>`__
 .. |optimizeresult| replace:: `OptimizeResult <https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.OptimizeResult.html>`__
 .. |linregress| replace:: `scipy.stats.linregress <https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.linregress.html>`__
 .. |hellenkamp| replace:: `*Hellenkamp et. al.* <https://doi.org/10.1038/s41592-018-0085-0>`__
@@ -39,7 +39,9 @@ from collections.abc import Sequence, Callable, Hashable, Iterator
 import warnings
 from typing import Any, Literal
 from numbers import Integral
-from itertools import repeat
+from itertools import product, repeat
+
+from .datamodel import rcParams
 
 import numpy as np
 from scipy.optimize import OptimizeResult
@@ -53,7 +55,7 @@ from .cite import cite
 
 from .ph_sel import PhSel, PhStream, DetDef
 from .photondata import (
-    PhotonDataS, PhotonData
+    PhotonDataS, PhotonData, PhotonDataList, IRFStyle
     )
 from .backgroundtables import (
     Periods, BG, exp_mlefit, BGFuncType
@@ -124,6 +126,8 @@ def make_bg(detdef:DetDef|PhotonDataS, period:float=60.0, tail_min:float=500e-6,
         Dictionary of |Param| and |Column| objects defining background periods.
 
     """
+    if isinstance(detdef, (PhotonData, PhotonDataList)):
+        rcParams.setdefault('analysis.lifetime', 'mean' if detdef.pulsed else False)
     detdef = detdef if isinstance(detdef, DetDef) else detdef.detdef
     prd = Param(Periods, params=dict(start_at='time_min', stop_at='over',
                                         period=period, detdef=detdef))
@@ -166,7 +170,8 @@ def _infer_bg(param:Param)->None|Param:
 
 
 def make_fret_from_base(base:Param, bg:Param=None, skip:Sequence[str]=None, 
-                        nbva:int|Sequence[int]=5, update:dict=None, **kwargs)->dict[str:Param|Column]:
+                        nbva:int|Sequence[int]=5, lifetime:None|bool|IRFStyle=None,
+                        update:dict=None, **kwargs)->dict[str:Param|Column]:
     r"""
     Create default set of |Param| and |Column| objects from an initial BasePhotonTable
     based |Param|.
@@ -245,6 +250,7 @@ def make_fret_from_base(base:Param, bg:Param=None, skip:Sequence[str]=None,
     - 'S' |Column| of ratio of bg and correction factor corrected photon counts 
       between Dex and Dex_AexAem (0ex and 0ex_1ex1em), based on the 'ratios' key
       (uses default start/stop types of input argument ``base``)
+    - 'Nmbg_DD' |Column| of background corrected nanomean for DexDem channel.
     
     
     Parameters
@@ -264,6 +270,11 @@ def make_fret_from_base(base:Param, bg:Param=None, skip:Sequence[str]=None,
         for the given dataset. The default is None.
     nbva : int | Sequence[int], optional
         Default size of bva chunck for bva columns. The default is 5.
+    lifetime : None | bool | IRFStyle, optional
+        Whether or not to include Nmbg_DD column, if specified as string,
+        specifies which IRF style, if True, defaults to using IRF style of "mean",
+        If None, use value from rcParams['analysis.lifetime']
+        The defautl is None.
     update : dict, optional
         Dictionary to update in place. The default is None.
     **kwargs : Any
@@ -275,6 +286,8 @@ def make_fret_from_base(base:Param, bg:Param=None, skip:Sequence[str]=None,
         Dictionary of default |Param| and |Column| objects.
 
     """
+    lifetime = rcParams.get('analysis.lifetime', 'mean') if lifetime is None else lifetime
+    lifetime = 'mean' if lifetime is True else lifetime
     out = dict()
     skip = tuple() if skip is None else skip
     nbva = (nbva, ) if isinstance(nbva, Integral) else nbva
@@ -290,6 +303,19 @@ def make_fret_from_base(base:Param, bg:Param=None, skip:Sequence[str]=None,
     nphbg, ratios = None, None
     if bg is not None:
         nphbg = _set_skip(out, 'nphbg', skip, Param, NphBG, {'single':True}, {'base':base, 'bg':bg})
+        if lifetime:
+            if base.detdef.pol == 1 and base.detdef.split == 1:
+                _set_skip(out, "Nmbg_DD", skip, Column, nphbg, 'nanomean_bg', (PhSel('0ex0em'), lifetime))
+            elif base.detdef.pol == 2 and base.detdef.split == 1:
+                if base.detdef.split == 1:
+                    for i, n in zip((0, 1), ("P", "S")):
+                        _set_skip(out, f"Nmbg_DD{n}", skip, Column, nphbg, 'nanomean_bg', (PhSel(f'0ex0em{i}pol'), lifetime))
+                else:
+                    for (i, n), s in product(zip((0, 1), ("P", "S")), range(base.detdef.split)):
+                        _set_skip(out, f"Nmbg_DD{n}{s}", skip, Column, nphbg, 'nanomean_bg', (PhSel(f'0ex0em{i}pol{s}'), lifetime))
+            else:
+                for p, s in product(range(base.detdef.pol), range(base.detdef.split)):
+                    _set_skip(out, f"Nmbg_DD{p}{s}", skip, Column, nphbg, 'nanomean_bg', (PhSel(f'0ex0em{p}pol{s}'), lifetime))
     if nphbg is not None and kwargs:
         ratios = _set_skip(out, 'ratios', skip, Param, Ratios, kwargs, {'nph':nphbg})
     if nphbg is not None:
@@ -394,7 +420,7 @@ def make_burst_search(bg:Param|Sequence[Param], m:int|Sequence[int]=10,
     update : dict
         Dictionary to update (inplace) with new values. The default is None.
     **kwargs : Any
-        Additional params in params of Bursts |Param|.
+        Additional kwargs passed to :func:`make_fret_from_base`
 
     Returns
     -------
@@ -427,10 +453,10 @@ def make_burst_search(bg:Param|Sequence[Param], m:int|Sequence[int]=10,
         if truthtable == 'auto':
             truthtable = 'and'
         bursts = Param(BurstOvlp, {'fuse':fuse, 'truthtable':truthtable}, {'bases':bursts})
-    rkwargs = dict(alpha=alpha, delta=delta, gamma=gamma, beta=beta, nbva=nbva,
-                   dir_ex=dir_ex, lk=lk, corr_mat=corr_mat, update=update)
-    rkwargs = {k:v for k, v in rkwargs.items() if v is not None}
-    out = make_fret_from_base(bursts, bg=bg, **rkwargs)
+    kwargs.update(**dict(alpha=alpha, delta=delta, gamma=gamma, beta=beta, nbva=nbva,
+                   dir_ex=dir_ex, lk=lk, corr_mat=corr_mat, update=update))
+    kwargs = {k:v for k, v in kwargs.items() if v is not None}
+    out = make_fret_from_base(bursts, bg=bg, **kwargs)
     out['bursts'] = bursts
     return out
 
@@ -1084,3 +1110,23 @@ MonoExdefaults = SequenceDefaults(
 
 #: Alias of MonExdefaults
 MD = MonoExdefaults
+
+
+def set_rcdefaults(alex:bool=True)->None:
+    """
+    Function to be called near beginning of scripts, sets defaults in rcParams
+    so that plotting defaults are set so plotting functions have better defaults
+    for single molecule analysis than matplotlib defaults
+
+    Parameters
+    ----------
+    alex : bool, optional
+        Whether or not the usuall data you are anlyzing is ALEX or single excitation. 
+        The default is True.
+
+    """
+    rcParams['plot.hist_bar'] = _dict_update(_histbar_kwargs, {'bins':_ratio_bins})
+    rcParams['plot.hist_kdeoverlay'] = _dict_update(_kdehistbar_kwargs, {'bins':_ratio_bins})
+    rcParams['plot.scatter'] = {'s':2.0}
+    if alex:
+        rcParams['plot.hexbin'] = AD['hexbin']

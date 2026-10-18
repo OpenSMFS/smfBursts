@@ -788,7 +788,7 @@ def unpack_fldecay_params(params:np.ndarray[np.float64], nirf_params:None|int=No
 
 def fit_fldecay(data:PhotonDataS, phsel:PhSel, gate:None|Param|GateGroup=None,
                 ndec:int=None, decay_range:None|slice|tuple[int,int]=None, 
-                irf:bool|np.ndarray=None, 
+                irf:None|bool|np.ndarray=None, 
                 tau_init:None|np.ndarray=None, amp_init:None|np.ndarray=None, bg_init:None|float=None,
                 irf_func:IRFFunc=norm.pdf, irf_init:None|np.ndarray=None, 
                 nparams_irf:None|int=2, irf_pos_idx:None|int=0, irf_width_idx:None|int=1,
@@ -818,7 +818,7 @@ def fit_fldecay(data:PhotonDataS, phsel:PhSel, gate:None|Param|GateGroup=None,
     decay_range : None|slice|tuple[int,int], optional
         Range of TCSPC bins in excitation range over which to fit the dacay. 
         The default is None.
-    irf : None|bool|np.ndarray, optional
+    irf : None | bool | np.ndarray, optional
         If a numpy array, this is used directly as the IRF, if False, then 
         use a simulated IRF (function can be supplied with the `irf_func`` argument),
         if True, the take IRF from ``data.irf[phsel]``, if None, the use IRF in

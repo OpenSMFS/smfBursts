@@ -421,7 +421,7 @@ def test_rotational_corr_c(datapolgroup, irfstyle):
 
 def test_single_ex(data1ex):
     bg = smf.ff.make_bg(data1ex, auto_threshold=True)
-    bursts = smf.ff.make_burst_search(bg['bg'], m=10, F=6.0)
+    bursts = smf.ff.make_burst_search(bg['bg'], m=10, F=6.0, lifetime=False)
     gate = smf.make_geq_gate(bursts['NphDD_bg'], 50)
     smf.ff.make_correction_factors(bursts['nphbg'], update=bursts, alpha=0.1, gamma=0.95)
     data1ex.get_frame(*smf.ff.get_columns(bursts, gate))

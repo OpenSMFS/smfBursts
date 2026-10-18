@@ -17,16 +17,21 @@ to the data, overriding any gates in the input.
 .. |nphistogram| replace:: `np.histogram() <https://numpy.org/doc/stable/reference/generated/numpy.histogram.html>`__
 .. |gaussian_kde| replace:: `scipy.stats.gaussian_kde <https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.gaussian_kde.html>`__
 .. |Text| replace:: `plt.Text <https://matplotlib.org/stable/api/text_api.html#matplotlib.text.Text>`__
+.. |axplot| replace:: `ax.plot <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.plot.html#matplotlib.axes.Axes.plot>`__
+.. |axscatter| replace:: `ax.scatter() <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.scatter.html>`__
+.. |axstairs| replace:: `ax.stairs <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.stairs.html>`__
 .. |axxlabel| replace:: `ax.set_xlabel <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_xlabel.html>`__
 .. |axylabel| replace:: `ax.set_ylabel <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_ylabel.html>`__
+.. |pltfigure| replace:: `plt.Figure <https://matplotlib.org/stable/api/_as_gen/matplotlib.figure.Figure.html>`__
+.. |pltgca| replace:: `plt.gca() <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.gca.html>`__
 """
 from collections.abc import Callable, Sequence
-from typing import Union, Any, Literal
+from typing import Any, Literal
+from functools import wraps
 from inspect import signature
 from itertools import repeat, zip_longest
 from numbers import Real, Integral
 import re
-# from functools import wraps
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -43,16 +48,47 @@ from .multifit import FitFunc, unwrap_param
 
 rcParams['plot.record'] = False
 
-
-
-DataS = Union[DataSet,DataSetList]
-AxKw = Union[None,plt.Axes]
+DataS = DataSet|DataSetList
+AxKw = None|plt.Axes
 
 
 def _check_ax(ax:AxKw)->plt.Axes:
     """convenience function, if ax is None, return current axes"""
     return plt.gca() if ax is None else ax
     
+
+def _kwdct(kwarg:None|dict)->dict:
+    """Similar to _check_ax, converts None to dict for []_kwargs argumments"""
+    return dict() if kwarg is None else kwarg
+
+
+def plotrcParam(module=None, default=None, name=None):
+    def defaultkw(func):
+        nonlocal module, default, name
+        default = _kwdct(default)
+        module = func.__module__ if module is None else module
+        name = func.__name__ if name is None else name
+        rcid = f'{module}.{name}'
+        rcParams[rcid] = default
+        # print(f'add {rcid} to rcParams, value = {rcParams[rcid]}')
+        params = signature(func).parameters
+        novarg = not any(p.kind == p.VAR_POSITIONAL for p in params.values())
+        argnames = tuple(params.keys())
+        lenargs = sum(p in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD) for p in params.values())
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            kw = rcParams.get(wrapper.rcParam_key, dict()).copy()
+            if novarg:
+                for arg in argnames[lenargs:len(args)]:
+                    kw.pop(arg, None)
+            kw = _dict_update(kw, kwargs)
+            return func(*args, **kw)
+        wrapper.rcParam_key = rcid
+        return wrapper
+    
+    return defaultkw
+        
+
 
 def _regate(gate:None|Gate_|GateGroup, *args:Param|Column)->list[Param|Column]:
     """
@@ -65,11 +101,6 @@ def _regate(gate:None|Gate_|GateGroup, *args:Param|Column)->list[Param|Column]:
     for arg in args[1:]:
         gate &= arg.base_gate
     return [arg.regate(gate) for arg in args]
-
-
-def _kwdct(kwarg:Union[dict,None])->dict:
-    """Similar to _check_ax, converts None to dict for []_kwargs argumments"""
-    return dict() if kwarg is None else kwarg
 
 
 def _rescale_value(val:np.ndarray, factor:Real)->np.ndarray[np.float64]:
@@ -110,9 +141,9 @@ def _get_column_arrays(data:DataS, *cols:Column, gate:GateGroup=None,
 
 NormLiteral = Literal[None,"none",'PMF','sum','max','PDF', 'cumulative','icumulative','CDF','iCDF']
 
-def _histcol(data:DataS, col:Column, gate:Union[None,GateGroup], 
+def _histcol(data:DataS, col:Column, gate:None|GateGroup, 
              include_unit:bool, rescale:Sequence[float], record:bool|None, remove_nan:bool,
-             normalize:NormLiteral, bins:Union[int,np.ndarray], minmax:tuple[float,float], 
+             normalize:NormLiteral, bins:int|np.ndarray, minmax:tuple[float,float], 
              )->tuple[np.ndarray,np.ndarray,str,str]:
     """
     Histogram columns of data and normalize appropriately, 
@@ -159,10 +190,11 @@ def _histcol(data:DataS, col:Column, gate:Union[None,GateGroup],
 OrientLiteral = Literal['vertical', 'horizontal']
 
 
+@plotrcParam(module='plot')
 def hist_bar(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None, 
              include_unit:bool=False, rescale:Real=1.0, record:bool=None,
              normalize:NormLiteral=None, 
-             remove_nan:bool=True, bins:Union[int,np.ndarray]=100, 
+             remove_nan:bool=True, bins:int|np.ndarray=100, 
              minmax:tuple[float,float]=None, orientation:OrientLiteral='vertical',
              xlabel:str=None, xlabel_kwargs:dict[str:Any]=None,
              ylabel:str=None, ylabel_kwargs:dict[str:Any]=None,
@@ -209,7 +241,7 @@ def hist_bar(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
     remove_nan : bool
         If true, before using np.histogram, remove any nan values. This prevents
         errors when auto-detecting the range. The default is True.
-    bins : Union[int,np.ndarray], optional
+    bins : int | np.ndarray, optional
         Bins to use, handed to |nphistogram|. 
         Either bin edges or number of bins to divide the data into.
         The default is 10.
@@ -234,9 +266,9 @@ def hist_bar(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
         The default is 'vertical'.
     **kwargs : TYPE
         Keyword arguments passed to 
-        `plt.bar <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.bar.html>`_ 
+        `ax.bar <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.bar.html>`_ 
         or 
-        `plt.barh <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.barh.html>`_
+        `ax.barh <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.barh.html>`_
 
     Raises
     ------
@@ -280,10 +312,11 @@ def hist_bar(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
     return hst, bns, br, xttl, yttl
 
 
+@plotrcParam(module='plot')
 def hist_stair(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None, 
                include_unit:bool=False, rescale:float=1.0, record:bool=None,
                normalize:NormLiteral=None, 
-               remove_nan:bool=True, bins:Union[int,np.ndarray]=100, 
+               remove_nan:bool=True, bins:int|np.ndarray=100, 
                minmax:tuple[float,float]=None, orientation:OrientLiteral='vertical',
                xlabel:str=None, xlabel_kwargs:dict[str,:Any]=None,
                ylabel:str=None, ylabel_kwargs:dict[str:Any]=None,
@@ -292,9 +325,8 @@ def hist_stair(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
     Plot a stair-histogram of the selected column. Automatically sets axes labels
     appropriately, and allows selection of vertical or horizontal bar chart.
     
-    Very similar to :func:`hist_bar`, except uses the
-    `ax.stairs <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.stairs.html>`_
-    function instead of ``ax.bar`` or ``ax.barh``
+    Very similar to :func:`hist_bar`, except uses the |axstairs| function 
+    instead of ``ax.bar`` or ``ax.barh``
 
     Parameters
     ----------
@@ -305,8 +337,7 @@ def hist_stair(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
     gate : GateGroup, optional
         Gate to apply to column, if None, uses gate of ``col``. The default is None.
     ax : plt.Axes, optional
-        Axes in which to plot histogram, if None, pull axes from
-        `plt.gca() <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.gca.html>`_ . 
+        Axes in which to plot histogram, if None, pull axes from |pltgca| . 
         The default is None.
     include_unit : bool, optional
         Whether to include unit in axes label. The default is False.
@@ -335,7 +366,7 @@ def hist_stair(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
     remove_nan : bool
         If true, before using np.histogram, remove any nan values. This prevents
         errors when auto-detecting the range. The default is True.
-    bins : Union[int,np.ndarray], optional
+    bins : int | np.ndarray, optional
         Bins to use, handed to |nphistogram|. 
         Either bin edges or number of bins to divide the data into.
         The default is 10.
@@ -359,8 +390,7 @@ def hist_stair(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
         Either 'vertical' or 'horizontal', which axis will be assigned to the normalized counts.
         The default is 'vertical'.
     **kwargs : TYPE
-        Keyword arguments passed to 
-        `ax.stairs <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.stairs.html>`_
+        Keyword arguments passed to |axstairs|
 
     Raises
     ------
@@ -402,9 +432,10 @@ def hist_stair(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
     return hst, bns, br, xttl, yttl
 
 
+@plotrcParam(module='plot')
 def hist_line(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None, 
               include_unit:bool=False, rescale:float=1.0, record:bool=None,
-              normalize:NormLiteral=None, remove_nan:bool=True, bins:Union[int,np.ndarray]=100, 
+              normalize:NormLiteral=None, remove_nan:bool=True, bins:int|np.ndarray=100, 
               minmax:tuple[float,float]=None, orientation:OrientLiteral='vertical',
               xlabel:str=None, xlabel_kwargs:dict[str:Any]=None,
               ylabel:str=None, ylabel_kwargs:dict[str:Any]=None,
@@ -413,8 +444,7 @@ def hist_line(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
     Plot a histogram of the selected column as a line. Automatically sets axes labels
     appropriately, and allows selection of vertical or horizontal bar chart.
     
-    Very similar to :func:`hist_bar`, except uses the
-    `ax.plot <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.plot.html#matplotlib.axes.Axes.plot>`_
+    Very similar to :func:`hist_bar`, except uses the |axplot|
     function instead of ``ax.bar`` or ``ax.barh``
 
 
@@ -427,8 +457,7 @@ def hist_line(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
     gate : GateGroup, optional
         Gate to apply to column, if None, uses gate of ``col``. The default is None.
     ax : plt.Axes, optional
-        Axes in which to plot histogram, if None, pull axes from
-        `plt.gca() <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.gca.html>`_ . 
+        Axes in which to plot histogram, if None, pull axes from |pltgca| . 
         The default is None.
     include_unit : bool, optional
         Whether to include unit in axes label. The default is False.
@@ -454,7 +483,7 @@ def hist_line(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
             - 'iCDF' inverse cumulative density function
         
         The default is None.
-    bins : Union[int,np.ndarray], optional
+    bins : int |np.ndarray, optional
         Bins to use, handed to |nphistogram|. 
         Either bin edges or number of bins to divide the data into.
         The default is 10.
@@ -478,8 +507,7 @@ def hist_line(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
         Either 'vertical' or 'horizontal', which axis will be assigned to the normalized counts.
         The default is 'vertical'.
     **kwargs : TYPE
-        Keyword arguments passed to 
-        `ax.plot <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.plot.html#matplotlib.axes.Axes.plot>`_
+        Keyword arguments passed to |axplot|
 
     Raises
     ------
@@ -524,11 +552,12 @@ def hist_line(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
     return hst, bns, lns, xttl, yttl
 
 
+@plotrcParam(module='plot')
 def hist_kdeoverlay(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None, 
                     include_unit:bool=False, rescale:float=1.0, record:bool=None,
                     hist_func:Callable=hist_bar, normalize:NormLiteral=None, 
-                    remove_nan:bool=True, bins:Union[int,np.ndarray]=100, 
-                    kde_bins:Union[int, np.ndarray]=500, minmax:tuple[float,float]=None, 
+                    remove_nan:bool=True, bins:int|np.ndarray=100, 
+                    kde_bins:int|np.ndarray=500, minmax:tuple[float,float]=None, 
                     orientation:OrientLiteral='vertical',
                     xlabel:str=None, xlabel_kwargs:dict[str:Any]=None,
                     ylabel:str=None, ylabel_kwargs:dict[str:Any]=None,
@@ -547,8 +576,7 @@ def hist_kdeoverlay(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=Non
     gate : GateGroup, optional
         Gate to apply to column, if None, uses gate of ``col``. The default is None.
     ax : plt.Axes, optional
-        Axes in which to plot histogram, if None, pull axes from
-        `plt.gca() <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.gca.html>`_ . 
+        Axes in which to plot histogram, if None, pull axes from |pltgca| . 
         The default is None.
     include_unit : bool, optional
         Whether to include unit in axes label. The default is False.
@@ -580,9 +608,9 @@ def hist_kdeoverlay(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=Non
     remove_nan : bool, optional
         Whether to mask nan values in columns during evaluation, if column contains
         nans, if False, may result in errors. The default is True.
-    bins : Union[int,np.ndarray], optional
+    bins : int | np.ndarray, optional
         Number of bins or bin edges in/of histogram. The default is 100.
-    kde_bins : Union[int, np.ndarray], optional
+    kde_bins : int | np.ndarray, optional
         Bin/evaluation points of KDE, same basic behavior as bins. The default is 500.
     minmax : tuple[float,float], optional
         Passed to hist_func, Minimum and maximum values, handed to |nphistogram|. 
@@ -649,6 +677,7 @@ def hist_kdeoverlay(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=Non
     return h, b, p, tx, ty, k
 
 
+@plotrcParam(module='plot')
 def hist2d(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Axes=None, 
                  include_unit:bool=False, rescale:tuple[float, float]=None,
                  record:bool=None,
@@ -674,8 +703,7 @@ def hist2d(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Axe
         If specified, colx and coly will be regated to gate, defining which points
         (rows) included. The default is None.
     ax : plt.Axes, optional
-        Axes in which to plot histogram, if None, pull axes from
-        `plt.gca() <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.gca.html>`_ . 
+        Axes in which to plot histogram, if None, pull axes from |pltgca| . 
         The default is None.
     include_unit : bool, optional
         Whether to include unit in axes label. The default is False.
@@ -730,6 +758,7 @@ def hist2d(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Axe
     return out + (xttl, yttl)
 
 
+@plotrcParam(module='plot')
 def hist(data:DataS, *args:Column, gate:GateGroup=None, ax:plt.Axes=None, 
          style:Literal[None,'auto', '2D','line','stair','bar']=None, 
          orientation:OrientLiteral='vertical', **kwargs:Any)->tuple[np.ndarray,np.ndarray,Any,plt.Text,plt.Text]:
@@ -750,8 +779,7 @@ def hist(data:DataS, *args:Column, gate:GateGroup=None, ax:plt.Axes=None,
         If specified, colx and coly will be regated to gate, defining which points
         (rows) included. The default is None.
     ax : plt.Axes, optional
-        Axes in which to plot histogram, if None, pull axes from
-        `plt.gca() <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.gca.html>`_ . 
+        Axes in which to plot histogram, if None, pull axes from |pltgca| . 
         The default is None.
     style : Literal[None,'auto', '2D','line','stair','bar'], optional
         String indicating type of plot to use, 
@@ -793,6 +821,7 @@ def hist(data:DataS, *args:Column, gate:GateGroup=None, ax:plt.Axes=None,
     raise ValueError(f"'{style} must be 'auto', 'line', 'stair', or 'bar'")
 
 
+@plotrcParam(module='plot')
 def hexbin(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Axes=None, 
            include_unit:bool=False, rescale:tuple[float, float]=None, record:bool=None,
            xlabel:str=None, xlabel_kwargs:dict[str:Any]=None, 
@@ -817,8 +846,7 @@ def hexbin(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Axe
         If specified, colx and coly will be regated to gate, defining which points
         (rows) included. The default is None.
     ax : plt.Axes, optional
-        Axes in which to plot histogram, if None, pull axes from
-        `plt.gca() <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.gca.html>`_ . 
+        Axes in which to plot histogram, if None, pull axes from |pltgca| . 
         The default is None.
     include_unit : bool, optional
         Whether to include unit in axes label. The default is False.
@@ -1057,10 +1085,11 @@ def colorcategory(*args:np.ndarray, cmap:str|mpl.colors.Colormap=None, ncat:int|
     return out
 
 
+@plotrcParam(module='plot')
 def scatter(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Axes=None,
             include_unit:bool=True, rescale:tuple[float,float]=None, record:bool=None,
             point_func:Callable[[np.ndarray,np.ndarray,...],dict[str:Any]]=None, 
-            point_cols:Union[Column,tuple[Column,...]]=None, point_kwargs:dict[str:Any]=None,
+            point_cols:Column|Sequence[Column]=None, point_kwargs:dict[str:Any]=None,
             xlabel:str=None, xlabel_kwargs:dict[str:Any]=None, 
             ylabel:str=None, ylabel_kwargs:dict[str:Any]=None,
             **kwargs)->tuple[mpl.collections.PathCollection,plt.Text,plt.Text]:
@@ -1079,8 +1108,7 @@ def scatter(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Ax
         If specified, colx and coly will be regated to gate, defining which points
         (rows) included. The default is None.
     ax : plt.Axes, optional
-        Axes in which to plot histogram, if None, pull axes from
-        `plt.gca() <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.gca.html>`_ . 
+        Axes in which to plot histogram, if None, pull axes from |pltgca| . 
         The default is None.
     include_unit : bool, optional
         Whether to include unit in axes label. The default is False.
@@ -1094,10 +1122,9 @@ def scatter(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Ax
     point_func : Callable[[np.ndarray,np.ndarray,...],dict[str:Any]], optional
         Callable that takes arrays from colx, coly, and those specified in 
         ``point_cols`` as args, and point_kwargs as kwargs, and returns dictionary
-        of keyowrd arguments to pass to
-        `ax.scatter <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.scatter.html>`_ . 
+        of keyowrd arguments to pass to |axscatter| . 
         The default is None.
-    point_cols : Union[Column,tuple[Column,...]], optional
+    point_cols : Column | Sequence[Column,], optional
         Additional columns, if any to pass to point_func as ``*args``. The default is None.
     point_kwargs : dict[str:Any], optional
         Keyword arguments to pass to point_func. The default is None.
@@ -1114,8 +1141,7 @@ def scatter(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, ax:plt.Ax
         Keyword arguments passed to |axylabel|.
         The default is None.
     **kwargs : Any
-        keyword arguments passed to
-        `ax.scatter() <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.scatter.html>`_ .
+        keyword arguments passed to |axscatter| .
 
     Returns
     -------
@@ -1198,6 +1224,7 @@ def _mean_intervalplot(data:DataS, colbin:Column, colav:Column, gate:GateGroup=N
     return out, xlbl, ylbl, av, cbins
         
 
+@plotrcParam(module='plot')
 def plot_meaninterval(data:DataS, colbin:Column, colav:Column, gate:GateGroup=None, 
                       ax:plt.Axes=None, bins:np.ndarray|int=10, include_unit:bool=True,
                       rescale:tuple[float,float]=None, record:bool=None,
@@ -1222,8 +1249,7 @@ def plot_meaninterval(data:DataS, colbin:Column, colav:Column, gate:GateGroup=No
         Gate to apply to colav and colbin, if not specified, use intersect of
         gates of colav and colbin. The default is None.
     ax : plt.Axes, optional
-        Axes in which to plot histogram, if None, pull axes from
-        `plt.gca() <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.gca.html>`_ . 
+        Axes in which to plot histogram, if None, pull axes from |pltgca| . 
         The default is None.
     bins : np.ndarray|int, optional
         Continuous bin ranges to use to group rows by value of colbin. The default is 10.
@@ -1281,6 +1307,7 @@ def plot_meaninterval(data:DataS, colbin:Column, colav:Column, gate:GateGroup=No
                               func='plot', **kwargs)
 
 
+@plotrcParam(module='plot')
 def scatter_meaninterval(data:DataS, colav:Column, colbin:Column, gate:GateGroup=None, 
                          ax:plt.Axes=None, bins:np.ndarray|int=10, include_unit:bool=True,
                          rescale:tuple[float,float]=None, record:bool=None,
@@ -1305,8 +1332,7 @@ def scatter_meaninterval(data:DataS, colav:Column, colbin:Column, gate:GateGroup
         Gate to apply to colav and colbin, if not specified, use intersect of
         gates of colav and colbin. The default is None.
     ax : plt.Axes, optional
-        Axes in which to plot histogram, if None, pull axes from
-        `plt.gca() <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.gca.html>`_ . 
+        Axes in which to plot histogram, if None, pull axes from |pltgca| . 
         The default is None.
     bins : np.ndarray|int, optional
         Continuous bin ranges to use to group rows by value of colbin. The default is 10.
@@ -1382,6 +1408,7 @@ def _proc_col(a:np.ndarray, c:np.ndarray, func:Literal['mean','median','str','er
     return np.array([func(a[c==v]) for v in np.unique(c)])
 
 
+@plotrcParam(module='plot')
 def errorbars(data:DataS, colx:Column, coly:Column, colcat:Column,
               gate:GateGroup=None, ax:plt.Axes=None,
               include_unit:bool=True, rescale:tuple[float,float]=None, record:bool=None,
@@ -1411,8 +1438,7 @@ def errorbars(data:DataS, colx:Column, coly:Column, colcat:Column,
         Gate to apply to colav and colbin, if not specified, use intersect of
         gates of colav and colbin. The default is None.
     ax : plt.Axes, optional
-        Axes in which to plot histogram, if None, pull axes from
-        `plt.gca() <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.gca.html>`_ . 
+        Axes in which to plot histogram, if None, pull axes from |pltgca| . 
         The default is None.
     include_unit : bool, optional
         Whether to include unit in axes label. The default is False.
@@ -1779,6 +1805,7 @@ def _axim(ax:plt.Axes)->Callable[[np.ndarray,np.ndarray,np.ndarray,...],mpl.imag
     return plot
 
 
+@plotrcParam(module='plot')
 def kdeplot(data:DataS, *args:Column, gate:GateGroup=None, ax:plt.Axes=None, 
             plot_style:str|Callable=None,
             include_unit:bool=False, rescale:Sequence[float]=None, record:bool=None,
@@ -1921,6 +1948,7 @@ _cpos_rgx = re.compile(r'(?P<y>l|lower|u|upper)(?P<x>l|left|r|right)')
 _cpos_map = {0:(1,0), 1:(1,1), 2:(0,1), 3:(0,0)}
 
 
+@plotrcParam(module='plot')
 def jointplot(data:DataS, colx:Column, coly:Column, gate:GateGroup=None, 
               fig:plt.Figure=None, axmat:np.ndarray[plt.Axes]=None,
               include_unit:bool=True, rescale:tuple[Real,Real]=None, record:bool=None,
@@ -1949,8 +1977,8 @@ def jointplot(data:DataS, colx:Column, coly:Column, gate:GateGroup=None,
         If specified, colx and coly will be regated to gate, defining which points
         (rows) included. The default is None.
     fig : plt.Figure, optional
-        `plt.Figure <https://matplotlib.org/stable/api/_as_gen/matplotlib.figure.Figure.html>`_ 
-        in which to plot the jointplot, function will create axes within this figure. 
+        |pltfigure| in which to plot the jointplot, function will create axes 
+        within this figure. 
         The default is None.
     axmat : np.ndarray[plt.Axes], optional
         3-element sequence of ``plt.Axes`` objects in which to place plots.
@@ -2129,33 +2157,152 @@ def jointplot(data:DataS, colx:Column, coly:Column, gate:GateGroup=None,
     return axmat, cout, xout, yout
 
 
+def _plot_func_options(ax:plt.Axes, options:tuple[None|str|Callable], *args:tuple[Any,...], **kwargs:dict):
+    for opt in options:
+        if opt is None:
+            continue
+        if callable(opt):
+            return opt(ax, *args, **kwargs)
+        elif isinstance(opt, str) and hasattr(ax, opt):
+            return getattr(ax, opt)(*args, **kwargs)
+        else:
+            raise TypeError("{type(opt)} is invalid option for a plot function")
+    raise ValueError("No valid plotting options specified")
+
+"""
+Plot the distribution (usually PDF) of ``func(params, x)`` and the
+underlying sub-distributions, assuming that ``func`` follows the format
+of ``mfit.n<dist>_pdf`` functions.
+
+Parameters
+----------
+func : FitFunc
+    Multi-distribution function, called as ``func(parmas, x)`` Typically
+    this is a  ``nd<dist>_pdf`` fucntion from the ``mfit`` module.
+params : np.ndarray[np.float64]
+    Array of parameter values.
+x : np.ndarray[np.float64]
+    X values at which the distribution will be plotted.
+ax : plt.Axes, optional
+    DESCRIPTION. The default is None.
+dist_kwargs : dict, optional
+    Keyword arguments handed to |axplot| for plotting the total distribution. 
+    The default is None.
+plot_sub : bool, optional
+    Whether or not to plot the underlying "single" distributions that compose
+    the multi-dist defiend by ``func`` and ``params``.
+    The default is True.
+subdist_kwargs : dict|Sequence[dict], optional
+    Keyword arguments for the plotting of the "single" distributions. 
+    If specified as dictionary, the same keyword arguments will have given
+    to all "single" distributions, if specified as a sequence, must be the
+    same length as the number of subdistributions, and each element must be
+    a dictionary specifing kewyord arguments for each sub distribution.
+    The default is None.
+
+**kwargs : Any
+    Keyword arguments handed to all calls of |axplot|.
+
+Returns
+-------
+distplot : Any
+    The output of |axplot| for the complete distribution.
+subs : list[Any]
+    The outpus of |axplot| for each sub-distribution.
+
+"""
+
+
+PltSpec = None|str|Callable[[plt.Axes,...],Any]
+
 def plot_multi_dist(func:FitFunc, params:np.ndarray[np.float64], x:np.ndarray[np.float64], 
                     ax:plt.Axes=None, dist_kwargs:dict=None, plot_sub:bool=True,
-                    subdist_kwargs:dict|Sequence[dict]=None, **kwargs:Any)->tuple[plt.Line2D,list[plt.Line2D]]:
+                    subdist_kwargs:dict|Sequence[dict]=None, 
+                    plot_func:PltSpec="plot", dist_func:PltSpec=None, 
+                    subdist_funcs:PltSpec|Sequence[PltSpec]=None,
+                    **kwargs:Any)->tuple[Any,list[Any]]:
+    """
+    Plot the distribution (usually PDF) of ``func(params, x)`` and the
+    underlying sub-distributions, assuming that ``func`` follows the format
+    of ``smf.mfit.n<dist>_pdf`` functions.
+
+
+    Parameters
+    ----------
+    func : FitFunc
+        Multi-distribution function, called as ``func(parmas, x)`` Typically
+        this is a  ``nd<dist>_pdf`` fucntion from the ``mfit`` module.
+    params : np.ndarray[np.float64]
+        Array of parameter values.
+    x : np.ndarray[np.float64]
+        X values at which the distribution will be plotted.
+    ax : plt.Axes, optional
+        Axes in which to plot the multi-distribution. If None, use |pltgca|. 
+        The default is None.
+    dist_kwargs : dict, optional
+        Keyword arguments handed to |axplot| for plotting the total distribution. 
+        The default is None.
+    plot_sub : bool, optional
+        Whether or not to plot the underlying "single" distributions that compose
+        the multi-dist defiend by ``func`` and ``params``.
+        The default is True.
+    subdist_kwargs : dict|Sequence[dict], optional
+        Keyword arguments for the plotting of the "single" distributions. 
+        If specified as dictionary, the same keyword arguments will have given
+        to all "single" distributions, if specified as a sequence, must be the
+        same length as the number of subdistributions, and each element must be
+        a dictionary specifing kewyord arguments for each sub distribution.
+        The default is None.
+    plot_func : PltSpec, optional
+        Function used to plot the data for all distributions. This is overridden
+        for distributions where a more specific function is given in dist_func
+        or ``subdist_funcs``. If specified as a string, will attempt to get
+        that attribute from ``ax``, if callable, will call as 
+        ``plot_func(ax, x, <distribution>)``
+        The default is "plot".
+    dist_func : PltSpec | Sequence[PltSpec], optional
+        Function used to plot the the whole multi-distribution. 
+        If specified as a string, will attempt to get that attribute from 
+        ``ax``, if callable, will call as ``plot_func(ax, x, <distribution>)``
+        The default is None.
+    subdist_funcs : PltSpec, optional
+        Function(s) used to plot the "single" distributions.
+        If specified as a string, will attempt to get that attribute from 
+        ``ax``, if callable, will call as ``plot_func(ax, x, <distribution>)``
+        Can specifiy as single string/function to use on all, or as sequence
+        1 for each sub-distribution
+        The default is None.
+    **kwargs : Any
+        Additional keyword arguments handed to all plotting calls.
+
+    Returns
+    -------
+    displot : Any
+        Output of function call for the whole distribution
+    subs : list[Any]
+        Output of function calls for each sub distribution.
+
+    """
     dist_kwargs = dict() if dist_kwargs is None else dist_kwargs
     subdist_kwargs = dict() if subdist_kwargs is None else subdist_kwargs
     subdist_kwargs = repeat(subdist_kwargs) if isinstance(subdist_kwargs, dict) else subdist_kwargs
+    if subdist_funcs is None or isinstance(subdist_funcs, str) or callable(subdist_funcs):
+        subdist_funcs = repeat(subdist_funcs) 
     ax = _check_ax(ax)
-    distplot = ax.plot(x, func(params, x), **_dict_update(kwargs, dist_kwargs))
+    distplot = _plot_func_options(ax, (dist_func, plot_func), x, func(params, x), **_dict_update(kwargs, dist_kwargs))
     if plot_sub:
         parrays = unwrap_param(func, params, as_dict=False)
         if func._free:
-            subs = [ax.plot(x, func(np.asarray(param), x), **_dict_update(kwargs, subkws)) 
-                    for subkws, param in zip(subdist_kwargs, *parrays)]
+            subs = [_plot_func_options(ax, (sdf, dist_func, plot_func),
+                                       x, func(np.asarray(param), x), **_dict_update(kwargs, subkws))
+                    for sdf, subkws, param in zip(subdist_funcs, subdist_kwargs, *parrays)]
         else:
-            subs = [ax.plot(x, amp*func(np.asarray(param), x), **_dict_update(kwargs, subkws)) 
-                    for subkws, *param, amp in zip(subdist_kwargs, *parrays)]
+            subs = [_plot_func_options(ax, (sdf, dist_func, plot_func), 
+                                       x, amp*func(np.asarray(param), x), **_dict_update(kwargs, subkws)) 
+                    for sdf, subkws, *param, amp in zip(subdist_funcs, subdist_kwargs, *parrays)]
     else:
         subs = list()
     return distplot, subs
 
 
-# TODO: complete this method
-def plot_residuals_cdfbins(func:FitFunc, params:np.ndarray[np.float64], bins:np.ndarray[np.float64],
-                           ax:plt.Axes=None, dist_kwargs:dict=None, plot_sub:bool=True,
-                           subdist_kwargs:dict|Sequence[dict]=None, **kwargs):
-    dist_kwargs = dict() if dist_kwargs is None else dist_kwargs
-    subdist_kwargs = dict() if subdist_kwargs is None else subdist_kwargs
-    subdist_kwargs = repeat(subdist_kwargs) if isinstance(subdist_kwargs, dict) else subdist_kwargs
-    ax = _check_ax(ax)
-
+# TODO: Consider how to add plotting for residuals

@@ -668,24 +668,25 @@ class PhotonData(DataSet):
             self._pharray = pharray
         self._reference = ref
         self._save_memory = bool(save_memory)
-        irf = dict() if irf is None else irf
-        if not isinstance(irf, dict):
-            try:
-                irf = dict(*irf)
-            except Exception as e:
-                raise TypeError(f"irf must be specified as dict of keys as PhSel:array, not {type(irf)}") from e
-        self._irf = SubDiskDict(self._meta, 'irf', self._check_irf)
-        irf_thresh = dict() if irf_thresh is None else irf_thresh
-        self._irf_thresh = SubDiskDict(self._meta, 'irf_thresh', self._check_irf_thresh)
-        for ph_sel, hst in irf.items():
-            self._irf[ph_sel] = hst
-        if not isinstance(irf_thresh, dict):
-            try:
-                irf_thresh = dict(*irf_thresh)
-            except Exception as e:
-                raise TypeError(f"irf_thresh must be specified as dict of keys as PhSel:int, not {type(irf_thresh)}") from e
-        for ph_sel, thresh in irf_thresh.items():
-            self._irf_thresh[ph_sel] = thresh
+        if 'nanos' in pharray:
+            irf = dict() if irf is None else irf
+            if not isinstance(irf, dict):
+                try:
+                    irf = dict(*irf)
+                except Exception as e:
+                    raise TypeError(f"irf must be specified as dict of keys as PhSel:array, not {type(irf)}") from e
+            self._irf = SubDiskDict(self._meta, 'irf', self._check_irf)
+            irf_thresh = dict() if irf_thresh is None else irf_thresh
+            self._irf_thresh = SubDiskDict(self._meta, 'irf_thresh', self._check_irf_thresh)
+            for ph_sel, hst in irf.items():
+                self._irf[ph_sel] = hst
+            if not isinstance(irf_thresh, dict):
+                try:
+                    irf_thresh = dict(*irf_thresh)
+                except Exception as e:
+                    raise TypeError(f"irf_thresh must be specified as dict of keys as PhSel:int, not {type(irf_thresh)}") from e
+            for ph_sel, thresh in irf_thresh.items():
+                self._irf_thresh[ph_sel] = thresh
         # add citations for ns/usALEX/PIE
         if 'ex_ranges' in self.setup:
             if 'alex_period' in self.setup:
@@ -883,6 +884,8 @@ class PhotonData(DataSet):
             Photon counts of each TCSPC bin.
 
         """
+        if not self.pulsed:
+            raise ValueError("No tcspc decays for non-pulsed excitation experiments")
         ex = list(phsel.ex.elements)[0]
         tcspc_unit = self.setup.tcspc_unit[ex]
         ex_start, ex_stop = get_phsel_ex_range(self.setup, phsel)
@@ -930,10 +933,14 @@ class PhotonData(DataSet):
     @property
     def irf(self)->dict[PhSel:np.ndarray[np.int64]]:
         """Dictionary of irfs (1 per single stream PhSel)"""
+        if not self.pulsed:
+            raise AttributeError("Non-pulsed exciation experiments cannot have IRF")
         return self._irf
 
     @irf.setter
     def irf(self, val:dict):
+        if not self.pulsed:
+            raise AttributeError("Non-pulsed exciation experiments cannot have IRF")
         for k, v in val.items():
             if k in self._irf:
                 if np.any(self._irf[k] != v):
@@ -943,10 +950,14 @@ class PhotonData(DataSet):
     @property
     def irf_thresh(self)->dict[PhSel:int]:
         """Dictionary of each single stream PhSel, of nanotime threshold for computing mean nanotime"""
+        if not self.pulsed:
+            raise AttributeError("Non-pulsed exciation experiments cannot have IRF")
         return self._irf_thresh
     
     @irf_thresh.setter
     def irf_thresh(self, val:dict):
+        if not self.pulsed:
+            raise AttributeError("Non-pulsed exciation experiments cannot have IRF")
         for k, v in val.items():
             if k in self._irf_thresh:
                 if self._irf_thresh[k] != v:
@@ -1082,10 +1093,16 @@ class PhotonDataList(DataSetList):
     def setup(self)->tuple[PhSpec,...]:
         """Tuple of :class:`PhSpec` objects, 1 for each :class:`PhotonData`"""
         return tuple(d._pharray['setup'] for d in self._datas)
-
+    
     @property
     def clk_p(self)->float:
+        """clock unit of times (macroitimes), in unit of seconds"""
         return self.datas[0].clk_p
+
+    @property
+    def pulsed(self)->bool:
+        """If data is has pulsed excitation"""
+        return self.datas[0].pulsed
 
     def iter_times(self, phsel:PhSel=phsel_all)->Iterator[np.ndarray[np.int64]]:
         """
@@ -1271,6 +1288,16 @@ class PhotonDataList(DataSetList):
         for data in self.datas[1:]:
             hst += data.get_tcspc_decay(phsel, gate=gate, full=full)[1]
         return t, hst
+    
+    def get_stream_names(self)->dict[str:dict[int,str]]:
+        """
+        Get a dictionary providing names for each channel-type and stream.
+        Dictionary is nested, has structure:
+        ``{'ex_wv':{n:name,...}, 'em_wv_centers':{n:name,...}}, 'pol_angle':{n:name,...}``
+        Where n is stream number (int), and name is name of stream (str) specifying
+        wavelength or angle of polarization.
+        """
+        return self.datas[0].get_stream_names()
 
     def save(self, *args:Param, group:tb.Group=None, name:Callable[[int],str]=None, 
              save_sorted:bool=None)->list[tb.Group]:
@@ -1371,7 +1398,9 @@ class PhotonDataList(DataSetList):
         return file
 
 
-PhotonDataS = PhotonData|PhotonDataList
+#: Type specifier for specifying either :class:`PhotonData` or :class:`PhotonDataList`
+#: used as type hint when function can take either.
+PhotonDataS = PhotonData|PhotonDataList 
 
 
 def _echo_first(*args):
@@ -1416,8 +1445,9 @@ def _regularize_ph_sel(val:PhSel|Sequence[PhSel],
         return np.array([_regularize_ph_sel(v, detdef, convert_all) for v in val.reshape(-1)]).reshape(val.shape)
     return val
 
-
+#: |TypeValidator| for starttime column keys
 TV_str_start = TV_str(isin=('start', 'istarttime'))
+#: |TypeValidator| for stoptime column keys
 TV_str_stop = TV_str(isin=('stop', 'istoptime'))
 
 
@@ -1510,10 +1540,12 @@ class PhotonTable:
         """
         raise NotImplementedError("Subclasses must implement this method")
 
-
+#: Type hint for starttime column keys
 ColKeyStart = Literal['istarttime', 'start']
+#: Type hint for stoptime column keys
 ColKeyStop = Literal['istoptime', 'stop']
 _irf_styles = ('thresh', 'mean', 'max')
+#: Type hint for irfstyle column keys
 IRFStyle = Literal[_irf_styles]
 TV_irfstyle = TV_str(isin=_irf_styles)
 

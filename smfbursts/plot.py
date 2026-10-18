@@ -37,7 +37,7 @@ from .datamodel.utils import get_unit_prefix, _dict_update, fjit
 from .datamodel.immutabledata import get_pycode_subval
 from .datamodel.tables import Param, Column, GateGroup
 from .datamodel.plot import (
-    hist_bar, hist_stair, hist_line, hist_kdeoverlay, 
+    plotrcParam, hist_bar, hist_stair, hist_line, hist_kdeoverlay, 
     hist2d, hist, hexbin, kdeplot, scatter, errorbars, jointplot,
     density_kde, rescale_size, density_kdesize, point_size, gaus_2Dkde, gaus_2Dkde_cmap,
     _check_ax, _get_column_arrays, _rescale_value, plot_meaninterval, 
@@ -54,6 +54,7 @@ import smfbursts.cfuncs as smc
 from .photonHDF5 import PhotonHDF5Data
 
 
+@plotrcParam(module='plot')
 def alternation_hist(raw:PhotonHDF5Data, ich:int=0, ax:plt.Axes=None, group_dets:None|bool=None,
                      **kwargs):
     """
@@ -134,6 +135,7 @@ def _time_plot(func:str, ax:plt.Axes, data:PhotonDataS, col:Column, gate:GateGro
     return out, xlbl, ylbl, vlines
 
 
+@plotrcParam(module='plot')
 def time_plot(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
               include_unit:bool=False, rescale:Real=1.0, record:bool=False,
               plotlabel:str=None,
@@ -214,6 +216,8 @@ def time_plot(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.Axes=Non
                       plotlabel, xlabel, xlabel_kwargs, ylabel, ylabel_kwargs, 
                       list_concatenate, divlines, divlines_kwargs, kwargs)
 
+
+@plotrcParam(module='plot')
 def time_scatter(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
                  include_unit:bool=False, rescale:Real=1.0, record=False, 
                  plotlabel:str=None,
@@ -333,6 +337,7 @@ def _process_startstop(times:np.ndarray[np.int64], clk_p:float, period:int|float
     return np.arange(start, stop, period)
     
 
+@plotrcParam(module='plot')
 def time_course_hist(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None, 
                      period:Integral|Real|np.ndarray=10, bins:Integral|np.ndarray=10, 
                      include_unit:bool=True, rescale:Real=None, record:bool=False,
@@ -479,6 +484,7 @@ def _get_factor(data:PhotonData, rescale:Union[None,int,float])->tuple[str, floa
 TimeDir = Literal['x', 'horizontal', 'y', 'vertical']
 
 
+@plotrcParam(module='plot')
 def axaltspan(data:PhotonData, start:float|int, stop:float|int, ax:plt.Axes=None, 
               time_shift:float|int=0, rescale:Real=None, 
               time_direction:TimeDir='x', 
@@ -575,6 +581,7 @@ def axaltspan(data:PhotonData, start:float|int, stop:float|int, ax:plt.Axes=None
     return spans
 
 
+@plotrcParam(module='plot')
 def burst_dets(data:PhotonData, param:Param, burst:int, ax:plt.Axes=None, 
                time_direction:TimeDir='x', rescale:Real=None, zerostart:bool=False,
                det_pos:dict[int|PhSel:float]=None, 
@@ -805,8 +812,9 @@ def _colapse_transitions(idx:np.ndarray)->tuple[np.ndarray,np.ndarray]:
     x[:-1] = y[1:]
     x[-1] = y[-1]
     return x, y
-    
 
+
+@plotrcParam(module='plot')
 def timetrace(data:PhotonData, ax:plt.Axes=None, streams:Sequence[PhSel]=None,
               bg:Param=None, bins:Integral|Real|np.ndarray=None,
               tmin:float=0.0, tmax:float=1.0, binwidth:float=1e-3,
@@ -959,6 +967,7 @@ def _ratetrace(photons:np.ndarray[np.int64], m:int)->tuple[np.ndarray[np.int64],
     return diff, mean
 
 
+@plotrcParam(module='plot')
 def ratetrace(data:PhotonData, ax:plt.Axes=None, streams:Sequence[PhSel]=None,
               bg:Param=None, m:Integral=10, tmin:float=0.0, tmax:float=1.0,
               stream_kwargs:Sequence[dict]=None, bg_kwargs:Sequence[dict]=None,
@@ -1120,6 +1129,7 @@ def _sort_times(data:PhotonData, phsel:PhSel)->np.ndarray[np.int64]:
     return data.times[np.isin(data.dets, stream_ids)]
 
 
+@plotrcParam(module='plot')
 def hist_interphoton(data:PhotonData, bg:Param=None, n:int=0, ax:plt.Axes=None,
                      streams:Sequence[PhSel]=None, labels:Sequence[str]=True,
                      bins:np.ndarray[np.float64]=None, tmin=0.0, tmax=1e-2, binwidth=1e-4,

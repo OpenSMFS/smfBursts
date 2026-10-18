@@ -727,15 +727,49 @@ class Param(_ImData):
 
     @property
     def _sort_tuple(self)->tuple[Hashable,...]:
+        """Tuple for sorting multiple Param objects together."""
         return (f'{self.tp.__module__}.{self.tp.__name__}', 
                 _make_sortable(self.parents), _make_sortable(self.params))
 
     def has_flag(self, *args:str)->bool:
+        """
+        Determine if a given flag is present in the flags of a given param.
+
+        Parameters
+        ----------
+        *args : str
+            Flat identifiers.
+
+        Returns
+        -------
+        bool
+            Whether or not the flag is present.
+
+        """
         if not 'flags' in self:
             return False
         return _nested_in(self.flags, args)
 
-    def add_flag(self, flags:str|tuple[str,...], val:Any, strict:bool=True)->None:
+    def add_flag(self, flags:str|Sequence[str], val:Any, strict:bool=True)->None:
+        """
+        Add flag to flags dictionary of param. Note that flags are mutable and
+        do not contribute to the hash or equality evaluation
+
+        Parameters
+        ----------
+        flags : str|tuple[str,...]
+            Flag identifier, if a sequence of str, will create nested dictionary
+        val : Any
+            Calue Assigned to flag.
+        strict : bool, optional
+            If True, raise error if flag is already present. The default is True.
+
+        Raises
+        ------
+        ValueError
+            Flat already present in flags, cannot set new version.
+
+        """
         flags = tuple(flags) if isinstance(flags, Sequence) and not isinstance(flags, str) else (flags, )
         if strict and self.has_flag(*flags):
             raise ValueError(f"flag {flags} already present")
@@ -744,11 +778,43 @@ class Param(_ImData):
         _nested_set(self.flags, flags, val)
 
     def get_flag(self, *args:str, default:Any=None)->Any:
+        """
+        Retrieve a flag, if it exists from 
+
+        Parameters
+        ----------
+        *args : str
+            flag identifiers.
+        default : Any, optional
+            Value to return if flag is not present. The default is None.
+
+        Returns
+        -------
+        Any
+            Value of specified flag, if present, otherwise default.
+
+        """
         if 'flags' not in self:
             return default
-        return _nested_get(self.flags, args)
+        return _nested_get(self.flags, args, default=default)
 
     def pop_flag(self, *args:str, default:Any=None)->Any:
+        """
+        Remove flag from flags.
+
+        Parameters
+        ----------
+        *args : str
+            flag identifiers.
+        default : Any, optional
+            Value to return if flag is not present. The default is None.
+
+        Returns
+        -------
+        Any
+            Value of specified flag, if present, otherwise default..
+
+        """
         if 'flags' not in self:
             return default
         return _nested_pop(self.flags, args, default)
