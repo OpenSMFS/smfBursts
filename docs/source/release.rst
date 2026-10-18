@@ -1,6 +1,20 @@
 Release Notes
 -------------
 
+0.2.1 (under development)
+-------------------------
+Additions
+
+- ``rcParams`` has ``"analysis.lifetime`` key to speficy if fretfactory should
+  assume data is pulsed
+- :func:`smfbursts.fretfactory.make_fret_from_base` now can add ``"Nmbg_DD"`` 
+  key (``"nanomean_bg"`` column)
+
+Changes
+
+- Fix issues with plotting function not correctly combining kwargs.
+  This was a fix to an internal utils function.
+
 0.2.0
 -----
 
