@@ -483,7 +483,7 @@ def hist_line(data:DataS, col:Column, gate:GateGroup=None, ax:plt.Axes=None,
             - 'iCDF' inverse cumulative density function
         
         The default is None.
-    bins : int |np.ndarray, optional
+    bins : int | np.ndarray, optional
         Bins to use, handed to |nphistogram|. 
         Either bin edges or number of bins to divide the data into.
         The default is 10.

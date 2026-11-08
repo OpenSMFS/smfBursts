@@ -72,7 +72,7 @@ thus can be used as dictionary keys.
 
 import functools
 from itertools import chain, product, combinations
-from typing import Union, ClassVar
+from typing import Union, ClassVar, Literal
 from collections.abc import Iterable, Sequence, Hashable, Iterator
 import re
 
@@ -242,15 +242,14 @@ class ChannelSet:
         """If defined positibely or empty negative (all)"""
         return self.kind if self.elements else not self.kind
 
-    def tex_str(self, stream_names:dict[str:dict[int|frozenset[int]:str]]=None)->str:
+    def tex_str(self, stream_names:dict[int|frozenset[int]:str]=None)->str:
         """
         Convert to math-tex formated string
 
         Parameters
         ----------
-        stream_names : dict[str:dict[int|frozenset[int]:str]], optional
-            Names for each channel, given as nested dict, outer dicts have 
-            keys of channel name, inner keys are int, specifing index, values
+        stream_names : dict[int|frozenset[int]:str], optional
+            Dictionary of int/frozenset of ints, specifing index, values
             are stream names. The default is None.
 
         Returns
@@ -261,6 +260,8 @@ class ChannelSet:
 
         """
         stream_names = dict() if stream_names is None else stream_names
+        if self in stream_names:
+            return stream_names[self]
         if not self:
             return stream_names.get((True, frozenset()), '')
         if not self.kind and (False, self.elements) in stream_names:
@@ -415,8 +416,9 @@ TypeValidator.register_grouptype("ChannelSet", read_channelset)
 TV_channelset = TypeValidator(ChannelSet, check_channelset, 
                               encode_channelset, decode_channelset, write_channelset)
 
-_StreamTypes = ('ex', 'em', 'pol', 'split')
-
+_ChannelTypes = ('ex', 'em', 'pol', 'split')
+#: Type hint for valid names of photon streams
+ChannelType = Literal[_ChannelTypes]
 
 class PhStream(_ImData):
     """
@@ -437,9 +439,9 @@ class PhStream(_ImData):
         split channels, default is ChannelSet(False, {})
         
     """
-    __slots__ = _StreamTypes
-    _typeconversions = ImDict({key:TV_channelset for key in _StreamTypes})
-    _defaults = ImDict({key:ChannelSet(False, frozenset()) for key in _StreamTypes})
+    __slots__ = _ChannelTypes
+    _typeconversions = ImDict({key:TV_channelset for key in _ChannelTypes})
+    _defaults = ImDict({key:ChannelSet(False, frozenset()) for key in _ChannelTypes})
 
     # catch case of single empty stream, convert to all empty
     def __post_init__(self):
@@ -471,14 +473,14 @@ class PhStream(_ImData):
         """items() like iterator, enuring iteration over all channel categories"""
         yield from ((cat, self[cat]) for cat in self.__slots__)
 
-    def keys(self, skip:Sequence[Hashable]|set[Hashable]|frozenset[Hashable]=None)->Iterator[str]:
+    def keys(self, skip:Sequence[ChannelType]|set[ChannelType]|frozenset[ChannelType]=None)->Iterator[str]:
         """
         Iterator over each channel category name.
 
         Parameters
         ----------
-        skip : Sequence[Hashable]|set[Hashable]|frozenset[Hashable], optional
-            channel categories to skip. The default is None.
+        skip : Sequence[ChannelType]|set[ChannelType]|frozenset[ChannelType], optional
+            Channel categories to skip. The default is None.
 
         Yields
         ------
@@ -617,7 +619,7 @@ class PhStream(_ImData):
         return all(s.positive_all for s in self._all_values())
 
     def tex_str(self, detdef:"DetDef"=None, name:str='f', 
-                stream_names:dict[str:dict[int|frozenset[int]:str]]=None)->str:
+                stream_names:dict[ChannelType:dict[Union[int,frozenset[int],"ChannelSet"]:str]]=None)->str:
         """
         Generate tex string representing PhSel using information provided.
 
@@ -628,7 +630,7 @@ class PhStream(_ImData):
         name : str, optional
             Name given to sort of parameter being extracted (ie n, f, I etc). 
             The default is 'f'.
-        stream_names : dict[str:dict[int|frozenset[int]:str]], optional
+        stream_names : dict[str:dict[int|frozenset[int]|ChannelSet:str]], optional
             Names for each channel, given as nested dict, outer dicts have 
             keys of channel name, inner keys are int, specifing index, values
             are stream names. The default is None.
@@ -700,7 +702,7 @@ def _stream_intersect(stream0:PhStream, stream1:PhStream)->PhStream:
     return PhStream(**intersect)
 
 
-def _stream_combs(sdict:dict[str,ChannelSet])->tuple[PhStream,...]:
+def _stream_combs(sdict:dict[ChannelType,ChannelSet])->tuple[PhStream,...]:
     """Given a dictionary of categories and sub streams, return tuple of all possible combinations as PhStream objects"""
     # to maintain order (could alternatively use ordereddict)
     slist = [(cat, dets) for cat, dets in sdict.items()]
@@ -1059,7 +1061,7 @@ class PhSel:
         return self._get_union_set('split')
 
     def tex_str(self, detdef:"DetDef"=None, name:str='f', 
-                stream_names:dict[str:dict[int|frozenset[int]:str]]=None, reduce:bool=True)->str:
+                stream_names:dict[Union[ChannelType|"PhSel"]:dict[int|frozenset[int]:str]|str]=None, reduce:bool=True)->str:
         """
         Generate tex string representing PhSel using information provided.
 
@@ -1070,7 +1072,7 @@ class PhSel:
         name : str, optional
             Name given to sort of parameter being extracted (ie n, f, I etc). 
             The default is 'f'.
-        stream_names : dict[str:dict[int|frozenset[int]:str]], optional
+        stream_names : dict[ChannelType|PhSel:dict[int|frozenset[int]:str]|str], optional
             Names for each channel, given as nested dict, outer dicts have 
             keys of channel name, inner keys are int, specifing index, values
             are stream names. The default is None.
@@ -1084,6 +1086,9 @@ class PhSel:
             (assumed to be portion of larger string, so not wrapped in $).
 
         """
+        stream_names = dict() if stream_names is None else stream_names
+        if self in stream_names:
+            return f'{name}{stream_names[self]}'
         streams = list(self.streams)
         if reduce:
             cur = PhSel('none')
@@ -1287,7 +1292,7 @@ class DetDef:
         Number of split channels. Default is 1.
     """
     __slots__ = ('shape', 'strides')
-    _params:ClassVar[tuple[str]] = _StreamTypes
+    _params:ClassVar[tuple[ChannelType]] = _ChannelTypes
     #: Array of [nex, nem, npol, nspol] ie the shape of the detector space
     shape:np.ndarray[np.uint8]
     #: Array of the "stride" for each channel, 
@@ -1756,10 +1761,10 @@ def sort_phsels(phsels:Sequence[PhSel], detdef:DetDef=None, return_index:bool=Fa
     """
     if detdef is None:
         # get max stream to create detdef
-        detdef_dict = {name:1 for name in _StreamTypes}
+        detdef_dict = {name:1 for name in _ChannelTypes}
         for phsel in phsels:
             for stream in phsel.streams:
-                for name in _StreamTypes:
+                for name in _ChannelTypes:
                     if not stream[name].elements:
                         continue
                     detdef_dict[name] = max((max(stream[name].elements)+1, detdef_dict[name]))

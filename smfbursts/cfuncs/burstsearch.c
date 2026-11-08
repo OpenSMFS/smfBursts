@@ -962,7 +962,6 @@ int cp_burst_search(double alpha, double beta, double clk_p, CPStream *photons,
 		/* SPRT to find max end of next burst */
 		SPRT(cA, cB, cC, nper, photons);
 	}
-	final:
 	return finalize_bursts(bursts);
 }
 

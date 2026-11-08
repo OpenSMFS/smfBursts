@@ -12,9 +12,6 @@ into the plot (without creating many gates based therein).
 .. |PhotonDataList| replace:: `PhotonDataList <smfbursts.photondata.PhotonDataList>`__
 .. |Param| replace:: `Param <smfbursts.datamodel.Param>`__
 .. |pltax| replace:: `plt.Axes <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.html>`__
-.. |pltgca| replace:: `plt.gca() <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.gca.html>`__
-.. |axscatter| replace:: `ax.scatter() <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.scatter.html>`__
-.. |axplot| replace:: `ax.plot() <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.plot.html>`__
 .. |axaxvline| replace:: `ax.axvline() <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.axvline.html>`__
 .. |axaxvspan| replace:: `ax.axvspan() <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.axvspan.html>`__
 .. |axaxhspan| replace:: `ax.axhspan() <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.axhspan.html>`__
@@ -360,8 +357,7 @@ def time_course_hist(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.A
     gate : GateGroup, optional
         Gate for bursts/rows. The default is None.
     ax : plt.Axes, optional
-        `plt.Axes <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.html>`_  
-        in which to plot data, if None, use |pltgca|. 
+        |pltax| in which to plot data, if None, use |pltgca|.
         The default is None.
     period : Integral|Real|np.ndarray, optional
         Time division period. If int, sets number of time bins, if float, sets size
@@ -602,9 +598,7 @@ def burst_dets(data:PhotonData, param:Param, burst:int, ax:plt.Axes=None,
     burst : int
         Burst number.
     ax : plt.Axes, optional
-        `plt.Axes <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.html>`_  
-        in which to plot data, if None, use 
-        |pltgca|. 
+        |pltax| in which to plot data, if None, use |pltgca|. 
         The default is None.
     time_direction : Literal['x', 'horizontal', 'y', 'vertical'], optional
         Direction of time axis. The default is 'x'.

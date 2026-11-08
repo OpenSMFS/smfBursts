@@ -192,9 +192,9 @@ class Periods(BasePhotonTable):
         return out
 
     @classmethod
-    def _get_periods_index(cls, col:Column, include_unit:bool=False)->str:
+    def _get_periods_index(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
         """Index name func for periods column"""
-        return cls._periods_title_func(col, include_unit)
+        return cls._get_periods_title(col, include_unit)
 
 
 #########################################################
@@ -205,6 +205,7 @@ BGFuncType = Callable[[np.ndarray[np.int64],float,...], float]
 
 def _make_default_bg_preprocess(params:dict, parents:dict)->dict:
     return params
+
 
 def _make_default_bg_paramdefs(params:dict)->tuple[ParamDef,...]:
     params = tuple(inspect.signature(params['func']).parameters.values())
@@ -734,7 +735,7 @@ class BG(ChildPhotonTable):
             deviation of the empirical CDF from the fitted CDF.
         err_CM : float, (ph_sel:PhSel, )
             Crames-von Mises error metric. 
-            Computes :math:`\int_{-\infty}^{\infty} \left[] L_{n} - L_{*} \right]^{2}`.
+            Computes :math:`\int_{-\infty}^{\infty} \left[ L_{n} - L_{*} \right]^{2}`.
             Using trapezoid rule for numerical integration.
         tail_min : float, (ph_sel:PhSel)
             tail_min of given period, only useful when ``auto_threshold=True``
@@ -771,7 +772,10 @@ class BG(ChildPhotonTable):
 
     @classmethod
     def param_preprocess(cls, params, parents):
-        """Preprocess for BG param"""
+        """
+        Preprocess for BG param 
+        :meta private:
+        """
         params = params.asdict if isinstance(params, tupledict) else dict(params)
         params.setdefault('compute_stream', 'single_all')
         preprocess, _, _ , _ = get_pycode_subval('BG_func', params.get('func',exp_mlefit))

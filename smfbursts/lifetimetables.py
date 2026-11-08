@@ -883,7 +883,7 @@ def fit_fldecay(data:PhotonDataS, phsel:PhSel, gate:None|Param|GateGroup=None,
             - "irf_func" (conditional) function used to compute simulated IRF
 
     """
-    phsel = phsel.render_positive(data.detdef, convert_all=True)
+    phsel = phsel.render_positive(data.detdef, convert_all=False)
     if len(phsel.ex.elements) != 1:
         raise ValueError("can only compute lifetime of single excitation ")
     t, nhist = data.get_tcspc_decay(phsel, gate)

@@ -829,11 +829,11 @@ def regularize_dets(raw:PhotonHDF5Data, alex_type:str=None, autosave:bool=False,
             if 'alex_period' in sdict:
                 sdict['alex_type'] = 'macro' if 'alex_period' in pd.meas_specs else 'none'
             elif 'tcspc_unit' in sdict or 'tcspc_range' in sdict or 'tcspc_num_bins' in sdict:
-                sdict['alex_type'] = 'nano'
+                sdict['alex_type'] = 'nano' if pd.exs().size else 'none'
             else:
                 sdict['alex_type'] = 'none'
         if sdict['alex_type'] != 'none':
-            sdict['ex_ranges'] =pd.exs()
+            sdict['ex_ranges'] = pd.exs()
         setup = PhSpec(detdef=detdef, **sdict)
         skwargs = dict(em_dets=em_dets, pol_dets=pol_dets, split_dets=split_dets)
         if hasattr(pd, 'nanos'):

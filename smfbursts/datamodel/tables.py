@@ -2533,7 +2533,7 @@ class GateGroup(_ImData):
                 raise ValueError(
                     f"Unrecognized truthtable string {truthtable}")
             truthtable = TT_name_map[truthtable]
-        elif isinstance(truthtable, int):
+        elif isinstance(truthtable, int) and not isinstance(truthtable, bool):
             if truthtable not in TT_int_map:
                 raise ValueError(
                     f"Unrecognized truthtable int code, {truthtable}")
@@ -3931,7 +3931,7 @@ class DataSet:
         out = self._get_gategroup_mask(gategroup, relative)
         return out
 
-    def get(self, comp:Param|Column|Gate_|GateGroup, gate:str|Gate|GateGroup=None)->Union["Table",np.ndarray]:
+    def get(self, comp:Param|Column|Gate_|GateGroup, gate:None|Gate_|GateGroup=None)->Union["Table",np.ndarray]:
         r"""
         Retrieve the :class:`Table`,array or mask corresponding to the given
         :class:`Param`, :class:`Column`, or :class:`GateGroup` respectively given
@@ -3941,7 +3941,7 @@ class DataSet:
         ----------
         comp : Param | Column | Gate\_ | GateGroup
             Specification of type of data to retrieve from dataset.
-        gate : str | Gate\_ | GateGroup, optional
+        gate : Gate\_ | GateGroup, optional
             :class:`GateGroup` to be applied to ``comp``, unless ``comp`` is a
             :class:`GateGroup` or :class:`Gate_`, in which case it serves as the
             ``relative`` argument to :meth:`DataSet.get_gategroup`, defining which
@@ -3963,7 +3963,11 @@ class DataSet:
             comp = GateGroup.as_gategroup(comp)
         if isinstance(comp, (GateGroup)):
             return self.get_gategroup(comp, relative='parent' if gate is None else gate)
-        if gate is not None:
+        if isinstance(gate, str):
+            if gate not in ('all', 'none'):
+                raise ValueError("string specified gates must be 'all' or 'none'")
+            comp = comp.degate() if gate == 'all' else comp.regate(GG_none)
+        elif gate is not None:
             comp = comp.regate(gate)
         if isinstance(comp, Param):
             return self.get_table(comp)
@@ -3980,7 +3984,8 @@ class DataSet:
         Parameters
         ----------
         *args : Column
-            :class:`Column` s to include in table.
+            :class:`Column` s to include in table. Can also specify
+            a single argument as a sequence of :class:`Column`.
         names : Sequence[str], optional
             Column names (must be same length as args) to give to each column. 
             If None, use default names of columns supplied by :func:`Column.name` .
@@ -4006,6 +4011,10 @@ class DataSet:
             Dictionary of arrays, usuable to create pandas dataframe.
 
         """
+        if len(args) == 1 and not isinstance(args[0], Column):
+            args = args[0]
+        if any(not isinstance(err:=arg, Column) for arg in args):
+            raise TypeError(f"All columns must be of type Column, got {type(err).__name__}")
         if gate is None:
             gate = args[0].base_gate
             for arg in args:
@@ -4038,7 +4047,8 @@ class DataSet:
         Parameters
         ----------
         *args : Column
-            :class:`Column` s to include in table.
+            :class:`Column` s to include in table. Can also specify as
+            single sequence of :class:`Column`.
         names : Sequence[str], optional
             Column names (must be same length as args) to give to each column. 
             If None, use default names of columns supplied by :func:`Column.name` .
@@ -4098,7 +4108,8 @@ class DataSet:
         Parameters
         ----------
         *args : Column
-            Columns to save in csv file.
+            Columns to save in csv file. Can also specify
+            a single argument as a sequence of :class:`Column`.
         path_or_buf : None|str|os.PathLike, optional
             File or buffer to write to. If None, and not specified as first
             arg, return str of csv. Internally, this uses

@@ -17,8 +17,8 @@ The :class:`_ImData` class is used as a abstract base class for creating classes
 that have specific fields which are immutable, and can be accessed in a dictionary
 like way, and can be wirtten and read from HDF5 files.
 
-.. |MsgPack| replace:: `mMsgPack <https://msgpack.org/index.html>`__
-.. |msgpack| replace:: `**msgpack** <https://msgpack-python.readthedocs.io/en/latest/api.html>`__
+.. |MsgPack| replace:: `MsgPack <https://msgpack.org/index.html>`__
+.. |msgpack| replace:: `msgpack <https://msgpack-python.readthedocs.io/en/latest/api.html>`__
 """
 from typing import ClassVar, Any, Union
 from collections import Counter
@@ -1276,10 +1276,12 @@ def dwrite_none(val:None)->bytes:
 
 
 def encode_none(val:None)->dict[str:str]:
+    """Dummy encode function for encodeing None value"""
     return tuple()
 
 
 def decode_none(val:dict)->None:
+    """DUmmy decode function for decoding None values"""
     return None
 
 #: :class:`TypeValidator` for None type, only None is allowed.
@@ -1540,10 +1542,12 @@ TV_tuple = TypeValidator(tuple, check_tuple, None, None, write_arbsequence,
 
 
 def encode_frozenset(val:frozenset)->tuple[Hashable,...]:
+    """Function for encoding frozen set into msgpack"""
     return tuple(sorted(val, key=hash))
 
 
 def decode_frozenset(val:tuple[Hashable,...])->frozenset:
+    """Function for decoding frozen set from msgpack"""
     return frozenset(TypeValidator.decode_msgtup(v) for v in val[1:])
 
 
@@ -1586,7 +1590,7 @@ def _check_superdtype(val:np.ndarray, superdtype:type)->None:
         raise TypeError(f'must be array of type {superdtype}')
     
 
-def _check_objectdtype(val:np.ndarray[np.object_], typedefs:Union[TypeValidator,np.ndarray[TypeValidator]])->None:
+def _check_objectdtype(val:np.ndarray[np.object_], typedefs:TypeValidator|np.ndarray[TypeValidator])->None:
     """Check the arrays within an object array match typdefs"""
     if typedefs is None or isinstance(typedefs, (type, TypeValidator)):
         typedefs = np.array([typedefs], dtype=np.object_)
@@ -1598,7 +1602,7 @@ def _check_objectdtype(val:np.ndarray[np.object_], typedefs:Union[TypeValidator,
         diff = True if out[ij] is not val[ij] else diff
     if any(not isinstance(v, np.ndarray) for v in out.flat):
         warnings.warn("Object array of non-array objects, will not be able to save to HDF5 file")
-    else:
+    elif out.size:
         dtype = out.reshape(-1)[0].dtype
         if any(v.dtype != dtype for v in out.flat):
             warnings.warn("Object array of differently typed numpy arrays, will not be able to save to HDF5 file")
@@ -2076,6 +2080,7 @@ TV_tupledict = TypeValidator(tupledict, check_tupledict,
                              encode_tupledict, decode_tupledict, write_tupledict,
                              'tupledict', node_repr_tupledict, node_read_tupledict)
 
+#: Dictionary to store different pycode functions
 _pycode_subtypes = dict()
 
 #: Typehint for objects that can be stored/specified as PyCode

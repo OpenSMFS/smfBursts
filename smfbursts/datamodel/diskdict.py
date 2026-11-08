@@ -21,7 +21,7 @@ import warnings
 import numpy as np
 import tables as tb
 
-from .utils import FixedDict, ImDict, _GroupFuture, GroupFuture, GroupArg, _masked_iter, _eq
+from .utils import FixedDict, ImDict, _GroupFuture, GroupFuture, GroupArg, _masked_iter, _eq, _echo
 from .immutabledata import TypeValidator
 
 
@@ -611,19 +611,39 @@ def _dd_echo(key, value):
 
 class SubDiskDict:
     """
-    Alias a specific subset of a NestedDiskDict.
+    Alias a specific subset of a :class:`DiskDict`.
+    
+    Parameters
+    ----------
+    diskdict : DiskDict
+        The :class:`DiskDict` into which the SubDiskDict references.
+    prekey : Hashable | tuple[Hashable,...]
+        The key to prepend (always covnerted to a tuple) that is always a part
+        of the key in diskdict.
+    check_func : Callable[[Hashable,Any],tuple[Hashable,Any]], optional
+        Function which checks key-value pairs, may convert/normalize either or
+        both key and/or value, the returned key value pair will be stored in the
+        diskdict, with the prekey prepended (keys always wraped into tuples).
+        If not specified, key-values simply echoed.
+    key_func: Callable[[Hashable],Hashable], optional
+        Function which is sued for getting item allowing keys to be
+        converted/normalized.
+        If not specified, keys echoed.
     """
-    __slots__ = ('_diskdict', '_prekey', '_check_func')
-    def __init__(self, diskdict:DiskDict, prekey:Hashable, check_func:Callable[[Hashable,Any],tuple[Hashable,Any]]=_dd_echo):
+    __slots__ = ('_diskdict', '_prekey', '_check_func', '_key_func')
+    def __init__(self, diskdict:DiskDict, prekey:Hashable|tuple[Hashable,...], 
+                 check_func:Callable[[Hashable,Any],tuple[Hashable,Any]]=_dd_echo,
+                 key_func:Callable[[Hashable],Hashable]=_echo):
         super().__setattr__('_diskdict', diskdict)
         if not isinstance(prekey, tuple):
             prekey = (prekey, )
         super().__setattr__('_prekey', prekey)
         super().__setattr__('_check_func', check_func)
+        super().__setattr__('_key_func', key_func)
 
     def __getattribute__(self, attr):
         if attr not in ('keys', 'items', 'values', 'get'):
-            raise AttributeError("SubDiskDict has not attributes")
+            raise AttributeError("SubDiskDict has no attributes")
         return super().__getattribute__(attr)
 
     def __setitem__(self, key, value):
@@ -634,12 +654,14 @@ class SubDiskDict:
         super().__getattribute__('_diskdict')[key] = value
     
     def __getitem__(self, key):
+        key = super().__getattribute__('_key_func')(key)
         key = key if isinstance(key, tuple) else (key, )
         key = super().__getattribute__('_prekey') + key
         return super().__getattribute__('_diskdict')[key]
         
 
     def __contains__(self, key):
+        key = super().__getattribute__('_key_func')(key)
         if not isinstance(key, tuple):
             key = key, 
         key = super().__getattribute__('_prekey') + key
@@ -668,6 +690,7 @@ class SubDiskDict:
 
     def get(self, key:Hashable, default:Any=None):
         """Get key from SubDiskDict, return default if key not in SubDiskDict"""
+        key = super().__getattribute('_key_func')(key)
         if not isinstance(key, tuple):
             key = key, 
         key = super().__getattribute__('_prekey') + key
@@ -677,14 +700,27 @@ class SubDiskDict:
 
 
 class MaskedDD:
-    """
+    r"""
     Alias of DiskDict, all values must be arrays, always returns arrays masked
     by mask- used with tables that are derived from other tables.
+    
+    .. note::
+        
+        This is primarily used by derived :class:`Table <smfbursts.datamodel.tables.Table>`
+        to get the appropriate mask of non-derived parent table.
+    
+    Parameters
+    ----------
+    parent : DiskDict
+        Source of data being aliased
+    mask : np.ndarray[np.bool\_]
+        Boolean mask to apply to every value in the parent disk dict
     """
     __slots__ = ('_parent', '_mask')
-    _parent:DiskDict
-    _mask:np.ndarray[np.bool_]
-    def __init__(self, parent, mask):
+    _parent:DiskDict #: DiskDict that the MaskedDD references into/masks
+    _mask:np.ndarray[np.bool_] #: Mask to apply to all values in parent
+    
+    def __init__(self, parent:DiskDict, mask:np.ndarray[np.bool_]):
         self._parent = parent
         self._mask = mask
     
