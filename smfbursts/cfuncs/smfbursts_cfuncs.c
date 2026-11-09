@@ -1095,11 +1095,8 @@ static PyObject* smfbursts_cfuncs_kde_dist(PyObject* self, PyObject* args, PyObj
 			kernel[i] = kernel_func[func_id](delta, tau);
 		}
 	}
-	for ( i = 0; i < nkern; i++){
-		kernel[i] = 1.0;
-	}
 	if ( drop_self ){
-		kernel[lim] = 0.0;
+		kernel[lim-1] = 0.0;
 	}
 	if ( alloc_outlist_int64_double(&locslist, &outlist) ){
 		free_arraylist_double(&outlist);

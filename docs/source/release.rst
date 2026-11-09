@@ -6,7 +6,7 @@ Release Notes
 Additions
 
 - :func:`smfbursts.fretfactory.make_bg` now adds ``"Start"``, ``"Start"`` and
-  ``"Midtime"`` keys 
+  ``"Midtime"`` keys
   (``"start"``, ``"stop"`` and ``"midtime"`` columns of :class:`sfmbursts.backgroundtables.Periods`)
 - Add ``exclude_key``, ``exclude_key_pattern``, ``exclude_column`` keyword
   arguments to :func:`smfbursts.fretfactory.get_columns`

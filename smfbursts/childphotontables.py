@@ -1440,19 +1440,16 @@ class KDE(ChildPhotonTable):
             cacheparam = self.param.params + (('den', phsel_den), ('loc', phsel_loc), ('drop', drop_self))
             cacheparam = tupledict(*cacheparam)
             arr = self.origin._get_from_cache(self.__class__, cacheparam, "ph_kde",
-                                              getter=lambda:self._calc_kde(phsel_den, phsel_loc, drop_self))
+                                              getter=lambda:self._calc_kde(phsel_den, phsel_loc, drop_self=drop_self))
             mask = np.isin(self.origin.dets, self.detdef.get_stream_ids(phsel_loc))
             id_eval = np.cumsum(mask) - 1
             for istart, istop in zip(self.parents['base']['istart'], self.parents['base']['istop']):
                 yield arr[id_eval[istart:istop][mask[istart:istop]]]
         else:
             
-            yield from self.kde_func(self.parents['base']['ph_times',phsel_den], self.parents['base']['ph_times',phsel_loc])
-            # it = self.parents['base'].iter_column
-            # func = self.kde_func
-            # for times_den, times_loc in zip(it('ph_times', phsel_den), 
-            #                                 it('ph_times', phsel_loc)):
-            #     yield func(times_den, times_loc, drop_self=drop_self)
+            yield from self.kde_func(self.parents['base']['ph_times',phsel_den], 
+                                     self.parents['base']['ph_times',phsel_loc], 
+                                     drop_self=drop_self)
 
     @classmethod
     def _regularizecolumn_ph_kde(cls, source_param:Param, *args):

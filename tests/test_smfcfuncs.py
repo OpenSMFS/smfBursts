@@ -241,17 +241,17 @@ def test_kde_dist(data, burstDex):
         other = check_refcount(smc.kde_dist, (ta, tb), {}, {"drop_self":ds, "lim":lim, "arg":tau, "func":func})
         if func != 2:
             fauto = check_refcount(smc.kde_dist, (ta, ta), {"func":fmap[func]}, {"drop_self":ds, "lim":lim, "arg":tau})
-            assert np.allclose(auto, fauto), "Incorrect laplace calculation"
+            assert np.allclose(auto, fauto, equal_nan=True), f"Incorrect single auto {fmap[func].__name__} calculation"
             fother = check_refcount(smc.kde_dist, (ta, tb), {"func":fmap[func]}, {"drop_self":ds, "lim":lim, "arg":tau})
-            assert np.allclose(other, fother), "Incorrect laplace calculation"
+            assert np.allclose(other, fother, equal_nan=True), f"Incorrect single cross {fmap[func].__name__} calculation"
         else:
             check_refcount(smc.kde_dist, (ta, ta), {'func':dummy, 'arg':param}, {'drop_self':ds, 'lim':lim})
         auto = check_refcount(smc.kde_dist, (tba, tba), {}, {"drop_self":ds, "lim":lim, "arg":tau, "func":func})
         other = check_refcount(smc.kde_dist, (tba, tbb), {}, {"drop_self":ds, "lim":lim, "arg":tau, "func":func})
         if func != 2:
             fauto = check_refcount(smc.kde_dist, (tba, tba), {"func":fmap[func]}, {"drop_self":ds, "lim":lim, "arg":tau})
-            assert all(np.allclose(aut, faut) for aut, faut in zip(auto, fauto)), "Incorrect laplace calculation"
+            assert all(np.allclose(aut, faut, equal_nan=True) for aut, faut in zip(auto, fauto)), f"Incorrect list auto {fmap[func].__name__} calculation"
             fother = check_refcount(smc.kde_dist, (tba, tbb), {"func":fmap[func]}, {"drop_self":ds, "lim":lim, "arg":tau})
-            assert all(np.allclose(oth, foth) for oth, foth in zip(other, fother)), "Incorrect laplace calculation"
+            assert all(np.allclose(oth, foth, equal_nan=True) for oth, foth in zip(other, fother)), f"Incorrect list cross {fmap[func].__name__} calculation"
         else:
             check_refcount(smc.kde_dist, (tba, tba), {'func':dummy, 'arg':param}, {'drop_self':ds, 'lim':lim})

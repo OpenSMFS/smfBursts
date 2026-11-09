@@ -8,6 +8,8 @@ dist/
 *.hdf5
 *.spc
 *.set
+*.csv
+*.mat
 __pycache__
 data
 /docs/build

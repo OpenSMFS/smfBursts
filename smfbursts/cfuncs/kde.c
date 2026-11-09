@@ -94,10 +94,11 @@ int kde_array(const int64_t nphot, int64_t* times, const int64_t nloc, int64_t* 
 		cloc = locs[iloc];
 		tmin = cloc - lim; // get minimum and maximum times of range to compute in KDE
 		tmax = cloc + lim;
-		while ((imin < nphot) && (times[imin] < tmin)){ imin++; } // advance until imin is index in range
+		cloc = tmin + 1;
+		while ((imin < nphot) && (times[imin] <= tmin)){ imin++; } // advance until imin is index in range
 		while ((imax < nphot) && (times[imax] < tmax)){ imax++; } // advance until imax is just out of range
 		for (iphot = imin; iphot < imax; iphot++){
-			out[iloc] += kernel[times[iphot] - cloc + lim];
+			out[iloc] += kernel[times[iphot] - cloc];
 		}
 	}
 	return FALSE;

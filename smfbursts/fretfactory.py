@@ -98,6 +98,7 @@ def make_bg(detdef:DetDef|PhotonDataS, period:float=60.0, tail_min:float=500e-6,
     - 'BgDD' |Column| of background rate in DexDem (0ex0em) channel
     - 'BgDA' |Column| of background rate in DexAem (0ex1em) channel
     - 'BgAA' |Column| of background rate in AexAem (1ex1em) channel
+    - 'BgDex' |Column| of background rate in Dex (0ex) channel
     - 'BgAll' |Column| of background rate in Dex + AexAem (0ex_1ex1em) channels
 
     Parameters
@@ -146,8 +147,10 @@ def make_bg(detdef:DetDef|PhotonDataS, period:float=60.0, tail_min:float=500e-6,
     if detdef.ex == 1:
         out['BgAll'] = Column(bg, 'bg', PhSel('all'))
     else:
-        out['BgAll'] = Column(bg, 'bg', PhSel('0ex_1ex1em'))
         out['BgAA'] = Column(bg, 'bg', PhSel('1ex1em'))
+        out['BgDex'] = Column(bg, 'bg', PhSel('0ex'))
+        out['BgAll'] = Column(bg, 'bg', PhSel('0ex_1ex1em'))
+        
     return out
 
 
