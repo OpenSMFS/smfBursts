@@ -290,9 +290,9 @@ with full function signatures.
 .. |Coparam| replace:: :attr:`Column.origin_param <smfbursts.datamodel.tables.Column.origin_param>`
 .. |Cbparam| replace:: :attr:`Column.base_param <smfbursts.datamodel.tables.Column.base_param>`
 .. |paramproperty| replace:: :class:`@paramproperty <smfbursts.datamodel.tables.paramproperty>`
-.. |parammethod| replace:: :class:`@paramproperty <smfbursts.datamodel.tables.parammethod>`
-.. |tableproperty| replace:: :class:`@paramproperty <smfbursts.datamodel.tables.tableproperty>`
-.. |tablemethod| replace:: :class:`@paramproperty <smfbursts.datamodel.tables.tablemethod>`
+.. |parammethod| replace:: :class:`@parammethod <smfbursts.datamodel.tables.parammethod>`
+.. |tableproperty| replace:: :class:`@tableproperty <smfbursts.datamodel.tables.tableproperty>`
+.. |tablemethod| replace:: :class:`@tablemethod <smfbursts.datamodel.tables.tablemethod>`
 .. |PhotonData| replace:: :class:`PhotonData <smfbursts.photondata.PhotonData>`
 .. |BasePhotonTable| replace:: :class:`BasePhotonTable <smfbursts.photondata.BasePhotonTable>`
 .. |ChildPhotonTable| replace:: :class:`BasePhotonTable <smfbursts.photondata.ChildPhotonTable>`

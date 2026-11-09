@@ -234,14 +234,15 @@ int burst_variance_analysis(int64_t n, uint8_t *dets,
 							int64_t dsizeAll, uint8_t *dsetAll, int64_t dsizeSub, uint8_t *dsetSub,
 							int64_t ncore, double *bvas);
 
-double laplace_kdefunc(const int64_t loc, const int64_t time, const double tau);
-double gaussian_kdefunc(const int64_t loc, const int64_t time, const double tau);
-double rect_kdefunc(const int64_t loc, const int64_t time, const double tau);
-int kde_self(const int64_t nphot, int64_t* times, const double tau, const int64_t lim, double(*func)(int64_t, int64_t, double), double* out);
-int kde_self_np(const int64_t nphot, const int64_t stride, char* times, const double tau, const int64_t lim, double(*func)(int64_t, int64_t, double), double* out);
-int kde_self_exclude_zero(const int64_t nphot, int64_t* times, const double tau, const int64_t lim, double(*func)(int64_t, int64_t, double), double* out);
-int kde_self_exclude_zero_np(const int64_t nphot, const int64_t stride, char* times, const double tau, const int64_t lim, double(*func)(int64_t, int64_t, double), double* out);
-int kde_other(const int64_t nphot, int64_t* times, const int64_t nloc, int64_t* locs, const double tau, const int64_t lim, double(*func)(int64_t, int64_t, double), double* out);
-int kde_other_np(const int64_t nphot, const int64_t tstride, char* times, const int64_t nloc, const int64_t lstride, char* locs, const double tau, const int64_t lim, double(*func)(int64_t, int64_t, double), double* out);
-int kde_other_exclude_zero(const int64_t nphot, int64_t* times, const int64_t nloc, int64_t* locs, const double tau, const int64_t lim, double(*func)(int64_t, int64_t, double), double* out);
-int kde_other_exclude_zero_np(const int64_t nphot, const int64_t tstride, char* times, const int64_t nloc, const int64_t lstride, char* locs, const double tau, const int64_t lim, double(*func)(int64_t, int64_t, double), double* out);
+double laplace_kdefunc(const int64_t delta, const double tau);
+double gaussian_kdefunc(const int64_t delta, const double sigma);
+double rect_kdefunc(const int64_t delta, const double tau);
+int kde_slow(const int64_t nphot, int64_t* times, const int64_t nloc, int64_t* locs, const double tau, const int64_t lim, double(*func)(int64_t, double), double* out);
+int kde_slow_np(const int64_t nphot, const int64_t tstride, char* times, const int64_t nloc, const int64_t lstride, char* locs, const double tau, const int64_t lim, double(*func)(int64_t, double), double* out);
+int kde_slow_exclude_zero(const int64_t nphot, int64_t* times, const int64_t nloc, int64_t* locs, const double tau, const int64_t lim, double(*func)(int64_t, double), double* out);
+int kde_slow_exclude_zero_np(const int64_t nphot, const int64_t tstride, char* times, const int64_t nloc, const int64_t lstride, char* locs, const double tau, const int64_t lim, double(*func)(int64_t, double), double* out);
+double laplace_single(const int64_t delta, const double tau);
+double gaussian_single(const int64_t delta, const double sigma);
+double rect_single(const int64_t delta, const double tau);
+int kde_array(const int64_t nphot, int64_t* times, const int64_t nloc, int64_t* locs, const int64_t lim, double *kernel, double* out);
+int kde_array_np(const int64_t nphot, const int64_t tstride, char* times, const int64_t nloc, const int64_t lstride, char* locs, const int64_t lim, double *kernel, double* out);

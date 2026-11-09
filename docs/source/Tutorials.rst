@@ -51,6 +51,7 @@ and below showing the ``smfbursts`` equivalent.
     notebooks/SelectingFRETPopulations_translation
     notebooks/ns-ALEX_translation
     notebooks/us-ALEX_translation
+    notebooks/Tomov2CDE_translation
 
 
 .. _fretbursts : `FRETBursts <https://fretbursts.readthedocs.io>`__

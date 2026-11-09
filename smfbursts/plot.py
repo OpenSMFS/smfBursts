@@ -357,8 +357,7 @@ def time_course_hist(data:PhotonDataS, col:Column, gate:GateGroup=None, ax:plt.A
     gate : GateGroup, optional
         Gate for bursts/rows. The default is None.
     ax : plt.Axes, optional
-        `plt.Axes <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.html>`_  
-        in which to plot data, if None, use |pltgca|. 
+        |pltax| in which to plot data, if None, use |pltgca|.
         The default is None.
     period : Integral|Real|np.ndarray, optional
         Time division period. If int, sets number of time bins, if float, sets size
@@ -599,9 +598,7 @@ def burst_dets(data:PhotonData, param:Param, burst:int, ax:plt.Axes=None,
     burst : int
         Burst number.
     ax : plt.Axes, optional
-        `plt.Axes <https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.html>`_  
-        in which to plot data, if None, use 
-        |pltgca|. 
+        |pltax| in which to plot data, if None, use |pltgca|. 
         The default is None.
     time_direction : Literal['x', 'horizontal', 'y', 'vertical'], optional
         Direction of time axis. The default is 'x'.

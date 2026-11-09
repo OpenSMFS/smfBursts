@@ -40,6 +40,7 @@ import warnings
 from typing import Any, Literal
 from numbers import Integral
 from itertools import product, repeat
+import re
 
 from .datamodel import rcParams
 
@@ -97,6 +98,7 @@ def make_bg(detdef:DetDef|PhotonDataS, period:float=60.0, tail_min:float=500e-6,
     - 'BgDD' |Column| of background rate in DexDem (0ex0em) channel
     - 'BgDA' |Column| of background rate in DexAem (0ex1em) channel
     - 'BgAA' |Column| of background rate in AexAem (1ex1em) channel
+    - 'BgDex' |Column| of background rate in Dex (0ex) channel
     - 'BgAll' |Column| of background rate in Dex + AexAem (0ex_1ex1em) channels
 
     Parameters
@@ -137,13 +139,18 @@ def make_bg(detdef:DetDef|PhotonDataS, period:float=60.0, tail_min:float=500e-6,
         bg_params['F_bg'] = F_bg
     bg = Param(BG, bg_params, {'base':prd})
     out = {'periods':prd, 'bg':bg}
+    out['Start'] = Column(prd, 'start')
+    out['Stop'] = Column(prd, 'stop')
+    out['Midtime'] = Column(prd, 'midtime')
     out['BgDD'] = Column(bg, 'bg', PhSel('0ex0em'))
     out['BgDA'] = Column(bg, 'bg', PhSel('0ex1em'))
     if detdef.ex == 1:
         out['BgAll'] = Column(bg, 'bg', PhSel('all'))
     else:
-        out['BgAll'] = Column(bg, 'bg', PhSel('0ex_1ex1em'))
         out['BgAA'] = Column(bg, 'bg', PhSel('1ex1em'))
+        out['BgDex'] = Column(bg, 'bg', PhSel('0ex'))
+        out['BgAll'] = Column(bg, 'bg', PhSel('0ex_1ex1em'))
+        
     return out
 
 
@@ -555,8 +562,19 @@ def apply_gate(dct:dict[str:Param|Column], gate:GateGroup, inplace:bool=True)->d
     return out
 
 
-def get_columns(dct:dict[Any], gate:Column|Param|GateGroup,
-                key:Callable[[Column],Hashable]=None)->list[Column]:
+def _exclude_match(val:str, exclude:Sequence[str], exclude_pattern:Sequence[re.Pattern])->bool:
+    """
+    Check if a given key in a column dictionary is valid 
+    given the exclude and exclude pattern values
+    """
+    return not (val in exclude or any(pat.match(val) for pat in exclude_pattern))
+
+
+def get_columns(dct:dict[Any], gate:None|GateGroup=None,
+                key:Callable[[Column],Hashable]=None, 
+                exclude_key:None|str|Sequence[str]=None, 
+                exclude_key_pattern:None|str|re.Pattern|Sequence[str|re.Pattern]=None,
+                exclude_column:None|str|Sequence[str]=None)->list[Column]:
     """
     Retrieve a list of columns from the values of a dictionary that share the same
     |Coparam| all regated to also share the same |Cbparam|
@@ -572,9 +590,9 @@ def get_columns(dct:dict[Any], gate:Column|Param|GateGroup,
     ----------
     dct : dict[Any]
         Dictionary from which to retrieve only columns with matching |Coparam| values.
-    gate : GateGroup|Column|Param
+    gate : None | GateGroup, optional
         Object to match |Coparam| and define |Cbparam|
-        of output columns
+        of output columns. The default is None.
     key : None|True|Callable[[Column],Hashable], optional
         Key function to sort Columns by. If None or False will not perform any 
         sorting. If True, will use same sort function as used to sort columns
@@ -582,15 +600,47 @@ def get_columns(dct:dict[Any], gate:Column|Param|GateGroup,
         finally, if a callable, then it should be 
         usable as argument to `key` in the :code:`sorted` function. 
         The default is None.
+    exclude_key : None | str | Sequence[str], optional
+        Key or sequence of keys to exclude from output. 
+        The default is None.
+    exclude_key_pattern : None|str|re.Pattern|Sequence[str|re.Pattern], optional
+        Key patterns to exlcude from the output. If a string, any key
+        containing the string will be excluded. If a regular expression,
+        will exclude any key matching that pattern. Can specify as single
+        string/pattern, or as sequence thereof.
+        The default is None.
+    exclude_column : None | str | Sequence[str], optional
+        Column name(s) to exclude from the output. Any column with a 
+        column name matching this will be excluded. Either a string,
+        or sequence of strings to eclude multiple columns. 
+        The default is None.
 
     Returns
     -------
     list[Column]
-        List of :class:`Column` in dct that can be regated to gate.
-
+        List of columns contained in the dictionary, with matching
+        origin params, and common gate.
     """
-    out = [v.regate(gate.base_gate) for v in dct.values() 
-           if isinstance(v, Column) and _regateable(v, gate)]
+    exclude_key = tuple() if exclude_key is None else exclude_key
+    exclude_key = (exclude_key, ) if isinstance(exclude_key, str) else exclude_key
+    exclude_key_pattern = tuple() if exclude_key_pattern is None else exclude_key_pattern
+    exclude_key_pattern = (exclude_key_pattern, ) if isinstance(exclude_key_pattern, (str, re.Pattern)) else exclude_key_pattern
+    exclude_key_pattern = tuple(re.compile(pat) if isinstance(pat, str) else pat for pat in exclude_key_pattern)
+    exclude_column = tuple() if exclude_column is None else exclude_column
+    exclude_column = (exclude_column, ) if isinstance(exclude_column, str) else exclude_column
+    if gate is None:
+        for val in dct.values():
+            if isinstance(val, (Param, Column)):
+                gate = val.base_gate
+                break
+    elif 'param' not in gate:
+        for val in dct.values():
+            if isinstance(val, (Param, Column)):
+                gate = val.regate(gate).base_gate
+                break
+    out = [v.regate(gate.base_gate) for k, v in dct.items() 
+           if _exclude_match(k, exclude_key, exclude_key_pattern) and isinstance(v, Column) 
+           and _regateable(v, gate) and v.col not in exclude_column]
     out = [v for i, v in enumerate(out) if v not in out[:i]] # remove duplicates
     if key is not None and key is not False:
         key = _column_sort if key is True else key

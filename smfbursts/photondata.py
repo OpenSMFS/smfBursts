@@ -28,6 +28,7 @@ from numbers import Real
 from os import PathLike
 import warnings
 import hashlib
+from numbers import Integral
 
 import numpy as np
 import tables as tb
@@ -35,13 +36,16 @@ import tables as tb
 from phconvert.hdf5 import save_photon_hdf5
 
 from .datamodel.utils import (
-    tupledict, ImDict, arr_slc, union_multi, enumerate_intersects, get_unit_prefix
+    tupledict, ImDict, arr_slc, union_multi, enumerate_intersects, get_unit_prefix,
+    CheckNestDict, _nested_set
     )
 from .datamodel.immutabledata import (
     _ImData, TV_int, TV_float, TV_ndarray, TV_ImData, TV_str, TypeValidator
     )
-from .ph_sel import DetDef, PhSel, TV_DetDef, ChannelSet, _csall, phsel_all
-from .datamodel.diskdict import DiskDict, AttrDD, TypedValueDD, SubDiskDict
+from .ph_sel import (
+    DetDef, PhSel, TV_DetDef, ChannelSet, ChannelType, _ChannelTypes, 
+    _csall, phsel_all)
+from .datamodel.diskdict import AttrDD, TypedValueDD, SubDiskDict
 from .datamodel.tables import (
     TableLike, BaseTable, ChildTable, DataSet, DataSetList, TableConstructionError,
     paramproperty, Param, ColumnDef, Column, Gate, GateGroup, GroupFuture, ColumnWarning
@@ -484,6 +488,8 @@ def get_phsel_ex_range(setup:PhSpec, phsel:PhSel, force_contig:bool=False)->tupl
     phsel = phsel.render_positive(setup['detdef'])
     if len(phsel.ex.elements) != 1:
         raise ValueError("can only determine range for single ex stream PhSel objects")
+    if 'ex_ranges' not in setup:
+        return 0, setup['tcspc_num_bins'][setup.detdef.get_stream_ids(phsel)%setup.detdef.ex_stride].max()
     iex = list(phsel.ex.elements)[0]
     rng = setup['ex_ranges'][iex]
     if rng.shape[0] != 1:
@@ -492,7 +498,7 @@ def get_phsel_ex_range(setup:PhSpec, phsel:PhSel, force_contig:bool=False)->tupl
         warnings.warn("non-contiguous excitation range")
     if np.any(rng[:,0] > rng[:,1]):
         warnings.warn("wrapped excitation rang")
-        return 0, setup['tcspc_num_bins'][iex]
+        return 0, setup['tcspc_num_bins'].max()
     return np.min(rng), np.max(rng)
 
 
@@ -636,22 +642,26 @@ class PhotonData(DataSet):
 
     _pharray: PhArray
     _save_memory: bool
+    _stream_names: CheckNestDict
     _irf: SubDiskDict
     _irf_thresh: SubDiskDict
     _reference: weakref.ReferenceType
     _array_cache: weakref.WeakValueDictionary
 
-    def __init__(self, pharray:None|PhArray=None, group:GroupFuture=None, autosave:bool=False, 
+    def __init__(self, pharray:None|PhArray=None, group:GroupFuture=None, 
+                 autosave:bool=False, stream_names:dict[PhSel:str]=None, 
                  irf:dict[PhSel:np.ndarray[np.int64]]=None, irf_thresh:dict[PhSel:int]=None, 
                  meta:dict=None, save_memory:bool=False, track:bool=True, file:tb.File=None,
                  group_no:int|bool=1, ref:MutTracked=None, 
                  meta_conflict_policy:Literal['check','warn','error','pass']='pass'):
-        super().__init__(group, autosave, meta, pharray=pharray, irf=irf, irf_thresh=irf_thresh, 
+        super().__init__(group, autosave, meta, pharray=pharray, 
+                         stream_names=stream_names,
+                         irf=irf, irf_thresh=irf_thresh, 
                          save_memory=save_memory, track=track, file=file, group_no=group_no, ref=ref,
                          meta_conflict_policy=meta_conflict_policy)
 
-    def __init_data__(self, pharray:None|PhArray=None, 
-                    irf:dict[PhSel:np.ndarray[np.int64]]=None, irf_thresh:dict[PhSel:int]=None,
+    def __init_data__(self, pharray:None|PhArray=None, stream_names:dict[PhSel:str]=None,
+                      irf:dict[PhSel:np.ndarray[np.int64]]=None, irf_thresh:dict[PhSel:int]=None,
                     save_memory=False, ref:Any=None):
         # intercept creating from group
         if pharray is None:
@@ -669,6 +679,17 @@ class PhotonData(DataSet):
             self._pharray = pharray
         self._reference = ref
         self._save_memory = bool(save_memory)
+        # Render stream_names dictionary
+        stream_names = dict() if stream_names is None else stream_names
+        if not isinstance(stream_names, dict):
+            try:
+                stream_names = dict(*stream_names)
+            except Exception as e:
+                raise TypeError(f"stream_names must be specified as dict of PhSel:str, not {type(stream_names)}") from e
+        self._stream_names = CheckNestDict(self._check_stream_names, self._check_stream_names_key)
+        for k, v in stream_names.items():
+            self._stream_names[k] = v
+        # Pulsed experiment specific parameters
         if 'nanos' in pharray:
             irf = dict() if irf is None else irf
             if not isinstance(irf, dict):
@@ -676,9 +697,9 @@ class PhotonData(DataSet):
                     irf = dict(*irf)
                 except Exception as e:
                     raise TypeError(f"irf must be specified as dict of keys as PhSel:array, not {type(irf)}") from e
-            self._irf = SubDiskDict(self._meta, 'irf', self._check_irf)
+            self._irf = SubDiskDict(self._meta, 'irf', self._check_irf, self._norm_phsel_key)
             irf_thresh = dict() if irf_thresh is None else irf_thresh
-            self._irf_thresh = SubDiskDict(self._meta, 'irf_thresh', self._check_irf_thresh)
+            self._irf_thresh = SubDiskDict(self._meta, 'irf_thresh', self._check_irf_thresh, self._norm_phsel_key)
             for ph_sel, hst in irf.items():
                 self._irf[ph_sel] = hst
             if not isinstance(irf_thresh, dict):
@@ -694,10 +715,54 @@ class PhotonData(DataSet):
                 add_citation('KapanidisACR2005', purpose='using usALEX')
             else:
                 add_citation('PIE', purpose="using PIE/nsALEX")
-
+    
+    def _check_stream_names_key(self, key:tuple[PhSel]|tuple[ChannelType,ChannelSet|int|Sequence[int]]
+                                )->tuple[PhSel]|tuple[ChannelType,ChannelSet]:
+        """
+        key_func for the stream_names dictionary, keys must be either 
+        valid PhSel for data, or (ChannelType, ChannelSet) pair for 
+        single channel name.
+        """
+        
+        l = len(key)
+        if l == 0:
+            return key
+        if l > 2:
+            raise TypeError(f"stream_names keys can be a maximum of 2 deep, got {l}")
+        if isinstance(key[0], str) and key[0] in _ChannelTypes:
+            if l == 1: 
+                return key
+            cstream, cset = key
+            if not isinstance(cset, ChannelSet):
+                cset = ChannelSet(True, (cset, ) if isinstance(cset, Integral) else cset)
+            cset = cset.render_positive(self.detdef[cstream], convert_all=True)
+            return cstream, cset
+        if l > 1:
+            raise TypeError("PhSel style keys must be single PhSel, no additional keys permitted")
+        phsel = key[0] if isinstance(key[0], PhSel) else PhSel(key[0])
+        return (phsel.render_positive(self.detdef, convert_all=True), )
+    
+    def _check_stream_names(self, key:tuple[PhSel]|tuple[ChannelType,ChannelSet|int|Sequence[int]],
+                            label:str|bytes)->tuple[PhSel,str]:
+        """
+        Check func for stream_names dictionary, enusres keys are PhSel
+        or (ChannelType, ChannelSet) valid for the data, and values are
+        strings.
+        """
+        key = self._check_stream_names_key(key)
+        label = label if isinstance(label, str) else label.decode()
+        return key, label
+    
+    def _norm_phsel_key(self, phsel:PhSel)->PhSel:
+        """
+        Function which ensures phsel is in range, positive, and convert_all True.
+        Used as key_func in dictionaries
+        """
+        return phsel.render_positive(self.detdef, convert_all=True)
+    
     def _check_irf(self, phsel:PhSel, hst:np.ndarray)->tuple[PhSel,np.ndarray[np.int64]]:
         """Check irf key value pair- ie phsel in range and hst correct size/type"""
-        phsel = phsel.render_positive(self.detdef, convert_all=True)
+        phsel = self._norm_phsel_key(phsel)
         if self.detdef.get_stream_ids(phsel).size != 1:
             raise ValueError("PhSel must specifiy a single index for the given detdef")
         try:
@@ -706,12 +771,11 @@ class PhotonData(DataSet):
             raise ValueError("Values of irf must be 1D numpy arrays with size matching ex range") from e
         if hst.shape != (get_phsel_range_size(self.setup, phsel), ):
             raise ValueError(f"irf for {phsel} does has incorrect size, expected {get_phsel_range_size(self.setup, phsel)}, got {hst.size}")
-        phsel = phsel.render_positive(self.detdef, convert_all=True)
         return phsel, hst
-
+    
     def _check_irf_thresh(self, phsel:PhSel, thresh:int)->tuple[PhSel,int]:
         """Check irf_thresh key value pair- phsel in range and thresh in range"""
-        phsel = phsel.render_positive(self.detdef, convert_all=True)
+        phsel = self._norm_phsel_key(phsel)
         if self.detdef.get_stream_ids(phsel).size != 1:
             raise ValueError("PhSel must specifiy a single index for the given detdef")
         try:
@@ -720,7 +784,6 @@ class PhotonData(DataSet):
             raise TypeError("thresholds must be integers between 0 and excitation range") from e
         if not in_ph_range(thresh, self.setup, phsel):
             raise ValueError("thresholds must be inside excitation range of phsel")
-        phsel = phsel.render_positive(self.detdef, convert_all=True)
         return phsel, thresh
 
     def _calc_dataID(self)->bytes:
@@ -887,11 +950,14 @@ class PhotonData(DataSet):
         """
         if not self.pulsed:
             raise ValueError("No tcspc decays for non-pulsed excitation experiments")
-        ex = list(phsel.ex.elements)[0]
-        tcspc_unit = self.setup.tcspc_unit[ex]
+        det_ids = self.detdef.get_stream_ids(phsel) % self.detdef.ex_stride
+        tcspc_units = self.setup.tcspc_unit[det_ids]
+        if not np.allclose(tcspc_units, tcspc_units[0]):
+            warnings.warn("")
+        tcspc_unit = tcspc_units[0]
         ex_start, ex_stop = get_phsel_ex_range(self.setup, phsel)
         if gate is None:
-            hst = np.bincount(self.get_nanos(phsel), minlength=self.setup.tcspc_num_bins[ex])
+            hst = np.bincount(self.get_nanos(phsel), minlength=self.setup.tcspc_num_bins[det_ids].max())
             if full:
                 return np.arange(hst.size)*tcspc_unit, hst
             return np.arange(ex_stop-ex_start)*tcspc_unit, hst[ex_start:ex_stop]
@@ -930,6 +996,16 @@ class PhotonData(DataSet):
         for table in self._tables.values():
             if hasattr(table, "_save_memory_switch"):
                 table._save_memory_switch(self._save_memory)
+    
+    @property
+    def stream_names(self)->CheckNestDict[PhSel:str]:
+        """Dictionary of names for each stream (should be tex compatible)"""
+        return self._stream_names
+    
+    @stream_names.setter
+    def stream_names(self, val:dict[PhSel:str]):
+        for key, val in val.items():
+            self._stream_names[key] = val
 
     @property
     def irf(self)->dict[PhSel:np.ndarray[np.int64]]:
@@ -939,7 +1015,7 @@ class PhotonData(DataSet):
         return self._irf
 
     @irf.setter
-    def irf(self, val:dict):
+    def irf(self, val:dict[PhSel:np.ndarray]):
         if not self.pulsed:
             raise AttributeError("Non-pulsed exciation experiments cannot have IRF")
         for k, v in val.items():
@@ -956,7 +1032,7 @@ class PhotonData(DataSet):
         return self._irf_thresh
     
     @irf_thresh.setter
-    def irf_thresh(self, val:dict):
+    def irf_thresh(self, val:dict[PhSel:int]):
         if not self.pulsed:
             raise AttributeError("Non-pulsed exciation experiments cannot have IRF")
         for k, v in val.items():
@@ -966,7 +1042,7 @@ class PhotonData(DataSet):
                 continue
             self._irf_thresh[k] = v
 
-    def get_stream_names(self)->dict[str:dict[int,str]]:
+    def get_stream_names(self)->dict[ChannelSet:dict[int,str]]:
         """
         Get a dictionary providing names for each channel-type and stream.
         Dictionary is nested, has structure:
@@ -974,14 +1050,16 @@ class PhotonData(DataSet):
         Where n is stream number (int), and name is name of stream (str) specifying
         wavelength or angle of polarization.
         """
-        out = dict()
+        dct = dict()
         if 'ex_wv' in self.setup:
-            out['ex'] = {i:f'{wv*1e9:.0f}'  for i, wv in enumerate(self.setup.ex_wv)}
+            dct['ex'] = {i:f'{wv*1e9:.0f}'  for i, wv in enumerate(self.setup.ex_wv)}
         if 'em_wv_centers' in self.setup:
-            out['em'] = {i:f'{wv*1e9:.0f}'  for i, wv in enumerate(self.setup.em_wv_centers)}
+            dct['em'] = {i:f'{wv*1e9:.0f}'  for i, wv in enumerate(self.setup.em_wv_centers)}
         if 'pol_angle' in self.setup:
-            out['pol'] = {i:_pol_names(angle) for i, angle in enumerate(self.setup.pol_angle)}
-        return out
+            dct['pol'] = {i:_pol_names(angle) for i, angle in enumerate(self.setup.pol_angle)}
+        for stream, label in self._stream_names.items():
+            _nested_set(dct, stream, label)
+        return dct
     
     def _save(self, *args:Param, group:tb.Group=None, save_sorted:bool=None, _strict:bool=True)->tb.Group:
         """Internal function for saving data, wrapped by :meth:`PhotonData.save`"""
@@ -1892,6 +1970,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
             ph_sel should have same irf_thresh in origin data, and be reasonable to
             be treated collectively (single stream, or at least same excitation and
             emission).
+            
             .. note::
     
                 It is encouraged to use the ``nanomean_bg`` column of the table
@@ -1905,6 +1984,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
     
         nmdiff : float : (phsel_a:PhSel, phsel_b:PhSel)
             Difference in nanomean between ``phsel_a`` and ``phsel_b`` .
+            
             .. note::
                 
                 It is encouraged to usee the ``nmdiff_bg`` column of the table
@@ -2124,6 +2204,7 @@ class BasePhotonTable(PhotonTable, BaseTable):
 
     @classmethod
     def _check_anisotropy_raw(cls, col:Column):
+        """Check func for anisotropy raw columns"""
         sel_p, sel_s = col.keytup
         _validate_anisotropy(sel_p, sel_s, col.source_param.detdef)
 

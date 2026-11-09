@@ -10,7 +10,9 @@ in burst based analysis. These tables can have as a |Pbaseparam| any
 based |Param|
 
 
+.. |tupledict| replace:: :class:`tupledict <smfbursts.datamodel.utils.tupledict>`
 .. |Param| replace:: :class:`Param <smfbursts.datamodel.tables.Param>`
+.. |ParamDef| replace:: :class:`ParamDef <smfbursts.datamodel.tables.ParamDef>`
 .. |paramproperty| replace:: :class:`smfbursts.datamodel.tables.paramproperty`
 .. |Pbaseparam| replace:: :attr:`base_parent <smfbursts.datamodel.tables.Param.base_param>`
 .. |BasePhotonTable| replace:: :class:`BasePhotonTable <smfbursts.photondata.BasePhotonTable>`
@@ -32,17 +34,15 @@ from numbers import Real
 from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
-from scipy.optimize import minimize
 
 from .datamodel.utils import tupledict, arr_slc
 from .datamodel.immutabledata import (
     register_PyCode, get_pycode_subval,
     TV_bool, TV_float, TV_int, TV_str, TV_ndarray, TV_PyCode, TV_tuple
                                       )
-from .datamodel.diskdict import DiskDict
 from .datamodel.tables import (
     ParamDef, ParentDef, ColumnDef, Param, Column, as_paramdict, 
-    paramproperty, parammethod
+    paramproperty, parammethod, tableproperty
     )
 from .cite import cite, add_citation
 from .photondata import (
@@ -157,7 +157,7 @@ class NphBG(ChildPhotonTable):
     
     Params
     ------
-        single : bool
+        single : bool, optional
             If :code:`True`, compute only single streams, colums of compund 
             :class:`PhSel <smfbursts.ph_sel.PhSel>` computed as sum of streams. 
             Default is True.
@@ -659,7 +659,7 @@ class Ratios(ChildPhotonTable):
                 r = \frac{_{corr}n_{\parallel} - _{corr}n_{\perp}}{(1-3l_{2}) _{corr}n_{\parallel} - (2-3l_{1}) _{corr}n_{\perp}}
             
             
-            where :math:`_{corr}n_{\parallel}` and :math:`_{corr}n_{\parp}` are the
+            where :math:`_{corr}n_{\parallel}` and :math:`_{corr}n_{\perp}` are the
             *corrected* photon counts of the parallel (``phsel_p``) 
             and perpendicular (``phsel_s``) channels respectively, 
             these are specified in the first and second keys of this column, 
@@ -1024,180 +1024,287 @@ class Ratios(ChildPhotonTable):
 
 
 ###############################################################################
-######################### Experimental CDE functions  #########################
+################################ KDE functions ################################
 ###############################################################################
-def register_2cde_func(func:Callable[[int,int,float],float], shortcut:Callable=None)->None:
+def register_kde_func(func:Callable[[int,Any],float], param_defs:Sequence[ParamDef], 
+                      pfunc:Callable[[tupledict],Any]=None, _shortcut:int=None):
     """
-    Add new function for computing KDE function to TypeValidator code.
+    Register a new function that can be used as a kernel for the
+    :class:`KDE` table.
 
     Parameters
     ----------
-    func : Callable[[int,int,float],float]
-        function of signature ``func(tloc:ing, tphoton:int, tau:float)->float``
-        Where tloc is time where KDE is evaluated, tphoton is time of a photon,
-        and tau is a floating point constant, must return float.
-    shortcut : Callable, optional
-        If faster method available, that takes signature
-        ``func(times:np.ndarray, tau:float, lim:float=None, locs:np.ndarray=None)->np.ndarray``. 
-        The default is None.
-
-    """
-    if shortcut is not None:
-        register_PyCode(func, 'KDE_func', shortcut)
-    else:
-        register_PyCode(func, 'KDE_func', partial(smc.kde_photons_user, func=func))
-
+    func : Callable[[int,Any],float]
+        Kernel function, must take 2 positional arguments.
+        The first argument is an integer, and is the delta between a single
+        photon contributing to the KDE, and the time point being evaluated.
+        The second argument can technically be anything, but is typcially
+        a float.
+    param_defs : Sequence[ParamDef]
+        Tuple of |ParamDef| objects, defining the extra parameters needed
+        to specify the kernel, which will become part of the |Param| params
+        tupledict defining a :class:`KDE` based |Param|.
+    pfunc : Callable[[tupledict],Any], optional
+        Fucntion which converts the params tupledict of the class:`KDE`
+        based |Param| into a single object that can be read as the second
+        argument to func. The default is None.
     
-def laplace_kde_2cde(tl:int, tp:int, tau:float)->float:
+    Raises
+    ------
+    TypeError
+        Invalid ParamDef.
     """
-    Kernel function of laplace KDE
+    param_defs = (param_defs, ) if isinstance(param_defs, ParamDef) else tuple(param_defs)
+    if not all(isinstance(param, ParamDef) for param in param_defs):
+        raise TypeError("param_defs must be tuple of ParamDef")
+    if pfunc is None:
+        if len(param_defs) != 1:
+            raise ValueError("Cannot infer more than one parameter ParamDefs")
+        pname = param_defs[0].name
+        def param_func(param:tupledict, origin:PhotonData):
+            f"""Convert {func.__name__} parameters to arg for kde_dist"""
+            return param[pname] / origin.clk_p
+        pfunc = param_func
+    val = (func if _shortcut is None else _shortcut, pfunc, param_defs)
+    register_PyCode(func, "KDE_func", val)
+
+
+def laplace_kde(delta:int, tau:float)->float:
+    """
+    Laplace kernel function specifically for use as kernel function in
+    :class:`KDE`.
 
     Parameters
     ----------
-    tl : int
-        Location (time) where to evaluate laplace KDE.
-    tp : int
-        Time of single photon in laplace KDE.
+    delta : int
+        Time delta between points.
     tau : float
-        Time constant of laplace.
+        Lifetime of kernel.
 
     Returns
     -------
     float
-        Contribution of tp to tl based on laplace KDE with tau.
-
+        Kernel value.
     """
-    return np.exp(-abs(tl-tp) / tau)
-
-laplace_kde_2cde.name = r'\mathcal{L}'
-laplace_kde_2cde.factor = 5.0
-register_2cde_func(laplace_kde_2cde, shortcut=0)
+    return np.exp(-np.ab(delta)/tau)
+laplace_kde.name = r'\mathcal{L}'
+laplace_kde.thresh_func = lambda param: 5.0*param.get('tau', 5e-5)
 
 
-def gaussian_kde_2cde(tl:int, tp:int, tau:float)->float:
+register_kde_func(laplace_kde, ParamDef('tau', TV_float(mn=0.0), default=5e-5), _shortcut=0)
+
+
+def gaussian_kde(delta:int, sigma:float)->float:
     """
-    Kernel function of gaussian KDE
+    Gaussian kernel function specifically for use as kernel function in
+    :class:`KDE`.
 
     Parameters
     ----------
-    tl : int
-        Location (time) where to evaluate gaussina KDE.
-    tp : int
-        Time of single photon in gaussin KDE.
-    tau : float
-        Time constant of laplace.
+    delta : int
+        Time delta between points.
+    sigma : float
+        simga value for kernel.
 
     Returns
     -------
     float
-        Contribution of tp to tl based on gaussian KDE with tau.
-
+        Kernel value.
     """
-    return np.exp(-(tl-tp)**2 / (2*(tau**2)))
+    return np.exp(-delta**2/(2*sigma**2))
+gaussian_kde.name = r'\mathcal{N}'
+gaussian_kde.thresh_func = lambda param: 5.0*param.get('sigma', 5e-5)
 
-gaussian_kde_2cde.name = r'\mathcal{L}'
-gaussian_kde_2cde.factor = 3.0
-register_2cde_func(gaussian_kde_2cde, shortcut=1)
+
+register_kde_func(gaussian_kde, ParamDef('sigma', TV_float(mn=0.0), default=5e-5), _shortcut=1)
+
+
+def _append_kde_kernel_params(params:tupledict)->tuple[ParamDef,...]:
+    """append param func for adding kernel-specific params to KDE param"""
+    return  get_pycode_subval('KDE_func', params['kernel'])[2]
 
 
 class KDE(ChildPhotonTable):
     r"""
-    Implementation of FRET and ALEX 2CDE methods from |Tomov|.
+    Class for analysis of photon density based on Kernel Density Estimators.
     
     Note that this class is made a top-level class, ie can be accessed as
     ``smfbursts.PhotonData``.
     
-    This method estimates the probability that there is variance in the expected
+    The "formative" column of the KDE class is ``ph_kde`` which provides
+    the kernel-density estimation of photons in the first key, evaluated
+    at points in the second key.
+    
+    .. math::
+        
+        f^{U}_{\mathcal{K},\tau}(t) = \sum_{i=1}^{N_{U}}{\mathcal{K}(t-u_{i},\tau)}
+    
+    
+    Where :math:`f^{U}_{\mathcal{K},\tau}(t)` is the kernel density 
+    estimator at time :math:`t`, :math:`U` denotes the samples 
+    (photon times of a given photon selection) contributing to the kernel
+    density, :math:`\mathcal{K}` is a function of a time difference and
+    a lifetime :math:`\tau`.
+    
+    Typically :math:`\mathcal{K}` is either a Lapalce:
+        
+    .. math::
+        
+        \mathcal{L}(\Delta t,\tau) = e^{-|\Delta t| / \tau}
+        
+    
+    or Gaussain:
+    
+    .. math::
+        
+        \mathcal{N}(\Delta t,\tau) = e^{-\left(\frac{{\Delta t}^{2}}{2 \tau^{2}}\right)}
+    
+    
+    Kernel density estimates from one photon selection can be computed
+    at times either from itself or another photon selection using the 
+    ``ph_kde`` column, which therefore returns arrays for each time range.
+    
+    To reduce computational load, when :math:`\Delta t` is greater than
+    ``thresh``, the summation is terminated, as the kernal will have decayed
+    to provide an infinitesimal contribution.
+    
+    If the final key in this column is set to :code:`True`,
+    The KDE is modified so that the non-stochastic nature of photons
+    which arrive at the same time as a KDE is being evaluated are excluded.
+    This becomes the so-called "non-biased" KDE, denoted :math:`_{nb}f`:
+    
+    .. math::
+        
+        _{nb}f^{U}_{\mathcal{K},\tau}(t_{j}) = 
+        \sum_{u_{i}\ne t_{j}}^{N_{U}}{\mathcal{K}(t_{j}-u_{i},\tau)}
+    
+    
+    Additional columns implement time-range wise parameters presented in |Tomov|.
+    These parameters estimate the probability that there is variance in the expected
     emission probabilities as a molecule transits the confocal value
     (within burst dynamics) by comparing the ratio of kernel density estimator 
     values of one stream vs another.
     
-    The basic equation of a KDE is
+    To estimate the variability in proximity ratio (uncorrected FRET),
+    *Tomov et. al.* first comptued a ratio of KDE at either the donor
+    or FRET sensitized (acceptor) streams around a given set of photons
     
     .. math::
         
-        KDE_{X_{i}}^{Y} \left(t_{(CHX)_{i}}, t_{\{CHY\}} \right) = 
-        \sum_j^{N_{CHY}} \exp \left( - \frac{\lvert t_{(CHX)_i} - t_{(CHY)_j} \rvert}{\tau}\right)
+        E^{U,T}_{\mathcal{K},\tau} = 
+        \frac{1}{N_{T}}\sum_{j=1}^{N_{T}}{\frac{f^{U}_{\mathcal{K},\tau}(t_{j})}
+        {f^{U}_{\mathcal{K},\tau}(t_{j})+(1+\frac{1}{N_{T}})_{nb}f^{T}_{\mathcal{K},\tau}(t_{j})}}
     
     
-    where :math:`X are the points where the KDE is esimated, and :math:`Y` are
-    the points contributing to the KDE. |Tomov| set both of these to arrival times
-    of particular streams. When the streams of :math:`X` and :math:`Y` are the
-    same, they introduced a modified KDE, which does not count the photon at
-    the location 
+    The above is implemented in the ``tomovE`` column. It should be noted
+    that the :math:`(1+\frac{1}{N_{T}})` factor was determined empirically,
+    and has no clear mathematical or theoretical foundation.
+    
+    Then, to compute a final estimator of dynamics, *Tomov et. al.*
+    took the sum of two :math:`E` values, inverting the photon selections
+    (with :math:`U` being the FRET (acceptor) stream, and :math:`T` the donor stream):
+        
+    .. math::
+        
+        FRET2CDE_{\mathcal{K},\tau}^{U,T} = 110 - 
+        100(E^{U,T}_{\mathcal{K},\tau} + E^{T,U}_{\mathcal{K},\tau})
+        
+    
+    This is implemented as the ``fret2cde`` column, with the arbitrary
+    :math:`110` and :math:`100` factors incldued to provide the same scale
+    as in |Tomov|. These however are entirely arbitrary.
+    
+    *Tomov et. al.* defined a different set of parameters for determing
+    dynamics in stiochiometry, but they follow a similar pattern: a ratiometric
+    parameter, which is then summed with the same ratio with the streams
+    inverted, which is then linearly shifted by arbitrary constants to
+    generate the final parameter.
+    
+    The ratio is defined as follows:
+        
+    .. math::
+        
+        BR^{U,T}_{\mathcal{K},\tau} = \frac{1}{N_{U}}
+        \sum_{j=1}^{N_{T}}{\frac{f^{U}_{\mathcal{K,\tau}}(t_{j})}
+                           {f^{T}_{\mathcal{K,\tau}}(t_{j})}}
+    
+    
+    This is defined in the ``tomovBR`` column.
+    Note that this no longer uses the "non-biased" KDE when the source
+    and location streams are the same.
+    
+    The summed parameter used to determine stiochometry based dynyamics
+    is defined as:
     
     .. math::
         
-        nbKDE_{X_i}^X \left(t_{\{CHX\}} \right) = \left(1 + \frac{2}{N_{CHX}} \right) \cdot
-        \sum_{j, \;j\ne i}^{N_{CHX}} \exp \left( - \frac{\lvert t_{(CHX)_i} - t_{(CHX)_j} \rvert}{\tau}\right)
+        ALEX2CDE_{\mathcal{K},\tau}^{U,T} = 100 - 50(BR^{U,T}_{\mathcal{K},\tau}+BR^{T,U}_{\mathcal{K},\tau})
+    
     
     .. note::
         
-        The main text of |Tomov| describes :math:`N_{CHX}` ambiguously as the 
-        number of photons in channel :math:`X`, but fails to define if this is
-        with a burst, or fixed time range. Several interpretations are possible,
-        and the paper actively admits that they arrived at the :math:`1+2/N_{CHX}`
-        correction factor through trial and error. They provide in the supplementary
-        material screenshots of their labview code, which would suggest that
-        :math:`N_{CHX}` is the number of photons in a given burst. Therefore
-        this is what is impolemented here.
-    
-    
-    The KDE values are used to define the following ratiometric values
-    
-    .. math::
-        
-        (E)_D = \frac{1}{N_{CHD}} \sum_{i=1}^{N_{CHD}} \frac{KDE_{Di}^A}{KDE_{Di}^A + nbKDE_{Di}^D}
-    
-    
-    and 
-    
-    .. math::
-        
-        (1 - E)_A = \frac{1}{N_{CHA}} \sum_{i=1}^{N_{CHA}} \frac{KDE_{Ai}^D}{KDE_{Ai}^D + nbKDE_{Ai}^A}
-        
-    
-    Which generate the :math:`FRET-2CDE` parameter (``fret`` column)
-    
-    .. math::
-        
-        FRET-2CDE \left( t_{CHD}, t_{CHA} \right) = 110 - 100 \cdot \left[ (E)_D + (1 - E)_A \right]
-    
-    and, for assesing blinking
-    
-    .. math::
-        
-        BR_{D_{EX}} = \frac{1}{N_{CHA_{EX}}} 
-        \sum_{i=1}^{N_{CHD_{EX}}}{\frac{KDE_{D_{EX^{i}}}^{A_EX}}{KDE_{D_{EX^{i}}}^{D_EX}}}
-    
-        
-    and 
-    
-    .. math::
-        
-        BR_{A_{EX}} = \frac{1}{N_{CHD_{EX}}} 
-        \sum_{j=1}^{N_{CHA_{EX}}}{\frac{KDE_{A_{EX^{j}}}^{D_EX}}{KDE_{A_{EX^{j}}}^{A_EX}}}
-        
-    
-    which generates the :math:`ALEX-2CDE` parameter (``alex`` column)
-    
-    .. math::
-        
-        ALEX-2CDE \left( t_{CHD}, t_{CHA} \right) = 
-        100 - 50 \left[ BR_{D_{EX}} + BR_{A_{EX}} \right]
-    
+        |Tomov| contains some ambiguities in the definition of the number
+        of photons, and which photons contribute to the kernel density.
+        Generally there are two interpretations, either all photons in
+        the raw data-set, or only photons within a given time range.
+        For the :math:`(1+\frac{1}{N_{T}})` correction factor applied 
+        to :math:`_{nb}f` in evaluating :math:`E^{U,T}_{\mathcal{K},\tau}`
+        this is necessarily the number of photons in the time range.
+        On the other hand, when evaluating the KDE, it makes more sense
+        to use all raw photons, providing density from outside of the
+        time range. This was not made explicit in |Tomov|. Inspecting the
+        screenshots of the original LabView code, it appears that the KDE
+        was only evaluated on photons within a given time range.
+        ``smfbursts`` allows both styles of evaluation, depending
+        on the setting of the ``all_phot`` parameter.
     
     Params
     ------
-        kernel : Callable[[int, int, float], float]
+        kernel : Callable[[int, int, float], float], optional
             Kenel function (funtion inside sumation of :math:`KDE` or :math:`nbKDE`)
-            Must take 3 arguments, in order time where KDE is being evaluated,
-            then the time of a photon generating the kernel, and finally a float,
-            the time constant of the kernel.
-        tau : float
-            Lifetime (:math:`\tau`) of kernel, in seconds
+            Must take 2 arguments, the first is an integer, indicating the
+            delta between a pair of times (photon and time where KDE is evaluated),
+            and the second is an object representing the constants for the function.
+            Two functions are included with smfbursts:
+                
+                #. :func:`laplace_kde` This option adds the parameter ``tau`` to the list of params
+                #. :func:`gaussian_kde` this option adds the parameter ``sigma`` to the list of params
+            
+            Custom kernel functions must be registered with the
+            :func:`register_kde_func` function.
+            The default is :func:`laplace_kde`
+            
         thresh : float
             Maximum time range to evaluate photons in kernel, in seconds.
+            If not specified, and kernel function has attribute ``factor``,
+            thresh will be set to ``factor * tau``, if the kernel function
+            does not have the attribute ``factor``, will set thresh as
+            `` 5.0 * tau``.
+        
+        all_phot : bool, optional
+            Whether or not to include all photons in the given photon
+            selection in the KDE computation (True), or only those
+            inside the given time range (False). Note that if set to
+            False, densities near the beginning and end of a time range
+            will be smaller as any photons arrving before or after the
+            limit of the time range will not contribute to the density.
+            The default is True.
+        
+        exclude_zero : bool, optional
+            Whether or not to remove photons where kernel density is
+            zero from calculation of |Tomov| based parameters. 
+            If False, these non-removed values ``"tomovE"``, ``"tomovBR"``,
+            ``"fret2cde"`` and ``"alex2cde"`` columns will have many
+            nan values, as 0 density in denominators results in nans,
+            which prorogate up the parameter calculation.
+            The default is True.
+    
+    
+    The "kernel" function will add function-specific parameters.
+    
+    If :func:`laplace_kde` is chosen, the `tau` parameter is added.
+    
+    If :func:`gaussian_kde` is chosen, the `sigma` parameter is added.
     
     Parents
     -------
@@ -1206,34 +1313,99 @@ class KDE(ChildPhotonTable):
     
     Columns
     -------
-        fret : float (phsel_d:PhSel, phsel_aPhSel)
-            Evaluate :math:`FRET-2CDE` where :math:`t_{CHD}` is ``phsel_d``, and
-            :math:`t_{CHA}` is ``phsel_a``
+        ph_kde : np.ndarray[np.float64] (phsel_den:PhSel, phsel_loc:PhSel=None, drop_self:bool=False)
+            :math:`f^{phsel\_den}_{\mathcal{K},\tau}(phsel\_loc)` if ``drop_self = False``, or 
+            :math:`_{nb}f^{phsel\_den}_{\mathcal{K},\tau}(phsel\_loc)` if ``drop_self = True``
+            The KDE estimate of photon density of ``phsel_den`` around the times of ``phsel_loc``.
+            Can specify as single key, in which case ``phsel_loc`` is set as the same as ``phsel_den``
+            
+        tomovE : float (phsel_d:PhSel, phsel_a:PhSel)
+            The KDE based parameter from |Tomov|. Defined as
+            
+            .. math::
+                
+                E^{phsel\_a,phsel\_d}_{\mathcal{K},\tau} = 
+                \frac{1}{N_{phsel\_d}}\sum_{j=1}^{N_{phsel\_d}}{\frac{f^{phsel\_a}_{\mathcal{K},\tau}(t_{j})}
+                {f^{phsel\_a}_{\mathcal{K},\tau}(t_{j})+(1+\frac{1}{N_{phsel\_d}})_{nb}f^{phsel\_d}_{\mathcal{K},\tau}(t_{j})}}
+                
+            
+            where :math:`d` and :math;`a` are the photons in the 
+            ``phsel_d`` and ``phsel_a`` keys respectively, a subscript
+            indicating the photon within the given photon selection.
+            This can represent the :math:`E_{D}` or :math:`(1-E_{A})`
+            values from |Tomov|, if the ``phsel_d`` key is the donor
+            emission and the ``phsel_a`` key is the FRET sensitised 
+            (acceptor) emission, it is :math:`E_{D}`. If the roles are
+            reversed, it is :math:`(1-E_{A})`.
         
-        Alex : float (phsel_d:PhSel, phsel_aPhSel)
-            Evaluate :math:`ALEX-2CDE` where :math:`t_{CHD_{EX}}` is ``phsel_d``, and
-            :math:`t_{CHA_{EX}}` is ``phsel_a``
+        tomovBR : float (phsel_d:PhSel, phsel_a:PhSel)
+            The KDE based parameter from |Tomov|. Defines as
+            
+            .. math::
+                
+                BR^{phsel\_a,phsel\_d}_{\mathcal{K},\tau} = \frac{1}{N_{phsel\_a}}
+                \sum_{j=1}^{N_{phsel\_d}}{\frac{f^{phsel\_a}_{\mathcal{K,\tau}}(t_{j})}
+                                   {f^{phsel\_d}_{\mathcal{K,\tau}}(t_{j})}}
+                
+            
+            where :math:`d` and :math;`a` are the photons in the 
+            ``phsel_d`` and ``phsel_a`` keys respectively, a subscript
+            indicating the photon within the given photon selection.
+            This can represent the :math:`BR_{Dex}` if ``phsel_d`` is
+            the donor excitation streams, and ``phsel_a`` is the acceptor
+            excitation stream, and if the values are reversed, it gives the
+            :math;`BR_{Aex}` parameter.
+            
+        fret2cde : float (phsel_d:PhSel, phsel_aPhSel)
+            Evaluate the FRET-2CDE parameter from |Tomov|.
+            Defined as 
+            
+            .. math::
+                
+                FRET2CDE_{\mathcal{K},\tau}^{phsel\_a,phsel\_d} = 110 - 
+                100(E^{phsel\_a,phsel\_d}_{\mathcal{K},\tau} + E^{phsel\_d,phsel\_a}_{\mathcal{K},\tau})
+            
+            
+        alex2cde : float (phsel_d:PhSel, phsel_aPhSel)
+            Evaluate the FRET-2CDE parameter from |Tomov|.
+            Defined as 
+            
+            .. math::
+                
+                ALEX2CDE_{\mathcal{K},\tau}^{phsel\_a,phsel\d} = 100 -
+                50(BR^{phsel\_a,phsel\_d}_{\mathcal{K},\tau}+BR^{phsel\_d,phsel\_a}_{\mathcal{K},\tau})
+    
     
     """
+    
     #: :meta private:
     param_defs = (
-        ParamDef('kernel', TV_PyCode, default=laplace_kde_2cde),
-        ParamDef('tau', TV_float(mn=0.0), default=5e-4),
-        ParamDef('thresh', TV_float(mn=0.0))
+        ParamDef('kernel', TV_PyCode(subval='KDE_func'), default=laplace_kde, 
+                 append_params=_append_kde_kernel_params),
+        ParamDef('thresh', TV_float(mn=0.0), default=25e-5),
+        ParamDef('all_phot', TV_bool, default=True),
+        ParamDef('exclude_zero', TV_bool, default=True)
         )
     #: :meta private:
     parent_defs = (ParentDef('base', BasePhotonTableLike, is_base=True), )
     #: :meta private:
     column_defs = (
+        ColumnDef('ph_kde', (PhSel, PhSel, bool), 0, 'user', 
+                  iter_func='_iter_ph_kde', reg_func='_regularizecolumn_ph_kde', 
+                  get_derived=True, dtype=np.object_, typedef=np.dtype('<i8')),
+        ColumnDef('tomovE', (PhSel, PhSel), 0, 'user', iter_func='_iter_tomovE', 
+                  title_func='_get_tomovE_title'),
+        ColumnDef('tomovBR', (PhSel, PhSel), 0, 'user', iter_func='_iter_tomovBR',
+                  title_func='_get_tomovBR_title'),
         ColumnDef('fret2cde', (PhSel, PhSel), 0, 'user', iter_func='_iter_fret2cde', 
                   reg_func='_regularizecolumn_fret2cde', title_func='_get_fret2cde_title'),
         ColumnDef('alex2cde', (PhSel, PhSel), 0, 'user', iter_func='_iter_alex2cde', 
                   reg_func='_regularizecolumn_alex2cde', title_func='_get_alex2cde_title')
         )
-    
+
     def __init_columns__(self):
         pass
-    
+
     @classmethod
     def param_preprocess(cls, param:Sequence[tuple[str,Any]]|tupledict, parents:dict[str:Param])->tuple[dict,dict]:
         """
@@ -1241,107 +1413,101 @@ class KDE(ChildPhotonTable):
         and converts into consistent corr_mat approach for correction factors
         :meta private:
         """
-        param = as_paramdict(param, tuple(pdef.name for pdef in cls.param_defs))
+        param = param.asdict if isinstance(param, tupledict) else param
         if isinstance(parents, Param):
             parents = {'base':parents}
         elif isinstance(parents, tupledict):
             parents = parents.asdict
-        param.setdefault('kernel', laplace_kde_2cde)
-        param.setdefault('tau', 5e-4)
-        if 'thresh' not in param:
-            factor = param['kernel'].factor if hasattr(param['kernel'], 'factor') else 5.0
-            param['thresh'] = factor * param['tau']
+        param.setdefault('kernel', laplace_kde)
+        if 'thresh' not in param and hasattr(param['kernel'], 'thresh_func'):
+            param['thresh'] = param['kernel'].thresh_func(param.copy())
         return param, parents
-        
+    
+    @tableproperty
+    def kde_func(cls, param:Param, origin:PhotonDataS)->Callable:
+        func, pfunc, _ = get_pycode_subval('KDE_func', param.params['kernel'])
+        lim = int(param.params['thresh'] / origin.clk_p)
+        arg = pfunc(param.params, origin)
+        return partial(smc.kde_dist, lim=lim, func=func, arg=arg)
 
-    @paramproperty
-    def kde_func(cls, param:Param)->Callable[[np.ndarray[np.int64],float,np.ndarray[np.float64]],np.ndarray[np.float64]]:
-        """
-        |paramproperty| returning the function which is used to compute the 
-        KDE per photon.
-        """
-        func = get_pycode_subval('KDE_func', param.params['kernel'], param.params['kernel'])
-        return partial(smc.kde_photons, func=func)
+    def _calc_kde(self, phsel_den:PhSel, phsel_loc:PhSel, drop_self:bool)->np.ndarray[np.float64]:
+        times_den = self.origin.get_times(phsel_den)
+        times_loc = self.origin.get_times(phsel_loc)
+        return self.kde_func(times_den, times_loc)
 
-    def _index_iter(self, phsel_a:PhSel, phsel_b:PhSel, drop_self:bool
-                    )->tuple[np.ndarray[np.float64],np.ndarray[np.float64],np.ndarray[np.float64],np.ndarray[np.float64]]:
-        """
-        Iterate over each burst, returing the KDE values of each combination of
-        
+    def _iter_ph_kde(self, phsel_den:PhSel, phsel_loc:PhSel, drop_self:bool)->Iterator[np.ndarray[np.float64]]:
+        if self.param['all_phot']:
+            cacheparam = self.param.params + (('den', phsel_den), ('loc', phsel_loc), ('drop', drop_self))
+            cacheparam = tupledict(*cacheparam)
+            arr = self.origin._get_from_cache(self.__class__, cacheparam, "ph_kde",
+                                              getter=lambda:self._calc_kde(phsel_den, phsel_loc, drop_self=drop_self))
+            mask = np.isin(self.origin.dets, self.detdef.get_stream_ids(phsel_loc))
+            id_eval = np.cumsum(mask) - 1
+            for istart, istop in zip(self.parents['base']['istart'], self.parents['base']['istop']):
+                yield arr[id_eval[istart:istop][mask[istart:istop]]]
+        else:
+            
+            yield from self.kde_func(self.parents['base']['ph_times',phsel_den], 
+                                     self.parents['base']['ph_times',phsel_loc], 
+                                     drop_self=drop_self)
 
-        Parameters
-        ----------
-        phsel_a : PhSel
-            First photon selection.
-        phsel_b : PhSel
-            Second phootn selection.
-        drop_self : bool
-            Remove the .
-
-        Yields
-        ------
-        kde_aa : np.ndarray[np.float64]
-            kde of channel a photons evaluated at time of channel a photons.
-        kde_ab : np.ndarray[np.float64]
-            kde of channel a photons evaluated at time of channel b photons.
-        kde_ba : np.ndarray[np.float64]
-            kde of channel b photons evaluated at time of channel a photons.
-        kde_bb : np.ndarray[np.float64]
-            kde of channel b photons evaluated at time of channel b photons.
-
-        """
-        sela = self.origin.detdef.get_stream_ids(phsel_a)
-        selb = self.origin.detdef.get_stream_ids(phsel_b)
-        mask_a = np.isin(self.origin.dets, sela)
-        times_a = self.origin.times[mask_a]
-        mask_b = np.isin(self.origin.dets, selb)
-        times_b = self.origin.times[mask_b]
-        func = self.kde_func
-        tau = self.param.params['tau'] / self.origin.clk_p
-        kde_aa = func(times_a, tau, drop_self=drop_self)
-        kde_ab = func(times_a, tau, times_b)
-        kde_ba = func(times_b, tau, times_a)
-        kde_bb = func(times_b, tau, drop_self=drop_self)
-        idx_a = np.cumsum(mask_a)
-        idx_b = np.cumsum(mask_b)
-        for istart, istop in zip(self.parents['base']['istart'], self.parents['base']['istop']):
-            slc = slice(istart, istop)
-            ma = idx_a[slc][mask_a[slc]]
-            mb = idx_b[slc][mask_b[slc]]
-            yield kde_aa[ma], kde_ab[mb], kde_ba[ma], kde_bb[mb]
+    @classmethod
+    def _regularizecolumn_ph_kde(cls, source_param:Param, *args):
+        if len(args) > 3:
+            raise ValueError(f"too many arguments for column {cls.__name__}")
+        phsel_den, phsel_loc, drop_self = args + (None, )*(3-len(args))
+        phsel_den = phsel_all if phsel_den is None else phsel_den
+        phsel_den = phsel_den if isinstance(phsel_den, PhSel) else PhSel(phsel_den)
+        phsel_loc = phsel_den if phsel_loc is None else phsel_loc
+        phsel_loc = phsel_loc if isinstance(phsel_loc, PhSel) else PhSel(phsel_loc)
+        if drop_self and not (phsel_den & phsel_loc):
+            raise ValueError("KDE contributing photons and KDE evaluation points must overlap for drop_self to be True")
+        drop_self = bool(drop_self)
+        return phsel_den, phsel_loc, drop_self
 
     @classmethod    
-    def _get_kde_title(cls, title:str, col:Column, origin:PhotonData=None):
+    def _get_2cde_title(cls, title:str, col:Column, origin:PhotonData=None):
         """General title generator func for kde columns"""
         if hasattr(col.param.params['kernel'], 'name'):
             title += '_{%s}' % col.param.params['kernel'].name
         else:
             title += '_{%s}' % col.param.params['kernel'].__name__
-        title = '%s(%s/%s)' % ((title, ) + _title_sels('t', origin, *col.keytup))
+        title += '^{%s,%s}' % _title_sels('ph', origin, *col.keytup)[::-1]
         return f'${title}$'
     
-    @cite('TomovBioPhysJ2012', purpose='FRET 2CDE')
-    def _iter_fret2cde(self, phsel_d:PhSel, phsel_a:PhSel)->float:
-        """Iterator func for fret 2cde column"""
-        for kde_dd, kde_da, kde_ad, kde_aa in self._index_iter(phsel_d, phsel_a, True):
-            if kde_dd.size + kde_aa.size == 0:
+    def _iter_tomov_pair(self, phsel_den:PhSel, phsel_loc:PhSel, drop_self:bool)->Iterator[np.ndarray[np.float64]]:
+        phiter = zip(self.iter_column('ph_kde', phsel_loc, phsel_loc, drop_self),
+                     self.iter_column('ph_kde', phsel_den, phsel_loc, False),)
+        if self.param.params['exclude_zero']:
+            for ph_self, ph_other in phiter:
+                mask = (ph_self != 0.0) & (ph_other != 0.0)
+                yield ph_self[mask], ph_other[mask]
+        else:
+            yield from phiter
+
+    def _iter_tomovE(self, phsel_d:PhSel, phsel_a:PhSel)->Iterator[float]:
+        for kde_dd, kde_ad in self._iter_tomov_pair(phsel_d, phsel_a, True):
+            if kde_dd.size == 0 or kde_ad.size == 0:
                 yield np.nan
                 continue
             with np.errstate(invalid='ignore', divide='ignore'):
-                if kde_dd.size != 0:
-                    e_d = np.mean(kde_ad / (kde_ad + (1.0 + 2.0/kde_dd.size)*kde_dd))
-                else:
-                    e_d = 0.0
-                if kde_aa.size != 0:
-                    e_a = np.mean(kde_da / (kde_da + (1.0 + 2.0/kde_aa.size)*kde_aa))
-                else:
-                    e_a = 0.0
-            yield 110.0 - 100.0*(e_d+e_a)
+                yield np.mean(kde_ad / (kde_ad + (1+2/kde_dd.size)*kde_dd)) 
     
+    @classmethod
+    def _get_tomovE_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        return cls._get_2cde_title(r'kde\:E', col, origin=origin)
+
+    @cite('TomovBioPhysJ2012', purpose='FRET 2CDE')
+    def _iter_fret2cde(self, phsel_d:PhSel, phsel_a:PhSel)->float:
+        """Iterator func for fret 2cde column"""
+        for ed, ea in zip(self.iter_column('tomovE', phsel_d, phsel_a),
+                          self.iter_column('tomovE', phsel_a, phsel_d)):
+            yield 110.0 - 100.0*(ed + ea)
+
     @classmethod
     def _get_fret2cde_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
         """Title func for fret 2cde column"""
-        return cls._get_kde_title('FRET-2CDE', col, origin=origin)
+        return cls._get_2cde_title('FRET2CDE', col, origin=origin)
 
     @classmethod
     def _regularizecolumn_fret2cde(cls, source_param:Param, *args):
@@ -1351,17 +1517,26 @@ class KDE(ChildPhotonTable):
         phsel_a = PhSel('0ex1em') if len(phsel_a) == 0 else phsel_a[0]
         phsel_d, phsel_a = sort_phsels((phsel_d, phsel_a))
         return phsel_d, phsel_a
-    
-    @cite('TomovBioPhysJ2012', purpose='ALEX 2CDE')
-    def _iter_alex2cde(self, phsel_d:PhSel, phsel_a:PhSel)->float:
-        for kde_dd, kde_da, kde_ad, kde_aa in self._index_iter(phsel_d, phsel_a, False):
-            if kde_dd.size == 0 or kde_aa.size == 0:
+
+    def _iter_tomovBR(self, phsel_d:PhSel, phsel_a:PhSel)->Iterator[float]:
+        for kde_dd, kde_ad, na in zip(self.iter_column('ph_kde', phsel_d, phsel_d, False),
+                                       self.iter_column('ph_kde', phsel_a, phsel_d, False),
+                                       self.parents['base'].iter_column('nph_raw', phsel_a)):
+            if na == 0 or kde_dd.size == 0:
                 yield np.nan
                 continue
             with np.errstate(invalid='ignore', divide='ignore'):
-                br_d = kde_ad / kde_dd / kde_aa.size
-                br_a = kde_da / kde_aa / kde_dd.size
-            yield 100.0 - 50.0*(br_d+br_a)
+                yield np.sum(kde_ad / kde_dd) / na
+
+    @classmethod
+    def _get_tomovBR_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
+        return cls._get_2cde_title(r'kde\:BR', col, origin=origin)
+
+    @cite('TomovBioPhysJ2012', purpose='ALEX2CDE')
+    def _iter_alex2cde(self, phsel_d:PhSel, phsel_a:PhSel)->Iterator[float]:
+        for brd, bra in zip(self.iter_column('tomovBR', phsel_d, phsel_a),
+                            self.iter_column('tomovBR', phsel_a, phsel_d)):
+            yield 100.0 - 50.0*(brd+bra)
 
     @classmethod
     def _regularizecolumn_alex2cde(cls, source_param:Param, *args):
@@ -1374,4 +1549,5 @@ class KDE(ChildPhotonTable):
     
     @classmethod
     def _get_alex2cde_title(cls, col:Column, include_unit:bool=False, origin:PhotonData=None)->str:
-        return cls._get_kde_title('ALEX-2CDE', col, origin=origin)
+        return cls._get_2cde_title('ALEX2CDE', col, origin=origin)
+

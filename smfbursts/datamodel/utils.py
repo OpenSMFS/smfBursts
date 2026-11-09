@@ -854,6 +854,18 @@ class SequenceDefaults:
             The object, dictionary or sequence of dictionaries the key will take
         """
         self._kwargs[key] = val
+    
+    @property
+    def keys(self):
+        return self._kwargs.keys
+    
+    @property
+    def values(self):
+        return self._kwargs.values
+    
+    @property
+    def items(self):
+        return self._kwargs.items
 
 
 def _ndarray_to_str(string:np.ndarray|bytes)->str:
@@ -933,9 +945,278 @@ def _indent(val:str, indent:int)->str:
     """Indent a string"""
     return ' '*indent+('\n'+' '*indent).join(val.split('\n'))
 
-########################
-### Additional functions
-########################
+
+class CheckDict(dict):
+    """
+    A special dictionary that passes the key-value pairs through a function
+    in order to enforce typeing etc.
+    
+    Parameters
+    ----------
+    check_func : Callable[[Hashable,Any],tuple[Hashable,Any]]
+        Function with takes the key, and value as arguments as input, 
+        and outputs the "real" key-value pair (as a 2-tuple key-value pair)
+        to be stored in the dictionary. Should raise exception in case
+        of invalid key - value pair.
+    key_func : None | Callable[[Hashable],Hashable], optional
+        Function which takes a key as a value, and outputs the "real" key
+        stored in the dictionary. In case of invalid key, should raise
+        an exception. The default is None.
+    """
+    def __init__(self, check_func:Callable[[Hashable,Any],tuple[Hashable,Any]], key_func:Callable[[Hashable],Hashable]=None):
+        self._check_func = check_func
+        self._key_func = _echo if key_func is None else key_func
+    
+    def __setitem__(self, key, value):
+        super().__setitem__(*self._check_func(key, value))
+    
+    def __getitem__(self, key):
+        try:
+            key = self._key_func(key)
+        except Exception as e:
+            raise KeyError(f"{key} not valid key for this CheckDict") from e
+        return super().__getitem__(key)
+
+    def __contains__(self, other):
+        other = self._key_func(other)
+        return super().__contains__(other)
+
+    def get(self, key:Hashable, *default):
+        """
+        Retrieve value from dictionary.
+
+        Parameters
+        ----------
+        key : Hashable
+            Return the value for key if key is in the dictionary, else default..
+        default : Any, optional
+            Default value to return. If not specified, will raise an 
+            exception if the key is not in the dictionary
+
+        Returns
+        -------
+        Any
+            value in dictionary, or default.
+        """
+        if default:
+            return super().get(*self.check_func(key, *default))
+        return super().get(self._key_func(key))
+
+    def pop(self, k:Hashable, *d):
+        """
+        Remove specified key and return the corresponding value.
+
+        If the key is not found, return the default if given; otherwise,
+        raise a KeyError.
+
+        Parameters
+        ----------
+        k : Hashable
+            Key to remove from dictionary.
+        d : Any, optional
+            Default value to return in key is not in dictionary.
+
+        Returns
+        -------
+        Any
+            Value of k in dictionary, or d if k is not in dictionary,
+            if d is not specified and k is not in dictionary, raise 
+            exception.
+        """
+        k = self._key_func(k)
+        return super().pop(k, *d) if d else super().pop(k)
+
+    def update(self, E:dict)->None:
+        """
+        Add key-value paris to dictionary, specified as a dictionary,
+        overwrites specified values.
+
+        Parameters
+        ----------
+        E : dict
+            Dictionary with values to add to dict.
+
+        """
+        for key, val in E.items():
+            self[key] = val
+
+    def setdefault(self, key:Hashable, default:Any)->Any:
+        """
+        Insert key with a value of default if key is not in the dictionary.
+
+        Return the value for key if key is in the dictionary, else default..
+
+        Parameters
+        ----------
+        key : Hashable
+            Key to insert into dictionary.
+        default : Any
+            Value to assign to key if not already present in dictoinary.
+
+        Returns
+        -------
+        Any
+            Value of key in dictionary.
+        """
+        return super().setdefault(*self._check_func(key, default))
+
+
+class CheckNestDict(CheckDict):
+    """
+    Dictionary whose keys must be tuples, and which uses a check_func
+    to verify all keys and values.
+    Sub-dictionaries can be accessed by specifing keys with only beginning
+    parts of the tuple of the stored keys. Allowing a nested-like behavior.
+    
+    Parameters
+    ----------
+    check_func : Callable[[tuple[Hashable,...],Any],tuple[tuple[Hashable,...],Any]]
+        Function with takes the key, and value as arguments as input, 
+        and outputs the "real" key-value pair (as a 2-tuple key-value pair)
+        to be stored in the dictionary. Should raise exception in case
+        of invalid key - value pair. Note that the keys input will already
+        have been converted to tuples, should validate entire set.
+    key_func : None | Callable[[tuple[Hashable,...]],tupel[Hashable,...]], optional
+        Function which takes a key as a value, and outputs the "real" key
+        stored in the dictionary. In case of invalid key, should raise
+        an exception. Keys will already be converted to tuples, the 
+        validator should be able to convert "partial" keys so that
+        it is possible to compare input key with keys in dictionary.
+        The default is None.
+    
+    """
+    @staticmethod
+    def _tuple_key(key:tuple[Hashable,...]|Hashable)->tuple[Hashable,...]:
+        """Ensure key is a tuple, any sequence except str is converted to tuple, otherwise packed into 1-tuple"""
+        return tuple(key) if isinstance(key, Sequence) and not isinstance(key, str) else (key, )
+
+    def __setitem__(self, key, value):
+        key = self._tuple_key(key)
+        if isinstance(value, dict):
+            for k, v in value.items():
+                self[key + self._tuple_key(k)] = v
+        else:
+            super().__setitem__(*self._check_func(key, value))
+
+    def __getitem__(self, key):
+        key = self._key_func(self._tuple_key(key))
+        l = len(key)
+        if super().__contains__(key):
+            return super().__getitem__(key)
+        out = {k[l] if len(k) == (l+1) else k[l:]:v for k, v in self.items() if k[:l] == key}
+        if not out:
+            raise KeyError(f"{key} not in dict")
+        return out
+
+    def __contains__(self, other):
+        try:
+            key = self._key_func(self._tuple_key(other))
+        except:
+            return False
+        l = len(key)
+        return super().__contains__(key) or any(k[:l] == key for k in self.keys())
+
+    def get(self, key:Hashable|tuple[Hashable,...], *default):
+        """
+        Retrieve value from dictionary. If given partial key, will return
+        dictionary of all matching keys inside dictionary, with keys
+        of output dictionary being the "remainder" after the key specification.
+
+        Parameters
+        ----------
+        key : Hashable
+            Return the value for key if key is in the dictionary, else default..
+        default : Any, optional
+            Default value to return. If not specified, will raise an 
+            exception if the key is not in the dictionary
+
+        Returns
+        -------
+        Any
+            value in dictionary, or default.
+        """
+        if len(default) > 1:
+            raise TypeError(f"get expected at most 2 arguments, got {len(default)}")
+        if key in self:
+            return self[key]
+        if not default:
+            return None
+        return default[0]
+
+    def pop(self, k:Hashable|tuple[Hashable,...], *d):
+        """
+        Remove specified key and return the corresponding value.
+
+        If the key is not found, return the default if given; otherwise,
+        raise a KeyError.
+        
+        May specify parital key, and return will be dictionary with the
+        remainder of the matching keys, all matching keys will be removed
+        from the dictionary.
+
+        Parameters
+        ----------
+        k : Hashable | tuple[Hashable,...]
+            Key to remove from dictionary.
+        d : Any, optional
+            Default value to return in key is not in dictionary.
+
+        Returns
+        -------
+        Any
+            Value of k in dictionary, or d if k is not in dictionary,
+            if d is not specified and k is not in dictionary, raise 
+            exception.
+        """
+        if len(d) > 1:
+            raise TypeError(f"pop expected at most 2 arguments, got {len(d)}")
+        k = self._key_func(self._tuple_key(k))
+        if super().__contains__(k):
+            return super().pop(k)
+        l = len(k)
+        if k in self:
+            return {key[l] if (len(key)-1) == l else key[l:]:super().pop(key) for key
+                    in list(self.keys()) if key[:l] == k}
+        return d[0] if d else None
+
+    def setdefault(self, key:Hashable|tuple[Hashable,...], default:Any)->Any:
+        """
+        Insert key with a value of default if key is not in the dictionary.
+
+        Return the value for key if key is in the dictionary, else default.
+        
+        May set paritial key if default is a dictionary with keys that
+        "complete" the keys.
+
+        Parameters
+        ----------
+        key : Hashable | tuple[Hashable,,,,]
+            Key to insert into dictionary. May be a partial key
+        default : Any
+            Value to assign to key if not already present in dictoinary.
+
+        Returns
+        -------
+        Any
+            Value of key in dictionary.
+        """
+        if key in self:
+            return self[key]
+        self[key] = default
+        return self[key]
+    
+    @property
+    def nest(self)->dict:
+        """Generate a dictionary of dictionaries, nesting the tuple-keys of self"""
+        dct = dict()
+        for keys, val in self.items():
+            _nested_set(dct, keys, val)
+        return dct
+
+
+###############################################################################
+############################ Additional functions  ############################
+###############################################################################
 def union_multi(*args:Number|np.ndarray)->np.ndarray:
     """
     Repeted application of np.uion1d on each argument.
@@ -1123,10 +1404,10 @@ def _nested_dict_mergekey(update:dict, keys:Sequence[str], val:dict, strict:bool
     return update
 
 
-def _expand_by_index(indices, values, start):
+def _expand_by_index(indices:Sequence[int], values:Sequence[Any], start:int)->list:
     """
-    Return a list mapping the values in *values* to their cooresponding indeces in 
-    *indeces*, useful for putting all fields in an HDF5 file in numerical ascending
+    Return a list mapping the values in *values* to their cooresponding indices in 
+    *indices*, useful for putting all fields in an HDF5 file in numerical ascending
     order. *start* indicates the starting index (should be either 0 or 1), because
     photon HDF5 has make inconsistent choices on which fields should be numberedf
     from 0 like photon_data, and which should be number from 1 like alex_period

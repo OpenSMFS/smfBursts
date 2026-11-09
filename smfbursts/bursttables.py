@@ -4,7 +4,7 @@
 # Author: Paul David Harris
 # email: harrip@gmail.com
 r"""
-This module can also be accessed with the alias ``smfbursts.ff``
+This module can also be accessed with the alias ``smfbursts.brst``
 
 The ``smfbursts.bursttables`` module defines |BasePhotonTable| classes for bursts.
 

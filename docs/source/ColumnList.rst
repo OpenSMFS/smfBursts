@@ -544,7 +544,7 @@ bg_err_CM
 
 
 Crames-von Mises error metric.
-Computes :math:`\int_{-\infty}^{\infty} \left[] L_{n} - L_{*} \right]^{2}`.
+Computes :math:`\int_{-\infty}^{\infty} \left[ L_{n} - L_{*} \right]^{2}`.
 Using trapezoid rule for numerical integration.
 
 
@@ -747,7 +747,7 @@ calculated as
     2 n_{bg\perp}\bar{\tau_{bg\parallel}}
     {n_{bg\parallel}+2 n_{bg\perp}}
 
-where :math:`\n_{bg\parallel}` and :math:`\n_{bg\perp}` are the values
+where :math:`n_{bg\parallel}` and :math:`n_{bg\perp}` are the values
 of the corrected photon counts (from nph_c_ )
 of ``phsel_p`` and ``phsel_s`` respectively,
 and :math:`\bar{\tau_{bg\parallel}}` and :math:`\bar{\tau_{bg\perp}}`
@@ -884,7 +884,8 @@ The FRET 2CDE value proposed in |Tomov| of ``phsel_d`` and ``phsel_a``.
 
 .. math::
 
-        FRET-2CDE \left( t_{CHD}, t_{CHA} \right) = 110 - 100 \cdot \left[ (E)_D + (1 - E)_A \right]
+        FRET2CDE_{\mathcal{K},\tau}^{phsel\_a,phsel\_d} = 110 -
+        100(E^{phsel\_a,phsel\_d}_{\mathcal{K},\tau} + E^{phsel\_d,phsel\_a}_{\mathcal{K},\tau})
 
 
 alex2cde
@@ -900,9 +901,64 @@ The ALEX 2CDE value proposed in |Tomov| of ``phsel_d`` and ``phsel_a``.
 
 .. math::
 
-        ALEX-2CDE \left( t_{CHD}, t_{CHA} \right) = 
-        100 - 50 \left[ BR_{D_{EX}} + BR_{A_{EX}} \right]
+    ALEX2CDE_{\mathcal{K},\tau}^{phsel\_a,phsel\d} = 100 -
+    50(BR^{phsel\_a,phsel\_d}_{\mathcal{K},\tau}+BR^{phsel\_d,phsel\_a}_{\mathcal{K},\tau})
 
+
+tomovE
+******
+
+    |Param| : |KDE|
+
+    Type: :code:`np.float64`
+
+    Keys : (``phsel_d`` : |PhSel|, ``phsel_a`` : |PhSel|)
+
+
+The KDE based parameter from |Tomov|. Defined as
+
+.. math::
+
+    E^{phsel\_a,phsel\_d}_{\mathcal{K},\tau} =
+    \frac{1}{N_{phsel\_d}}\sum_{j=1}^{N_{phsel\_d}}{\frac{f^{phsel\_a}_{\mathcal{K},\tau}(t_{j})}
+    {f^{phsel\_a}_{\mathcal{K},\tau}(t_{j})+(1+\frac{1}{N_{phsel\_d}})_{nb}f^{phsel\_d}_{\mathcal{K},\tau}(t_{j})}}
+
+
+where :math:`d` and :math;`a` are the photons in the
+``phsel_d`` and ``phsel_a`` keys respectively, a subscript
+indicating the photon within the given photon selection.
+This can represent the :math:`E_{D}` or :math:`(1-E_{A})`
+values from |Tomov|, if the ``phsel_d`` key is the donor
+emission and the ``phsel_a`` key is the FRET sensitised
+(acceptor) emission, it is :math:`E_{D}`. If the roles are
+reversed, it is :math:`(1-E_{A})`.
+
+
+tomovBR
+*******
+
+    |Param| : |KDE|
+
+    Type: :code:`np.float64`
+
+    Keys : (``phsel_d`` : |PhSel|, ``phsel_a`` : |PhSel|)
+
+The KDE based parameter from |Tomov|. Defines as
+
+.. math::
+
+    BR^{phsel\_a,phsel\_d}_{\mathcal{K},\tau} = \frac{1}{N_{phsel\_a}}
+    \sum_{j=1}^{N_{phsel\_d}}{\frac{f^{phsel\_a}_{\mathcal{K,\tau}}(t_{j})}
+                       {f^{phsel\_d}_{\mathcal{K,\tau}}(t_{j})}}
+
+
+where :math:`d` and :math;`a` are the photons in the
+``phsel_d`` and ``phsel_a`` keys respectively, a subscript
+indicating the photon within the given photon selection.
+This can represent the :math:`BR_{Dex}` if ``phsel_d`` is
+the donor excitation streams, and ``phsel_a`` is the acceptor
+excitation stream, and if the values are reversed, it gives the
+:math;`BR_{Aex}` parameter.
 
 
 Photon Array Columns
@@ -976,6 +1032,21 @@ ph_mask
 
 Boolean arrays of the all photons in time ranges, :code:`True` where a photon is in ``phsel``.
 
+
+ph_kde
+******
+
+    |Param| : |KDE|
+
+    Type: :code:`np.ndarray[np.float64]`
+
+    Keys : ( ``phsel_den`` : |PhSel|, ``phsel_loc`` : |PhSel|, ``drop_self`` : :code:`bool` = :code:`False`)
+
+
+:math:`f^{phsel\_den}_{\mathcal{K},\tau}(phsel\_loc)` if ``drop_self = False``, or 
+:math:`_{nb}f^{phsel\_den}_{\mathcal{K},\tau}(phsel\_loc)` if ``drop_self = True``
+The KDE estimate of photon density of ``phsel_den`` around the times of ``phsel_loc``.
+Can specify as single key, in which case ``phsel_loc`` is set as the same as ``phsel_den``
 
 
 .. |Param| replace:: :class:`Param <smfbursts.datamodel.tables.Param>`

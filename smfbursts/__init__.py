@@ -58,11 +58,17 @@ from .datamodel import has_matplotlib, has_numba
 # smfbursts imports
 from ._citations import smfbursts_citations
 from .photondata import PhotonData, PhotonDataList, as_irf
+from . import photondata
+phdata = photondata
 from .backgroundtables import Periods, BG, make_bg_param
 from . import backgroundtables
 bg = backgroundtables
 from .bursttables import Bursts, BurstOvlp
+from . import bursttables
+brst = bursttables
 from .childphotontables import NphBG, Ratios, KDE
+from . import childphotontables
+cpt = childphotontables
 from .lifetimetables import Phasor
 from . import lifetimetables 
 lt = lifetimetables

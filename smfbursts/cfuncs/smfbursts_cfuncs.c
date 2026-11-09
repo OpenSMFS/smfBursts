@@ -12,6 +12,174 @@
 
 #include "smfbursts_burstwise.h"
 
+typedef struct{
+	int64_t size;
+	int64_t *lens;
+	int64_t **datas;
+	PyArrayObject **arrays;
+	int single;
+	
+} PyArrayInt64List;
+
+typedef struct{
+	int64_t size;
+	int64_t *lens;
+	double **datas;
+	PyArrayObject **arrays;
+	int single;
+	
+} PyArrayDoubleList;
+
+static inline int init_arraylist_int64(PyArrayInt64List *list){
+	list->size = 0;
+	list->lens = NULL;
+	list->datas = NULL;
+	list->arrays = NULL;
+	list->single = FALSE;
+	return 0;
+}
+
+static inline int init_arraylist_double(PyArrayDoubleList *list){
+	list->size = 0;
+	list->lens = NULL;
+	list->datas = NULL;
+	list->arrays = NULL;
+	list->single = FALSE;
+	return 0;
+}
+
+int free_arraylist_int64(PyArrayInt64List *arrlist){
+	if (arrlist == NULL){
+		return FALSE;
+	}
+	if (arrlist->lens != NULL){
+		free(arrlist->lens);
+		arrlist->lens = NULL;
+	}
+	if (arrlist->datas != NULL){
+		free(arrlist->datas);
+		arrlist->datas = NULL;
+	}
+	if (arrlist->arrays == NULL){
+		return FALSE;
+	}
+	for (int64_t i = 0; i < arrlist->size; i++){
+		Py_XDECREF(arrlist->arrays[i]);
+		arrlist->arrays[i] = NULL;
+	}
+	free(arrlist->arrays);
+	arrlist->arrays = NULL;
+	return FALSE;
+}
+
+int free_arraylist_double(PyArrayDoubleList *arrlist){
+	if (arrlist == NULL){
+		return FALSE;
+	}
+	if (arrlist->lens != NULL){
+		free(arrlist->lens);
+		arrlist->lens = NULL;
+	}
+	if (arrlist->datas != NULL){
+		free(arrlist->datas);
+		arrlist->datas = NULL;
+	}
+	if (arrlist->arrays == NULL){
+		return FALSE;
+	}
+	for (int64_t i = 0; i < arrlist->size; i++){
+		Py_XDECREF(arrlist->arrays[i]);
+		arrlist->arrays[i] = NULL;
+	}
+	free(arrlist->arrays);
+	arrlist->arrays = NULL;
+	return FALSE;
+}
+
+int converter_listofarrays_int64(PyObject *obj, void *result){
+	PyArrayInt64List *arrlist = (PyArrayInt64List*) result;
+	Py_ssize_t pylen = PySequence_Length(obj), len = 0, i;
+	if ( pylen == -1 ){
+		PyErr_SetString(PyExc_TypeError, "cannot interpret starts/stops as sequence of arrays");
+		return 0;
+	}
+	else if ( pylen == 0 ) {
+		PyErr_SetString(PyExc_ValueError, "must specify at least 1 array");
+		return 0;
+	}
+	PyObject *temp = NULL;
+	temp = PySequence_GetItem(obj, 0);
+	// case of single array
+	if (PySequence_Length(temp) == -1){
+		PyErr_Clear();
+		len = 1;
+		arrlist->single = TRUE;
+	}
+	else {
+		len = pylen;
+		arrlist->single = FALSE;
+	}
+	Py_DECREF(temp);
+	arrlist->size = (int64_t) len;
+	arrlist->lens = (int64_t*) calloc(pylen, sizeof(int64_t));
+	arrlist->arrays = (PyArrayObject**) calloc(pylen, sizeof(PyArrayObject*));
+	arrlist->datas = (int64_t**) calloc(len, sizeof(int64_t*));
+	if ((arrlist->lens == NULL)||(arrlist->arrays == NULL)||(arrlist->datas == NULL)){
+		PyErr_NoMemory();
+		return 0;
+	}
+	if (arrlist->single){
+		if ((arrlist->arrays[0] = (PyArrayObject*) PyArray_FROMANY(obj, NPY_INT64, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY)) == NULL){
+			return 0;
+		}
+		arrlist->lens[0] = (int64_t) PyArray_DIM(arrlist->arrays[0], 0);
+		arrlist->datas[0] = (int64_t*) PyArray_DATA(arrlist->arrays[0]);
+	}
+	else{
+		for (i = 0; i < pylen; i++){
+			if ((temp = PySequence_GetItem(obj, i)) == NULL){
+				return 0;
+			}
+			arrlist->arrays[i] = (PyArrayObject*) PyArray_FROMANY(temp, NPY_INT64, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
+			Py_DECREF(temp);
+			if (arrlist->arrays[i] == NULL){
+				return 0;
+			}
+			arrlist->lens[i] = (int64_t) PyArray_DIM(arrlist->arrays[i], 0);
+			arrlist->datas[i] = (int64_t*) PyArray_DATA(arrlist->arrays[i]);
+		}
+	}
+	return 1;
+}
+
+static inline int get_dset(PyArrayObject* npdetids, int64_t nphot, uint8_t *dets, int64_t *dsize, uint8_t **dset){
+	uint8_t maxdet = 0;
+	int64_t i;
+	if (npdetids == NULL){
+		for (i = 0; i < nphot; i++){
+			if ( maxdet < dets[i] ) maxdet = dets[i];
+		}
+		*dsize = 1 + (int64_t) maxdet;
+		*dset = (uint8_t*) malloc((*dsize)*sizeof(uint8_t));
+		if (*dset == NULL){
+			*dsize = 0;
+			PyErr_SetString(PyExc_MemoryError, "insufficient memory to allocate new det_ids array");
+			return TRUE;
+		}
+		for (i = 0; i < *dsize; i++){
+			(*dset)[i] = (uint8_t) i;
+		}
+	}
+	else {
+		*dsize = PyArray_DIM(npdetids, 0);
+		if (*dsize == 0){
+			PyErr_SetString(PyExc_ValueError, "det_ids must be at least size 1");
+			return TRUE;
+		}
+		*dset = (uint8_t*) PyArray_DATA(npdetids);
+	}
+	return FALSE;
+}
 
 static PyObject* smfbursts_cfuncs_index_range(PyObject* self, PyObject* args, PyObject* kwargs)
 {
@@ -63,9 +231,9 @@ static PyObject* smfbursts_cfuncs_index_ranges(PyObject* self, PyObject* args, P
 	if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOO|p:index_ranges", kwlist, &pytimes, &pystarts, &pystops, &overlap)){
 		return NULL;
 	}
-	PyArrayObject *nptimes = (PyArrayObject*) PyArray_FROMANY(pytimes, NPY_INT64, 1, 1, NPY_ARRAY_ENSUREARRAY);
-	PyArrayObject *npstarts = (PyArrayObject*) PyArray_FROMANY(pystarts, NPY_INT64, 1, 1, NPY_ARRAY_ENSUREARRAY);
-	PyArrayObject *npstops = (PyArrayObject*) PyArray_FROMANY(pystops, NPY_INT64, 1, 1, NPY_ARRAY_ENSUREARRAY);
+	PyArrayObject *nptimes = (PyArrayObject*) PyArray_FROMANY(pytimes, NPY_INT64, 1, 1, NPY_ARRAY_ALIGNED|NPY_ARRAY_ENSUREARRAY);
+	PyArrayObject *npstarts = (PyArrayObject*) PyArray_FROMANY(pystarts, NPY_INT64, 1, 1, NPY_ARRAY_ALIGNED|NPY_ARRAY_ENSUREARRAY);
+	PyArrayObject *npstops = (PyArrayObject*) PyArray_FROMANY(pystops, NPY_INT64, 1, 1, NPY_ARRAY_ALIGNED|NPY_ARRAY_ENSUREARRAY);
 	if ((nptimes == NULL)||(npstarts == NULL)||(npstops == NULL)){
 		Py_XDECREF(nptimes);
 		Py_XDECREF(npstarts);
@@ -165,15 +333,14 @@ static PyObject* smfbursts_cfuncs_burstsearch(PyObject* self, PyObject* args, Py
 	PyArrayObject *npdets = (PyArrayObject*) PyArray_FROMANY(pydets, NPY_UINT8, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
 	PyArrayObject *npperiods = (PyArrayObject*) PyArray_FROMANY(pyperiods, NPY_INT64, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
 	PyArrayObject *npbg = (PyArrayObject*) PyArray_FROMANY(pybg, NPY_DOUBLE, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
-	PyArrayObject *npdetids = NULL;
+	PyArrayObject *npdetids = ((pydetids == NULL)||(pydetids == Py_None)) ? NULL : (PyArrayObject*) PyArray_FROMANY(pydetids, NPY_UINT8, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
+	PyObject *pystarts = NULL, *pystops = NULL; // arrays for output
 	int64_t nphot = 0, nper=0, dsize = 0;
 	int64_t *times = NULL, *periods = NULL;
 	uint8_t *dets=NULL, *dset = NULL;
 	double *bg = NULL;
-	if (nptimes == NULL) goto decrefs;
-	if (npdets == NULL) goto decrefs;
-	if (npperiods == NULL) goto decrefs;
-	if (npbg == NULL) goto decrefs;
+	if ((nptimes == NULL)||(npdets == NULL)||(npperiods == NULL)||(npbg == NULL)){ goto decrefs; }
+	if ((pydetids != NULL)&&(pydetids != Py_None)&&(npdetids == NULL)){ goto decrefs; }
 	// check for errors in arrays
 	if ((nphot = (int64_t)PyArray_DIM(nptimes, 0)) != ((int64_t) PyArray_DIM(npdets, 0))){
 		PyErr_Format(PyExc_ValueError, "mismatched sizes of times and dets arrays, must be identical, but got %ld, and %ld", PyArray_DIM(nptimes, 0), PyArray_DIM(npdets,0));
@@ -183,37 +350,13 @@ static PyObject* smfbursts_cfuncs_burstsearch(PyObject* self, PyObject* args, Py
 		PyErr_Format(PyExc_ValueError, "mismatched sizes of periods and bg arrays, periods must be 1 greater in size that bg, but got %ld, and %ld", PyArray_DIM(npperiods, 0), PyArray_DIM(npbg,0));
 		goto decrefs;
 	}
-	// assign pointers
+	// get pointers to arrays of numpy inputs, assign to variables for burst search
 	times   = (int64_t*) PyArray_DATA(nptimes);
 	dets    = (uint8_t*) PyArray_DATA(npdets);
 	periods = (int64_t*) PyArray_DATA(npperiods);
 	bg      = (double*)  PyArray_DATA(npbg);
 	// if det_ids is included, extract array, otherwise make detids all detectors
-	if ((pydetids != NULL)&&(pydetids != Py_None)){
-		npdetids = (PyArrayObject*) PyArray_FROMANY(pydetids, NPY_UINT8, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
-		if (npdetids == NULL) goto decrefs;
-		dsize = (int64_t) PyArray_DIM(npdetids, 0);
-		if (dsize < 1){
-			PyErr_SetString(PyExc_ValueError, "must specify at least one detector id");
-			goto decrefs;
-		}
-		dset = (uint8_t*) PyArray_DATA(npdetids);
-	}
-	else{
-		uint8_t maxdet = 0;
-		for (int64_t i = 0; i < nphot; i++){
-			if (dets[i] > maxdet){
-				maxdet = dets[i];
-			}
-		}
-		dsize = 1 + (int64_t) maxdet;
-		dset = (uint8_t*) malloc(dsize*sizeof(uint8_t));
-		if (dset == NULL) goto decrefs;
-		uint8_t detid = 0;
-		for (int64_t d = 0; d < dsize; d++){
-			dset[d] = detid++;
-		}
-	}
+	if (get_dset(npdetids, nphot, dets, &dsize, &dset)){ goto decrefs; }
 	// perform calculation
 	Bursts *bursts = NULL;
 	Py_BEGIN_ALLOW_THREADS;
@@ -224,22 +367,12 @@ static PyObject* smfbursts_cfuncs_burstsearch(PyObject* self, PyObject* args, Py
 	Py_END_ALLOW_THREADS;
 	// build output
 	const npy_intp dims[] = { (npy_intp) bursts->size , };
-	PyObject *pystarts = NULL;
-	PyObject *pystops = NULL;
 	if (bursts->size != 0){
 		//~ pystarts = PyArray_SimpleNewFromData(1, dims, NPY_INT64, bursts->starts);
 		//~ pystops= PyArray_SimpleNewFromData(1, dims, NPY_INT64, bursts->stops);
 		pystarts = PyArray_EMPTY(1, dims, NPY_INT64, 0);
 		pystops = PyArray_EMPTY(1, dims, NPY_INT64, 0);
-		if ((pystarts == NULL) || (pystops == NULL)){
-			free_bursts_fields(bursts);
-			Py_XDECREF(pystarts);
-			pystarts = NULL;
-			Py_XDECREF(pystops);
-			pystops = NULL;
-			goto decrefs;
-		}
-		else{
+		if ((pystarts != NULL) && (pystops != NULL)){
 			memcpy(PyArray_DATA((PyArrayObject*)pystarts), bursts->starts, sizeof(int64_t)*bursts->size);
 			memcpy(PyArray_DATA((PyArrayObject*)pystops), bursts->stops, sizeof(int64_t)*bursts->size);
 		}
@@ -247,12 +380,6 @@ static PyObject* smfbursts_cfuncs_burstsearch(PyObject* self, PyObject* args, Py
 	else{
 		pystarts = PyArray_ZEROS(1, dims, NPY_INT64, FALSE);
 		pystops = PyArray_ZEROS(1, dims, NPY_INT64, FALSE);
-		if ((pystarts == NULL) || (pystops == NULL)){
-			Py_XDECREF(pystarts);
-			pystarts = NULL;
-			Py_XDECREF(pystops);
-			pystops = NULL;
-		}
 	}
 	free_bursts_fields(bursts);
 	if (bursts != NULL){
@@ -260,11 +387,21 @@ static PyObject* smfbursts_cfuncs_burstsearch(PyObject* self, PyObject* args, Py
 		bursts = NULL;
 	}
 	// build output
-	out = PyTuple_Pack(2, pystarts, pystops);
+	if ((pystarts != NULL) && (pystops != NULL)){
+		out = PyTuple_Pack(2, pystarts, pystops);
+	}
 	// decref created arrays
 	decrefs:
+	Py_XDECREF(pystarts);
+	pystarts = NULL;
+	Py_XDECREF(pystops);
+	pystops = NULL;
 	Py_XDECREF(nptimes);
 	nptimes = NULL;
+	if ((npdets == NULL) && ( dset != NULL)){
+		free(dset);
+		dset = NULL;
+	}
 	Py_XDECREF(npdets);
 	npdets = NULL;
 	Py_XDECREF(npperiods);
@@ -276,84 +413,11 @@ static PyObject* smfbursts_cfuncs_burstsearch(PyObject* self, PyObject* args, Py
 	return out;
 }
 
-typedef struct{
-	int64_t size;
-	int64_t *lens;
-	PyArrayObject **arrays;
-	int64_t **datas;
-} PyArrayList;
-
-int free_arraylist(PyArrayList *arrlist){
-	if (arrlist == NULL){
-		return FALSE;
-	}
-	if (arrlist->lens != NULL){
-		free(arrlist->lens);
-		arrlist->lens = NULL;
-	}
-	if (arrlist->datas != NULL){
-		free(arrlist->datas);
-		arrlist->datas = NULL;
-	}
-	if (arrlist->arrays == NULL){
-		return FALSE;
-	}
-	for (int64_t i = 0; i < arrlist->size; i++){
-		Py_XDECREF(arrlist->arrays[i]);
-		arrlist->arrays[i] = NULL;
-	}
-	free(arrlist->arrays);
-	arrlist->arrays = NULL;
-	return FALSE;
-}
-
-int converter_listofarrays_int64(PyObject *obj, void *result){
-	PyArrayList *arrlist = (PyArrayList*) result;
-	Py_ssize_t pylen = PySequence_Length(obj);
-	if ( pylen == -1 ){
-		PyErr_SetString(PyExc_TypeError, "cannot interpret starts/stops as sequence of arrays");
-		return 0;
-	}
-	else if ( pylen == 0 ) {
-		PyErr_SetString(PyExc_ValueError, "must specify at least 1 array");
-		return 0;
-	}
-	arrlist->size = (int64_t) pylen;
-	arrlist->lens = (int64_t*) calloc(pylen, sizeof(int64_t));
-	arrlist->arrays = (PyArrayObject**) calloc(pylen, sizeof(PyArrayObject*));
-	arrlist->datas = (int64_t**) calloc(pylen, sizeof(int64_t*));
-	if ((arrlist->lens == NULL)||(arrlist->arrays == NULL)||(arrlist->datas == NULL)){
-		PyErr_NoMemory();
-		return 0;
-	}
-	PyObject *temp = NULL;
-	for (Py_ssize_t i = 0; i < pylen; i++){
-		temp = PySequence_GetItem(obj, i);
-		if (temp == NULL){
-			return 0;
-		}
-		arrlist->arrays[i] = (PyArrayObject*) PyArray_FROMANY(temp, NPY_INT64, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
-		Py_DECREF(temp);
-		if (arrlist->arrays[i] == NULL){
-			return 0;
-		}
-		arrlist->lens[i] = (int64_t) PyArray_DIM(arrlist->arrays[i], 0);
-		arrlist->datas[i] = (int64_t*) PyArray_DATA(arrlist->arrays[i]);
-	}
-	return 1;
-}
-
 static PyObject* smfbursts_cfuncs_burstgate(PyObject* self, PyObject* args, PyObject* kwargs){
 	char *kwlist[] = {"starts", "stops", "truthtable", "starttime", "stoptime", "alloc_size", NULL};
-	PyArrayList startslist, stopslist;
-	startslist.size = 0;
-	startslist.lens = NULL;
-	startslist.arrays = NULL;
-	startslist.datas = NULL;
-	stopslist.size = 0;
-	stopslist.lens = NULL;
-	stopslist.arrays = NULL;
-	stopslist.datas = NULL;
+	PyArrayInt64List startslist, stopslist;
+	init_arraylist_int64(&startslist);
+	init_arraylist_int64(&stopslist);
 	PyObject *pytruthtable = NULL, *pystarttime = NULL, *pystoptime = NULL;
 	PyArrayObject *nptruthtable = NULL;
 	PyObject *out = NULL;
@@ -481,13 +545,10 @@ static PyObject* smfbursts_cfuncs_burstgate(PyObject* self, PyObject* args, PyOb
 		outstops= (PyArrayObject*) PyArray_EMPTY(1, dims, NPY_INT64, 0);
 		if ((outstarts == NULL) || (outstops == NULL)){
 			free_bursts_fields(outbursts);
-			Py_XDECREF(outstarts);
-			Py_XDECREF(outstops);
 			goto decrefs;
 		}
 		memcpy(PyArray_DATA(outstarts), outbursts->starts, sizeof(int64_t)*outbursts->size);
 		memcpy(PyArray_DATA(outstops), outbursts->stops, sizeof(int64_t)*outbursts->size);
-		free_bursts_fields(outbursts);
 		//~ PyArray_ENABLEFLAGS((PyArrayObject*) outstarts, NPY_ARRAY_OWNDATA);
 		//~ PyArray_ENABLEFLAGS((PyArrayObject*) outstops, NPY_ARRAY_OWNDATA);
 	}
@@ -495,17 +556,17 @@ static PyObject* smfbursts_cfuncs_burstgate(PyObject* self, PyObject* args, PyOb
 		outstarts = (PyArrayObject*) PyArray_ZEROS(1, dims, NPY_INT64, FALSE);
 		outstops = (PyArrayObject*) PyArray_ZEROS(1, dims, NPY_INT64, FALSE);
 		if ((outstarts == NULL) || (outstops == NULL)){
-			free_bursts_fields(outbursts);
-			Py_XDECREF(outstarts);
-			outstarts = NULL;
-			Py_XDECREF(outstops);
-			outstops = NULL;
 			goto decrefs;
 		}
 	}
+	free_bursts_fields(outbursts);
 	out = PyTuple_Pack(2, outstarts, outstops);
 	// exit, decref cast numpy arrays
 	decrefs:
+	Py_DECREF(outstarts);
+	outstarts = NULL;
+	Py_DECREF(outstops);
+	outstops = NULL;
 	if (inbursts != NULL){
 		free(inbursts);
 		inbursts = NULL;
@@ -514,8 +575,8 @@ static PyObject* smfbursts_cfuncs_burstgate(PyObject* self, PyObject* args, PyOb
 		free(outbursts);
 		outbursts = NULL;
 	}
-	free_arraylist(&startslist);
-	free_arraylist(&stopslist);
+	free_arraylist_int64(&startslist);
+	free_arraylist_int64(&stopslist);
 	Py_XDECREF(nptruthtable);
 	nptruthtable = NULL;
 	return out;
@@ -582,7 +643,13 @@ static PyObject* smfbursts_cfuncs_fusebursts(PyObject* self, PyObject* args, PyO
 	decrefs:
 	free_bursts_fields(&outbursts);
 	Py_XDECREF(npstarts);
+	npstarts = NULL;
 	Py_XDECREF(npstops);
+	npstops = NULL;
+	Py_XDECREF(outstarts);
+	outstarts = NULL;
+	Py_XDECREF(outstops);
+	outstops = NULL;
 	return out;
 }
 
@@ -613,14 +680,13 @@ static PyObject* smfbursts_cfuncs_maximum_rate(PyObject* self, PyObject* args, P
 	PyArrayObject *npdets = (PyArrayObject*) PyArray_FROMANY(pydets, NPY_UINT8, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
 	PyArrayObject *npistarts = (PyArrayObject*) PyArray_FROMANY(pyistarts, NPY_INT64, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
 	PyArrayObject *npistops = (PyArrayObject*) PyArray_FROMANY(pyistops, NPY_INT64, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
-	PyArrayObject *npdetids = NULL;
+	PyArrayObject *npdetids = ((pydetids == NULL)||(pydetids == Py_None)) ? NULL : (PyArrayObject*) PyArray_FROMANY(pydetids, NPY_UINT8, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
 	PyObject *out = NULL;
 	int64_t dsize = 0;
 	uint8_t *dset = NULL;
 	int64_t nphot = (int64_t) PyArray_DIM(nptimes, 0);
-	if ((nptimes == NULL) || (npdets == NULL) || (npistarts == NULL) || (npistops == NULL)){
-		goto decrefs;
-	}
+	if ((nptimes == NULL) || (npdets == NULL) || (npistarts == NULL) || (npistops == NULL)){ goto decrefs; }
+	if ((pydetids != NULL)&&(pydetids != Py_None)&&(npdetids == NULL)){ goto decrefs; }
 	if (nphot != (int64_t) PyArray_DIM(npdets, 0)){
 		PyErr_Format(PyExc_ValueError, "times and dets must be of the same size, got %ld, and %ld", nphot, PyArray_DIM(npdets,0));
 		goto decrefs;
@@ -635,8 +701,8 @@ static PyObject* smfbursts_cfuncs_maximum_rate(PyObject* self, PyObject* args, P
 	int64_t *istarts = (int64_t*) PyArray_DATA(npistarts);
 	int64_t *istops = (int64_t*) PyArray_DATA(npistops);
 	const npy_intp dims[] = {(npy_intp) nbursts, };
-	if (nbursts == 0){
-		out = PyArray_ZEROS(1, dims, NPY_DOUBLE, FALSE);
+	out = PyArray_ZEROS(1, dims, NPY_DOUBLE, FALSE);
+	if ((out == NULL)||(nbursts == 0)){
 		goto decrefs;
 	}
 	// check that no istart/istop exceeds size of photons (out of range index)
@@ -647,35 +713,7 @@ static PyObject* smfbursts_cfuncs_maximum_rate(PyObject* self, PyObject* args, P
 		}
 	}
 	// process det_ids, 
-	if (pydetids != NULL){
-		npdetids = (PyArrayObject*) PyArray_FROMANY(pydetids, NPY_UINT8, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
-		if (npdetids == NULL) goto decrefs;
-		dsize = (int64_t) PyArray_DIM(npdetids, 0);
-		if (dsize < 1){
-			PyErr_SetString(PyExc_ValueError, "must specify at least one detector id");
-			goto decrefs;
-		}
-		dset = (uint8_t*) PyArray_DATA(npdetids);
-	}
-	else{
-		uint8_t maxdet = 0;
-		for (int64_t i = 0; i < nphot; i++){
-			if (dets[i] > maxdet){
-				maxdet = dets[i];
-			}
-		}
-		dsize = 1 + (int64_t) maxdet;
-		dset = (uint8_t*) malloc(dsize*sizeof(uint8_t));
-		if (dset == NULL) goto decrefs;
-		uint8_t detid = 0;
-		for (int64_t d = 0; d < dsize; d++){
-			dset[d] = detid++;
-		}
-	}
-	out = PyArray_ZEROS(1, dims, NPY_DOUBLE, FALSE);
-	if (out == NULL){
-		goto decrefs;
-	}
+	if (get_dset(npdetids, nphot, dets, &dsize, &dset)){ goto decrefs; }
 	double *maxrates = (double*) PyArray_DATA((PyArrayObject*) out);
 	// calculate
 	Py_BEGIN_ALLOW_THREADS;
@@ -689,15 +727,11 @@ static PyObject* smfbursts_cfuncs_maximum_rate(PyObject* self, PyObject* args, P
 	Py_XDECREF(npdets);
 	Py_XDECREF(npistarts);
 	Py_XDECREF(npistops);
-	if (pydetids == NULL){
-		if (dset != NULL){
-			free(dset);
-			dset = NULL;
-		}
+	if ((npdetids == NULL)&&(dset != NULL)){
+		free(dset);
 	}
-	else{
-		Py_DECREF(npdetids);
-	}
+	dset = NULL;
+	Py_XDECREF(npdetids);
 	return out;
 }
 
@@ -771,16 +805,21 @@ static PyObject* smfbursts_cfuncs_burst_variance_analysis(PyObject* self, PyObje
 	// decrefs
 	decrefs:
 	Py_XDECREF(npdets);
+	npdets = NULL;
 	Py_XDECREF(npistarts);
+	npistarts = NULL;
 	Py_XDECREF(npistops);
+	npistops = NULL;
 	Py_XDECREF(npdetidAll);
+	npdetidAll = NULL;
 	Py_XDECREF(npdetidSub);
+	npdetidSub = NULL;
 	return out;
 }
 
 
-static inline int pyeval_kde_single(PyObject* pyfunc, int64_t tl, int64_t tt, double tau, double* res){
-	PyObject* funcres = PyObject_CallFunction(pyfunc, "LLd", tl, tt, tau);
+static inline int pyeval_kde_single(PyObject* pyfunc, int64_t delta, double tau, double* res){
+	PyObject* funcres = PyObject_CallFunction(pyfunc, "Ld", delta, tau);
 	if (funcres == NULL){
 		return TRUE;
 	}
@@ -800,7 +839,7 @@ static inline int kde_self_npf(npy_intp nphot, npy_intp stride, char* times, dou
 		while ((imin < nphot) && (*(int64_t*)&times[imin*stride] < tmin)){ imin++; } // advance until imin is index in range
 		while ((imax < nphot) && (*(int64_t*)&times[imax*stride] < tmax)){ imax++; } // advance until imax is just out of range
 		for (iphot = imin; iphot < imax; iphot++){
-			if (pyeval_kde_single(pyfunc, *(int64_t*)&times[iloc*stride], *(int64_t*)&times[iphot*stride], tau, &kde_val)){ return TRUE; }
+			if (pyeval_kde_single(pyfunc, (*(int64_t*)&times[iloc*stride]) - (*(int64_t*)&times[iphot*stride]), tau, &kde_val)){ return TRUE; }
 			out[iloc] += kde_val;
 		}
 	}
@@ -821,7 +860,7 @@ static inline int kde_self_exclude_zero_npf(npy_intp nphot, int64_t stride, char
 			if (cloc == *(int64_t*)&times[iphot*stride]){ 
 				continue;
 			}
-			if (pyeval_kde_single(pyfunc, *(int64_t*)&times[iloc*stride], *(int64_t*)&times[iphot*stride], tau, &kde_val)){ return TRUE; }
+			if (pyeval_kde_single(pyfunc, (*(int64_t*)&times[iloc*stride]) - (*(int64_t*)&times[iphot*stride]), tau, &kde_val)){ return TRUE; }
 			out[iloc] += kde_val;
 		}
 	}
@@ -839,7 +878,7 @@ static inline int kde_other_npf(const npy_intp nphot, const int64_t tstride, cha
 		while ((imin < nphot) && (*(int64_t*)&times[imin*tstride] < tmin)){ imin++; } // advance until imin is index in range
 		while ((imax < nphot) && (*(int64_t*)&times[imax*tstride] < tmax)){ imax++; } // advance until imax is just out of range
 		for (iphot = imin; iphot < imax; iphot++){
-			if (pyeval_kde_single(pyfunc, *(int64_t*)&locs[iloc*lstride], *(int64_t*)&times[iphot*tstride], tau, &kde_val)){ return TRUE; }
+			if (pyeval_kde_single(pyfunc, (*(int64_t*)&locs[iloc*lstride]) - (*(int64_t*)&times[iphot*tstride]), tau, &kde_val)){ return TRUE; }
 			out[iloc] += kde_val;
 		}
 	}
@@ -860,19 +899,17 @@ static inline int kde_other_exclude_zero_npf(const npy_intp nphot, const int64_t
 			if (cloc == *(int64_t*)&times[iphot*tstride]){ 
 				continue;
 			}
-			if (pyeval_kde_single(pyfunc, *(int64_t*)&locs[iloc*lstride], *(int64_t*)&times[iphot*tstride], tau, &kde_val)){ return TRUE; }
+			if (pyeval_kde_single(pyfunc, (*(int64_t*)&locs[iloc*lstride]) - (*(int64_t*)&times[iphot*tstride]), tau, &kde_val)){ return TRUE; }
 			out[iloc] += kde_val;
 		}
 	}
 	return FALSE;
 }
 
-
-
 static PyObject* smfbursts_cfuncs_kde_photons(PyObject* self, PyObject* args, PyObject* kwargs){
 	char *kwlist[] = {"times", "tau", "locs", "lim", "func", "drop_self", NULL};
 	PyObject *pytimes=NULL, *pylocs=NULL, *pyfunc=NULL;
-	double tau, flim = -1.0;
+	double tau, flim = -1.0, *dout = NULL;
 	int drop_self = FALSE, func = 0, err = FALSE;
 	if (!PyArg_ParseTupleAndKeywords(args, kwargs, "Od|OdOp:kde_photons", kwlist, &pytimes, &tau, &pylocs, &flim, &pyfunc, &drop_self)){
 		return NULL;
@@ -908,65 +945,194 @@ static PyObject* smfbursts_cfuncs_kde_photons(PyObject* self, PyObject* args, Py
 	else{
 		lim = (int64_t) flim;
 	}
-	PyArrayObject* nptimes = (PyArrayObject*) PyArray_FROMANY(pytimes, NPY_INT64, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
+	PyArrayObject *nptimes=NULL, *nplocs=NULL, *out=NULL;
+	nptimes = (PyArrayObject*) PyArray_FROMANY(pytimes, NPY_INT64, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
 	if (nptimes == NULL){
 		return NULL;
 	}
-	PyArrayObject* nplocs = (pylocs != NULL) ? (PyArrayObject*) PyArray_FROMANY((PyObject*) pylocs, NPY_INT64, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY) : NULL;
-	if ((pylocs !=NULL ) && (nplocs == NULL)){
-		Py_DECREF(nptimes);
-		return NULL;
+	if (pylocs == NULL){
+		nplocs = nptimes;
+		Py_INCREF(nplocs);
+	}
+	else{
+		nplocs = (PyArrayObject*) PyArray_FROMANY((PyObject*) pylocs, NPY_INT64, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
+		if (nplocs == NULL){ goto decrefs; }
 	}
 	npy_intp nphot = PyArray_DIM(nptimes, 0);
 	npy_intp tstride = PyArray_STRIDE(nptimes, 0);
 	char *times = PyArray_DATA(nptimes);
-	npy_intp nloc = (pylocs != NULL) ? PyArray_DIM(nplocs, 0) : 0;
-	npy_intp lstride = (pylocs != NULL) ? PyArray_STRIDE(nplocs, 0) : 0;
-	char *locs = (pylocs != NULL) ? PyArray_DATA(nplocs) : NULL;
-	npy_intp dims[] = {(pylocs==NULL)? nphot : nloc, };
-	PyArrayObject* out = (PyArrayObject*) PyArray_ZEROS(1, dims, NPY_DOUBLE, FALSE);
+	npy_intp nloc = PyArray_DIM(nplocs, 0);
+	npy_intp lstride = PyArray_STRIDE(nplocs, 0);
+	char *locs = PyArray_DATA(nplocs);
+	npy_intp dims[] = {nloc, };
+	int fswitch = drop_self + 2*(func == 3);
+	double (*kdefuncs[3])(int64_t, double) = {laplace_kdefunc, gaussian_kdefunc, rect_kdefunc};
+	out = (PyArrayObject*) PyArray_ZEROS(1, dims, NPY_DOUBLE, FALSE);
 	if (out == NULL){
 		goto decrefs;
 	}
-	double *dout = (double*) PyArray_DATA(out);
-	int fswitch = drop_self + 2*(pylocs != NULL) + 4*(func == 3);
-	double (*kdefuncs[3])(int64_t, int64_t, double) = {laplace_kdefunc, gaussian_kdefunc, rect_kdefunc};
+	dout = (double*) PyArray_DATA(out);
 	switch(fswitch){
 		case 0:
-		err = kde_self_np((int64_t)nphot, (int64_t)tstride, times, tau, lim, kdefuncs[func], dout);
+		err = kde_slow_np((int64_t)nphot, (int64_t)tstride, times, (int64_t)nloc, (int64_t)lstride, locs, tau, lim, kdefuncs[func], dout);
 		break;
 		case 1:
-		err = kde_self_exclude_zero_np((int64_t)nphot, (int64_t)tstride, times, tau, lim, kdefuncs[func], dout);
+		err = kde_slow_exclude_zero_np((int64_t)nphot, (int64_t)tstride, times, (int64_t)nloc, (int64_t)lstride, locs, tau, lim, kdefuncs[func], dout);
 		break;
 		case 2:
-		err = kde_other_np((int64_t)nphot, (int64_t)tstride, times, (int64_t)nloc, (int64_t)lstride, locs, tau, lim, kdefuncs[func], dout);
-		break;
-		case 3:
-		err = kde_other_exclude_zero_np((int64_t)nphot, (int64_t)tstride, times, (int64_t)nloc, (int64_t)lstride, locs, tau, lim, kdefuncs[func], dout);
-		break;
-		case 4:
-		err = kde_self_npf(nphot, tstride, times, tau, lim, pyfunc, dout);
-		break;
-		case 5:
-		err = kde_self_exclude_zero_npf(nphot, tstride, times, tau, lim, pyfunc, dout);
-		break;
-		case 6:
 		err = kde_other_npf(nphot, tstride, times, nloc, lstride, locs, tau, lim, pyfunc, dout);
 		break;
-		case 7:
+		case 3:
 		err = kde_other_exclude_zero_npf(nphot, tstride, times, nloc, lstride, locs, tau, lim, pyfunc, dout);
 		break;
+	}
+	if (err){
+		Py_XDECREF(out);
+		out = NULL;
 	}
 	decrefs:
 	Py_XDECREF(nptimes);
 	nptimes = NULL;
 	Py_XDECREF(nplocs);
 	nplocs = NULL;
-	if (err){
-		Py_XDECREF(out);
-		out = NULL;
-	}
 	return (PyObject*) out;
+}
+
+static inline int alloc_outlist_int64_double(PyArrayInt64List *like, PyArrayDoubleList *out){
+	npy_intp dims[1];
+	out->size = 0;
+	out->lens = (int64_t*) calloc(like->size, sizeof(int64_t));
+	out->datas = (double**) calloc(like->size, sizeof(double*));
+	out->arrays = (PyArrayObject**) calloc(like->size, sizeof(PyArrayObject*));
+	if ((out->lens == NULL) || (out->datas == NULL) || (out->arrays == NULL)){
+		if (out->lens != NULL) free(out->lens);
+		if (out->datas != NULL) free(out->datas);
+		if (out->arrays != NULL) free(out->arrays);
+		PyErr_NoMemory();
+		return 1;
+	}
+	out->size = like->size;
+	out->single = like->single;
+	for (int64_t i = 0; i < like->size; i++){
+		dims[0] = (npy_intp) like->lens[i];
+		if ((out->arrays[i] = (PyArrayObject*) PyArray_ZEROS(1, dims, NPY_DOUBLE, 0)) == NULL){
+			return 1;
+		}
+		out->lens[i] = like->lens[i];
+		out->datas[i] = PyArray_DATA(out->arrays[i]);
+	}
+	return 0;
+}
+
+static PyObject* smfbursts_cfuncs_kde_dist(PyObject* self, PyObject* args, PyObject* kwargs){
+	double (*kernel_func[3])(const int64_t, const double) = {laplace_kdefunc, gaussian_kdefunc, rect_kdefunc};
+	char *kwlist[] = {"density", "locs", "lim", "func", "arg", "drop_self", NULL};
+	PyObject *pyfunc = NULL, *pyarg = NULL, *out = NULL, *temp = NULL;
+	PyArrayInt64List densitylist, locslist;
+	PyArrayDoubleList outlist;
+	init_arraylist_int64(&densitylist);
+	init_arraylist_int64(&locslist);
+	init_arraylist_double(&outlist);
+	int drop_self = FALSE;
+	double *kernel = NULL;
+	Py_ssize_t pslim;
+	if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O&O&nOO|p:kde_dist", kwlist, converter_listofarrays_int64, &densitylist, 
+																				converter_listofarrays_int64, &locslist, &pslim, &pyfunc, &pyarg, &drop_self)){
+		goto decrefs;
+	}
+	// verify valid size of the limit time range
+	int64_t lim = (int64_t) pslim, i, delta;
+	int64_t nkern = 2*lim - 1;
+	if ((pslim < 0)||(nkern < lim)){
+		PyErr_Format(PyExc_ValueError, "lim must be positive (or lim too large to hold 2 int64), not %ld", pslim);
+		goto decrefs;
+	}
+	// cast inputs to arrays
+	if ( densitylist.size != locslist.size ){
+		PyErr_Format(PyExc_ValueError, "mismatch in number of arrays in density and locs: %ld vs %ld", densitylist.size, locslist.size);
+		goto decrefs;
+	}
+	// Allocate kernel cache
+	if ((kernel = (double*) malloc(nkern * sizeof(double))) == NULL){
+		PyErr_NoMemory();
+		goto decrefs;
+	}
+	// compute kenrnel cache
+	if (PyCallable_Check(pyfunc)){
+		for ( delta = 1-lim, i = 0; delta < lim; delta++, i++ ){
+			temp = PyObject_CallFunction(pyfunc, "LO", (long long) delta, pyarg);
+			if (temp == NULL){
+				goto decrefs;
+			}
+			kernel[i] = PyFloat_AsDouble(temp);
+			Py_DECREF(temp);
+			temp = NULL;
+			if ( PyErr_Occurred() != NULL){
+				PyErr_SetString(PyExc_TypeError, "func must return an float");
+				goto decrefs;
+			}
+		}
+	}
+	else{
+		long func_id = PyLong_AsLong(pyfunc);
+		if ( PyErr_Occurred() ){
+			goto decrefs;
+		}
+		if ((func_id < 0) || (func_id > 2))
+		{
+			PyErr_SetString(PyExc_ValueError, "func must be 0 (laplace), 1 (gaussian), 2 (rect), or callable (custom)");
+			goto decrefs;
+		}
+		double tau = PyFloat_AsDouble(pyarg);
+		if ( func_id == 1){ // convert tau to 2 tau^2 for gaussian
+			tau = 2 * tau * tau;
+		}
+		if ( PyErr_Occurred() ){
+			PyErr_SetString(PyExc_TypeError, "Using build-int functions requires tau to be float");
+			goto decrefs;
+		}
+		for ( delta = 1-lim, i = 0; delta < lim; delta++, i++ ){
+			kernel[i] = kernel_func[func_id](delta, tau);
+		}
+	}
+	if ( drop_self ){
+		kernel[lim-1] = 0.0;
+	}
+	if ( alloc_outlist_int64_double(&locslist, &outlist) ){
+		free_arraylist_double(&outlist);
+		goto decrefs;
+	}
+	for (i = 0; i < locslist.size; i++){
+		kde_array(densitylist.lens[i], densitylist.datas[i], locslist.lens[i], locslist.datas[i], lim, kernel, outlist.datas[i]);
+	}
+	free(outlist.lens);
+	outlist.lens = NULL;
+	free(outlist.datas);
+	outlist.datas = NULL;
+	if (outlist.single) {
+		out = (PyObject*) outlist.arrays[0];
+	}
+	else {
+		if ((out = PyTuple_New((Py_ssize_t) outlist.size)) != NULL){
+			for ( i = 0; i < outlist.size; i++){
+				PyTuple_SET_ITEM(out, (Py_ssize_t) i, (PyObject*) outlist.arrays[i]);
+			}
+		}
+		else {
+			free_arraylist_double(&outlist);
+			PyErr_NoMemory();
+		}
+	}
+	free(outlist.arrays);
+	outlist.arrays = NULL;
+	decrefs:
+	free_arraylist_int64(&densitylist);
+	free_arraylist_int64(&locslist);
+	if ( kernel != NULL ){
+		free(kernel);
+		kernel = NULL;
+	}
+	return out;
 }
 
 static PyObject* smfbursts_cfuncs_cpburstsearch(PyObject* self, PyObject* args, PyObject* kwargs){
@@ -1012,12 +1178,11 @@ static PyObject* smfbursts_cfuncs_cpburstsearch(PyObject* self, PyObject* args, 
 	PyArrayObject* npperiods = (PyArrayObject*) PyArray_FROMANY(pyperiods, NPY_INT64, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
 	PyArrayObject* npbg = (PyArrayObject*) PyArray_FROMANY(pybg, NPY_DOUBLE, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
 	PyArrayObject* npsbr = (PyArrayObject*) PyArray_FROMANY(pysbr, NPY_DOUBLE, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
-	PyArrayObject *npdetids = (pydetids == NULL)||(pydetids == Py_None) ? NULL: (PyArrayObject*) PyArray_FROMANY(pydetids, NPY_UINT8, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
+	PyArrayObject *npdetids = ((pydetids == NULL)||(pydetids == Py_None)) ? NULL: (PyArrayObject*) PyArray_FROMANY(pydetids, NPY_UINT8, 1, 1, NPY_ARRAY_CARRAY_RO|NPY_ARRAY_ENSUREARRAY);
+	PyArrayObject *npstarts = NULL, *npstops = NULL;
 	// if any error, go to decrefs, where all arrays decrefed and cleaned up
 	if ((nptimes == NULL)||(npdets == NULL)||(npperiods == NULL)||(npbg == NULL)||(npsbr == NULL)){goto decrefs;}
-	if (!((pydetids == NULL)||(pydetids == Py_None))){ // special check if detids not specified
-		if (npdetids == NULL) { goto decrefs; }
-	}
+	if ((pydetids != NULL)&&(pydetids != Py_None)&&(npdetids == NULL)){ goto decrefs; }// special check if detids not specified
 	// get sizes of each type of array
 	nphot = (int64_t) PyArray_DIM(nptimes, 0);
 	nper = (int64_t) PyArray_DIM(npbg, 0);
@@ -1040,19 +1205,7 @@ static PyObject* smfbursts_cfuncs_cpburstsearch(PyObject* self, PyObject* args, 
 	periods = (int64_t*) PyArray_DATA(npperiods);
 	bg = (double*) PyArray_DATA(npbg);
 	sbr = (double*) PyArray_DATA(npsbr);
-	if ((pydetids == NULL)||(pydetids == Py_None)){
-		for (int64_t i = 0; i < nphot; i++){ if (dets[i] > dsize) { dsize = (int64_t) dets[i]; } }
-		dsize++;
-		if ((dset = (uint8_t*) malloc(dsize * sizeof(uint8_t))) == NULL){
-			PyErr_SetString(PyExc_MemoryError, "insufficent memory to allocate dset array (how did this happend it should be tiny!)");
-			goto decrefs;
-		}
-		for (uint8_t i = 0; i < dsize; i++){ dset[i] = i; }
-	}
-	else {
-		dsize = (int64_t) PyArray_DIM(npdetids, 0);
-		dset = PyArray_DATA(npdetids);
-	}
+	if (get_dset(npdetids, nphot, dets, &dsize, &dset)){ goto decrefs; }
 	// perform burst search
 	Py_BEGIN_ALLOW_THREADS;
 	if (burst_search_cp(alpha, beta, clk_p, nphot, times, dets, dsize, dset, nper, periods, bg, sbr, fuse, alloc_size, ncore, &bursts)){
@@ -1062,11 +1215,9 @@ static PyObject* smfbursts_cfuncs_cpburstsearch(PyObject* self, PyObject* args, 
 	Py_END_ALLOW_THREADS;
 	// copy data to output numpy arrays
 	const npy_intp dims[] = {(npy_intp) bursts->size, };
-	PyArrayObject *npstarts = (PyArrayObject*) PyArray_EMPTY(1, dims, NPY_INT64, 0);
-	PyArrayObject *npstops = (PyArrayObject*) PyArray_EMPTY(1, dims, NPY_INT64, 0);
+	npstarts = (PyArrayObject*) PyArray_EMPTY(1, dims, NPY_INT64, 0);
+	npstops = (PyArrayObject*) PyArray_EMPTY(1, dims, NPY_INT64, 0);
 	if ((npstarts == NULL)||(npstops == NULL)){
-		Py_XDECREF(npstarts);
-		Py_XDECREF(npstops);
 		PyErr_SetString(PyExc_MemoryError, "insufficent memory for output of bursts");
 		goto decrefs;
 	}
@@ -1076,6 +1227,10 @@ static PyObject* smfbursts_cfuncs_cpburstsearch(PyObject* self, PyObject* args, 
 	out = PyTuple_Pack(2, (PyObject*)npstarts, (PyObject*) npstops);
 	// Decref created numpy arrays
 	decrefs:
+	Py_XDECREF(npstarts);
+	npstarts = NULL;
+	Py_XDECREF(npstops);
+	npstops = NULL;
 	Py_XDECREF(nptimes);
 	nptimes = NULL;
 	Py_XDECREF(npdets);
@@ -1086,7 +1241,10 @@ static PyObject* smfbursts_cfuncs_cpburstsearch(PyObject* self, PyObject* args, 
 	npbg = NULL;
 	Py_XDECREF(npsbr);
 	npsbr = NULL;
-	if ((pydetids == NULL)||(pydetids == Py_None)){if (dset != NULL) {free(dset); dset = NULL;}}
+	if ((npdetids == NULL) && (dset != NULL)){
+		free(dset);
+	}
+	dset = NULL;
 	Py_XDECREF(npdetids);
 	npdetids = NULL;
 	if (bursts != NULL){
@@ -1275,9 +1433,9 @@ static PyMethodDef smfbursts_cfuncs_funcs[] = {
 		"in same order as appear in 2 lists.\n\n"
 		"Parameters\n"
 		"----------\n"
-		"starts: list[np.ndarray[np.int64]]\n"
+		"starts: list[np.ndarray[np.int64]] | np.ndarray[np.int64]\n"
 		"    N length list of arrays of each set of start times in bursts\n"
-		"stops: list[np.ndarray[np.int64]]\n"
+		"stops: list[np.ndarray[np.int64]] | np.ndarray[np.int64]\n"
 		"    N length list of arrays of each set of stop times in bursts\n"
 		"truthtable: np.ndarray[np.bool\\_]\n"
 		"    Boolean array, with ndim = N and all dimensions size = 2.\n"
@@ -1391,6 +1549,8 @@ static PyMethodDef smfbursts_cfuncs_funcs[] = {
 		"kde_photons(times, tau, locs=None, lim=0.0, drop_self=False, func=0)\n"
 		"--\n\n"
 		"Compute kernel density estimator of photons.\n\n"
+		"This function should be used for sparse datasets, otherwise use\n"
+		"the equivalent, but faster :func:`kde_dist`.\n\n"
 		"Parameters\n"
 		"----------\n"
 		"times: np.ndarray[np.int16]\n"
@@ -1406,6 +1566,47 @@ static PyMethodDef smfbursts_cfuncs_funcs[] = {
 		"    in evaluating KDE. If 0.0, set based on selected func. The default is 0.0.\n"
 		"drop_self: np.ndarray[np.uint8]\n"
 		"    Photons with same time not dropped from KDE computation.\n"
+		"func: int | Callable[[int,float],float], optional\n"
+		"    Integer index specifying which KDE function to use.\n\n"
+		"    - ``0`` laplace KDE :math:`exp( -|t_{j} - t_{i}| / \\tau)`, lim defaults to 5.0\n"
+		"    - ``1`` gaussian KDE :math:`exp(-(t_{j}-t_{i})^2/(2*\\tau^{2}))`, lim defaults to 3.0\n"
+		"    - ``2`` rectanular kde 1.0 if :math:`|t_{j}-t_{i}| < \\tau / 2` 0.0 otherwise\n\n\n"
+		"    Or a callable with the signature \n"
+		"    ``func(delta:int, tau:float)->float``\n"
+		"    Which evaluatues the kde contribution for a delta between\n"
+		"    photon and location, wherethe kernal has a value of tau.\n\n"
+		"Returns\n"
+		"-------\n"
+		"np.ndarray[np.float64]\n"
+		"    Kernel Density for each time in locs or timesn\n"
+		},
+	{"kde_dist", (PyCFunction)smfbursts_cfuncs_kde_dist, METH_VARARGS|METH_KEYWORDS, 
+		"kde_dist(density, locs, lim, func, arg, drop_self=False)\n"
+		"--\n\n"
+		"Compute kernel density estimator for times at density, at the times\n"
+		"in locs. If points are separated by lim or more, the kernel is assume to be 0.\n\n"
+		"Note this function performs same calculation as :func:`kde_photons`\n"
+		"but is generally faster, except for sparse datasets, and this function\n"
+		"can process input of multiple arrays.\n\n"
+		"Parameters\n"
+		"----------\n"
+		"density: np.ndarray[np.int64] | list[np.ndarray[np.int64]\n"
+		"    Arrival times of photons producing kernel density.\n"
+		"    May specify as either single 1D array of ints, or as sequence\n"
+		"    of 1D int arrays. Within a single array, it is assuemd to be\n"
+		"    monotonically increasing, calculation will be incorrect otherwise.\n"
+		"locs: np.ndarray[np.int64] | list[np.ndarray[np.int64]\n"
+		"    Times at which to evaluate the kde.\n"
+		"    May specify as either single 1D array of ints, or as sequence\n"
+		"    of 1D int arrays. Within a single array, it is assuemd to be\n"
+		"    monotonically increasing, calculation will be incorrect otherwise\n."
+		"    Must contain same number of arrays as density.\n"
+		"    Size of output is same as size of density.\n"
+		"tau: float\n"
+		"    Decay constant of kde function.\n"
+		"lim: int, optional\n"
+		"    Limit of time difference beyond which density points are no\n"
+		"    longer computed, this is an open interval.\n"
 		"func: int | Callable[[int,int,float],float], optional\n"
 		"    Integer index specifying which KDE function to use.\n\n"
 		"    - ``0`` laplace KDE :math:`exp( -|t_{j} - t_{i}| / \\tau)`, lim defaults to 5.0\n"
@@ -1415,11 +1616,16 @@ static PyMethodDef smfbursts_cfuncs_funcs[] = {
 		"    ``func(timeloc:int, timephot:int, tau:float)->float``\n"
 		"    Which evaluatues the kde contributeion of timephot at point\n"
 		"    timeloc, with time constant tau\n\n"
+		"    arg: float | Any\n"
+		"        Argument to be passed to func, if a built in, mut be a\n"
+		"        float, ie a tau value\n\n"
+		"drop_self: bool, optional\n"
+		"    If True,set kernel density at 0 time difference to 0.\n\n"
 		"Returns\n"
 		"-------\n"
 		"np.ndarray[np.float64]\n"
-		"    Kernel Density for each time in locs or timesn\n"
-		},
+		"    Kernel Density for each time in locs.\n\n"
+	},
 	{NULL, NULL, 0, NULL}
 };
 
