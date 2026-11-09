@@ -1118,7 +1118,7 @@ static PyObject* smfbursts_cfuncs_kde_dist(PyObject* self, PyObject* args, PyObj
 	else {
 		if ((out = PyTuple_New((Py_ssize_t) outlist.size)) != NULL){
 			for ( i = 0; i < outlist.size; i++){
-				PyTuple_SET_ITEM(out, (Py_ssize_t) i, outlist.arrays[i]);
+				PyTuple_SET_ITEM(out, (Py_ssize_t) i, (PyObject*) outlist.arrays[i]);
 			}
 		}
 		else {
